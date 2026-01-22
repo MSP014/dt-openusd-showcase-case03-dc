@@ -44,3 +44,4 @@ __pycache__/
 .env
 .DS_Store
 Thumbs.db
+.__atomic-write*
