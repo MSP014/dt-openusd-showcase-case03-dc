@@ -1,6 +1,9 @@
 # Case 03 - Data Center .gitignore
 # STRICT POLICY: No heavy assets or binaries in the repo.
 
+# --- AI Assistant Protocols (Private) ---
+protocols/
+
 # --- Directories ---
 assets/
 cache/
