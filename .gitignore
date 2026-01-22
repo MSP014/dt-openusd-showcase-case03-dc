@@ -1,0 +1,46 @@
+# Case 03 - Data Center .gitignore
+# STRICT POLICY: No heavy assets or binaries in the repo.
+
+# --- Directories ---
+assets/
+cache/
+Refs/
+_incoming/
+geo/
+OUT/
+
+# --- Source/Project Files (Heavy/Binary) ---
+AE/
+PRJ/
+AI/
+
+# --- Media/Renders ---
+EXR/
+MP4/
+GIF/
+MOV/
+PNG/
+
+# --- File Extensions (Specific Blocklist) ---
+# USD (Text USD is allowed for composition, but heavy crates are blocked)
+*.usdc
+*.usd
+
+# Houdini
+*.hip
+*.hipnc
+*.hiplc
+*.bgeo
+*.sc
+
+# Adobe
+*.aep
+*.prproj
+*.psd
+
+# Python / System
+__pycache__/
+*.pyc
+.env
+.DS_Store
+Thumbs.db

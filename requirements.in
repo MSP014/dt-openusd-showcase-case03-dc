@@ -1,0 +1,11 @@
+# Case 03 Dependency Source File
+# Compile with: pip-compile requirements.in
+
+pip-tools
+pre-commit
+pytest
+flake8
+black
+isort
+bandit
+pip-audit

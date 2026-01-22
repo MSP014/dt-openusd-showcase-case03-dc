@@ -1,0 +1,29 @@
+graph TD
+    %% Architecture Definition for Case 03 - Data Center
+
+    subgraph "Root Assembly"
+        ROOT[root.usd]
+    end
+
+    subgraph "Layers (Sublayers)"
+        LAYOUT[layout.usd] --> ROOT
+        LIGHTS[lights.usd] --> ROOT
+        CAMERAS[cameras.usd] --> ROOT
+        SIM[sim_data.usd] --> ROOT
+    end
+
+    subgraph "Asset Composition (Payloads)"
+        RACK_GRP[Rack_Group] -.-> LAYOUT
+        SERVER_BLADE[Server_Blade] -.-> RACK_GRP
+        COOLING_SYS[Cooling_System] -.-> LAYOUT
+    end
+
+    subgraph "Data Binding (MDL)"
+        JSON[telemetry.json] --> PYTHON[instancer.py]
+        PYTHON -- "Updates Attributes" --> SERVER_BLADE
+        MAT[Heatmap.mdl] -- "Reads Attributes" --> SERVER_BLADE
+    end
+
+    style ROOT fill:#f9f,stroke:#333,stroke-width:2px
+    style LAYOUT fill:#ccf,stroke:#333,stroke-width:1px
+    style SIM fill:#fcc,stroke:#333,stroke-width:1px

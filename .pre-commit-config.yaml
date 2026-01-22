@@ -1,0 +1,56 @@
+# Pre-commit Guardrails - Case 03 (Data Center)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=10240'] # 10MB limit
+
+  - repo: local
+    hooks:
+      - id: black
+        name: black
+        entry: black
+        language: system
+        types: [python]
+
+      - id: isort
+        name: isort
+        entry: isort
+        language: system
+        types: [python]
+
+      - id: flake8
+        name: flake8
+        entry: flake8
+        language: system
+        types: [python]
+        args: ["--max-line-length=88"]
+
+      - id: bandit
+        name: bandit
+        entry: bandit
+        language: system
+        types: [python]
+        args: ["-r", "src", "tools"]
+        exclude: "tests/"
+
+      # Dependency Vulnerability Scanning
+      - id: pip-audit
+        name: pip-audit
+        entry: pip-audit
+        language: system
+        types: [python]
+        args: ["-r", "requirements.txt"]
+        pass_filenames: false
+
+      # Tests
+      - id: pytest
+        name: pytest
+        entry: pytest
+        language: system
+        pass_filenames: false
+        always_run: true
