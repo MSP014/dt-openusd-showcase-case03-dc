@@ -48,3 +48,4 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .__atomic-write*
+*.code-workspace
