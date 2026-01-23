@@ -1,13 +1,25 @@
-# Case 03 Dependency Source File
-# Compile with: pip-compile requirements.in
+# NVIDIA Showreel Standard - Universal Dependency Stack
 
+# Infrastructure & Orchestration
 pip-tools
 pre-commit
-pytest
-flake8
+python-dotenv
+requests
+jira
+
+# QA & Security
 black
 isort
+flake8
 bandit
 pip-audit
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+
+# Data & Physics (Digital Twin Foundation)
 pydantic
-python-dotenv
+numpy
+scipy
