@@ -12,10 +12,10 @@
 
 ## 📋 Project Overview
 
-This repository showcases a prototype **High-Performance Computing Infrastructure Digital Twin (Level L1)** demonstrating visualisation of critical operational parameters within data centre environments. The case study focuses on a render farm, presenting real-time monitoring of thermal, power, and cooling system dynamics.
+This repository showcases a prototype **AI Inference Refinery (Level L1 Digital Twin)** demonstrating the visualisation of high-performance computing infrastructure within the Armenian tech ecosystem. The case study focuses on an **Inference Farm** hosting NVIDIA's **Nemotron-3** flagship models.
 
 **Key Use Case:**
-The digital twin visualises **thermal behaviour of server racks receiving a large render job**. The scenario demonstrates temperature escalation across compute nodes as workload intensifies, followed by stabilisation through active cooling systems. Temperature data drives real-time heatmap shaders and status indicators via HUD/FUI overlays. This exemplifies how L1 Digital Twins translate complex infrastructure telemetry into clear visual narratives for operational awareness.
+The digital twin visualises a **"Viral Inference Surge"** — a sudden spike in global requests. The scenario demonstrates the **sequential activation of 160 nodes** as the load balancer scales resources in real-time. Temperature escalation, airflow dynamics, and distributed data flows (RDMA) drive real-time heatmap shaders and HUD/FUI overlays.
 
 **Project Focus:**
 
@@ -29,10 +29,10 @@ The digital twin visualises **thermal behaviour of server racks receiving a larg
 
 *This setup demonstrates an **L1 Digital Twin**, focusing on the visualization of critical infrastructure parameters (Thermal, Power, Network).*
 
-- **Houdini "Factory":** Procedural generation of racks, cabling, and simulation data mocking.
-- **USD Architecture:** Strict Point Instancing strategy (`Zone` -> `Rack` -> `Unit`) for rendering 10,000+ assets in real-time.
-- **MDL Visualization:** Custom shaders driving heatmaps and usage LEDs directly from USD attributes.
-- **Python Tooling:** Automated layout assembly and sensor data binding.
+- **Hero Asset**: **Blackwell Rig v1.0** (4U custom nodes featuring SilverStone RM44 chassis and 4x RTX PRO 4500 Blackwell GPUs).
+- **Houdini "Refinery"**: Procedural rack generation and cascading airflow/thermal simulation prep.
+- **USD Architecture**: Point Instancing strategy rendering **640 GPUs** across 16 racks in real-time.
+- **MDL Visualization**: Custom shaders driving heatmaps and RDMA data-flow "pulses" directly from USD attributes.
 
 ## 👁️ Visual Proof
 
