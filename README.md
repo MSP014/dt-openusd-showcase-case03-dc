@@ -109,9 +109,9 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 └── tools/           # Pipeline utilities (Jira Sync, Asset Validation)
 ```
 
-## 📜 License & Protocol
+## 📜 Technical Stack
 
-This project adheres to the **Nvidia Showreel Protocol**.
-
-- **Documentation**: British English (en-GB).
-- **Code**: Python 3.10 / USD 23.11+.
+- **Python**: 3.10
+- **USD**: 23.11+
+- **Houdini FX**: 21.0.596
+- **NVIDIA Omniverse / Isaac Sim**: 5.1.0
