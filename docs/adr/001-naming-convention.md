@@ -50,3 +50,9 @@ Format: `dt-omniverse-showreel-case##-[key]`
 
 * **Positive:** Predictable file system, clear separation of binary vs text data, and consistent international documentation code.
 * **Negative:** Requires initial setup discipline and cognitive load for suffix management.
+
+### 6. Asset Specific Naming
+
+* **Compute Nodes:** Use the chipset architecture code (e.g., `GB203`) rather than the commercial product name (e.g., `RTX 4500`) to emphasize engineering precision and versatility (Inference/Render/Compute).
+  * **Approved:** `Blackwell Rig GB203`
+  * **Rejected:** `Blackwell Rig PRO 4500`, `RTX 4500 Ada Rig`

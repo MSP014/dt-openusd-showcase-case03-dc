@@ -13,7 +13,7 @@ Unlike a traditional "batch" render farm, this "Refinery" acts as a live machine
 3. **Visual Delta**: The room transitions from a "Cold/Idle" state (Blue) to a "Heavy Load/Working" state (Orange-Red Heatmap).
 4. **Airflow Reaction**: As nodes activate, cooling fans ramp up, creating visible turbulence (simulated in Houdini) that vibrates the overhead cabling and filters through the front meshes.
 
-## 🖥️ Hardware Specification: Blackwell Rig v1.0
+## 🖥️ Hardware Specification: Blackwell Rig GB203
 
 To maximise visual "engineering porn" and simulation potential, the project uses a custom-designed **4U Air-Cooled Node** instead of standard rack-mount "fridges".
 
@@ -22,7 +22,7 @@ To maximise visual "engineering porn" and simulation potential, the project uses
 | Component | Model / Detail | Justification |
 | :--- | :--- | :--- |
 | **Chassis** | **SilverStone RM44** (4U, E-ATX) | Industrial design with maximized front mesh for visible airflow simulation. Supports SSI-EEB boards. |
-| **GPU Array** | **3× NVIDIA RTX PRO 4500 Blackwell** (32GB GDDR7) | Reduced from 4x to ensure physical fitment of the ConnectX-7 NIC and improved airflow. Rear power connectors eliminate cable clutter. |
+| **GPU Array** | **3× NVIDIA RTX PRO 4500 (GB203)** (32GB GDDR7) | Reduced from 4x to ensure physical fitment of the ConnectX-7 NIC and improved airflow. Rear power connectors eliminate cable clutter. |
 | **CPU** | **AMD Ryzen Threadripper PRO 7975WX** (32C/64T) | High core count for independent task scheduling/preprocessing. |
 | **RAM** | **512 GB DDR5-5600 ECC RDIMM** (8×64 GB) | Crucial buffer for large model weights. Optimized for **INT8 Quantization** (Nemotron-3 ~340GB). 8x64GB config maximizes the WRX90's 8-channel architecture without relying on unavailability of 128GB modules. |
 | **Cooler** | **Noctua NH-D9 TR5-SP6** (4U) | Premium air-cooling solution that fits within 4U height constraints while providing visual detail for simulation. |
@@ -44,7 +44,7 @@ To maximise visual "engineering porn" and simulation potential, the project uses
 #### 2. Thermal & Aerodynamics
 
 * **Front-to-Back Airflow**: The SilverStone RM44 is selected specifically for its mesh front. The 4U height allows for large, low-RPM intake fans that create a massive volume of air movement.
-* **Connectors**: The RTX PRO 4500's tail-end power connector is crucial. It eliminates the "cable clutter" above the cards typical of consumer GPUs, allowing laminar airflow over the backplates and through the CPU cooler.
+* **Connectors**: The RTX PRO 4500 (GB203)'s tail-end power connector is crucial. It eliminates the "cable clutter" above the cards typical of consumer GPUs, allowing laminar airflow over the backplates and through the CPU cooler.
 
 #### 3. Strategic & Economic Positioning
 

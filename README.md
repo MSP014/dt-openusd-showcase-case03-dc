@@ -1,108 +1,117 @@
-# Case 03: Data Center (HPC Infrastructure Digital Twin)
+# Case 03: Data Center (AI Inference Refinery)
 
-> [!WARNING]
-> **Work in Progress:** This project is currently under active development. Some links and assets may be placeholders.
-
----
-
-> **Role:** L1 Digital Twin (Infrastructure Monitoring)
-> **Stack:** Houdini, Omniverse (USD/Python), MDL, Jira Integration
+> [!NOTE]
+> **Status:** Active Prototype (Internal Beta)
+> **Stack:** NVIDIA Omniverse Kit (Python) + SideFX Houdini (Solaris)
 
 ---
 
 ## 📋 Project Overview
 
-This repository showcases a prototype **AI Inference Refinery (Level L1 Digital Twin)** demonstrating the visualisation of high-performance computing infrastructure within the Armenian tech ecosystem. The case study focuses on an **Inference Farm** hosting NVIDIA's **Nemotron-3** flagship models.
+A **Reproducible Tech Pack** demonstrating an **L1 Digital Twin** of an AI Inference Farm.
+The project visualises a **"Viral Inference Surge"** — a dynamic scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
-**Key Use Case:**
-The digital twin visualises a **"Viral Inference Surge"** — a sudden spike in global requests. The scenario demonstrates the **sequential activation of 160 nodes** as the load balancer scales resources in real-time. Temperature escalation, airflow dynamics, and distributed data flows (RDMA) drive real-time heatmap shaders and HUD/FUI overlays.
+Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's response in real-time based on normalised telemetry data.
 
-**Project Focus:**
+### Key Features
 
-- **Photorealistic SimReady Assets:** Industry-standard asset quality for professional visualisation
-- **Massive Scene Optimisation:** Point Instancing strategy rendering 10,000+ server units in real-time
-- **MDL-Driven Visualisation:** Custom shaders binding thermal/power data directly to material properties
+| Feature | Description |
+| :--- | :--- |
+| **3x4 Simulation Matrix** | 4 Operational States (Idle, Nominal, Surge, Critical) across 3 Levels of Detail (Node, Rack, Room). |
+| **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / CFD** (Engineering) modes. |
+| **Hero Asset** | **Blackwell Rig GB203** (Custom 4U Inference Node featuring 3x NVIDIA RTX PRO 4500 (GB203) GPUs). |
+| **Data-Driven** | All visual cues (Fan RPM, LEDs, Heatmaps) are driven by a decoupled Data Provider, not keyframes. |
 
 ---
 
-## 🎯 Technical Highlights
+## 🏗️ Architecture
 
-*This setup demonstrates an **L1 Digital Twin**, focusing on the visualization of critical infrastructure parameters (Thermal, Power, Network).*
+The system follows a strict separation of concerns:
 
-- **Hero Asset**: **Blackwell Rig v1.0** (4U custom nodes featuring SilverStone RM44 chassis and 3x RTX PRO 4500 Blackwell GPUs).
-- **Houdini "Refinery"**: Procedural rack generation and cascading airflow/thermal simulation prep.
-- **USD Architecture**: Point Instancing strategy rendering **480 GPUs** across 16 racks in real-time.
-- **MDL Visualization**: Custom shaders driving heatmaps and RDMA data-flow "pulses" directly from USD attributes.
+### 1. The Factory (SideFX Houdini)
 
-## 👁️ Visual Proof
+*Generates the static and dynamic assets.*
 
-> *Placeholders for future GIFs - Replace with actual optimised media*
+- **Solaris/PDG**: Procedural assembly of Racks and Room layouts.
+- **Simulation**: Pre-calculated CFD caches (VDB) for airflow and thermodynamics.
+- **Output**: Optimised USD assets (`.usd`, `.vdb`, `.bgeo`).
 
-1. **Thermal Heatmap:** `![Heatmap Demo](docs/img/heatmap_demo.gif)`
-2. **USD Composition:** `![Graph](docs/img/composition_graph.png)`
-3. **Houdini PDG:** `![PDG Flow](docs/img/houdini_pdg.png)`
+### 2. The App (Nvidia Omniverse)
 
-## 🏗️ Architecture & Decisions
+*Runs the runtime logic and visualisation.*
 
-This project follows a **README-driven structure** to manage the complexity of hybrid Houdini/Omniverse pipelines.
+- **Extension**: `omni.ai.refinery` (Custom Kit App).
+- **Logic**: Listens to the Data Provider and swaps USD VariantSets based on the current State.
+- **UI**: Custom Control Panel for manual state override.
 
-- [**View Architecture Decision Records (ADR)**](docs/adr/) – Design notes on Naming Conventions, Security Guardrails, and Dependency Locking.
+---
+
+## 🚦 state Matrix
+
+The Digital Twin operates in one of four discrete states at any given time:
+
+| State | Load | Visual Cues |
+| :--- | :--- | :--- |
+| **Idle** | 0% | Laminar airflow, cool ambient lighting, minimal power draw. |
+| **Nominal** | 25% | Steady-state cooling, efficient PUE, green status LEDs. |
+| **Surge** | 50% | Fans ramping up, heat signatures visible on exhaust vents. |
+| **Critical** | 85% | Thermal throttling, turbulent airflow (Heat haze), red warning LEDs. |
+
+---
+
+## 🛠️ Usage & Setup
+
+### 1. Environment Setup
+
+The project relies on a specific Conda environment (`case03-env`) to ensure reproducibility.
+
+```bash
+# Create and activate environment
+conda create -n case03-env python=3.10
+conda activate case03-env
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Asset Hydration
+
+To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) are stored externally.
+
+1. **Download** the Asset Pack: `[LINK_TBD]`
+2. **Extract** contents to: `assets/_external/`
+3. **Verify** structure:
+
+    ```text
+    assets/_external/
+    ├── usd/      # Heavy USD Crates
+    ├── tex/      # 4K/8K Textures
+    └── vdb/      # Simulation Caches
+    ```
+
+### 3. Running the App
+
+> *Coming Soon: Instructions for launching the Omniverse Extension*
+
+---
 
 ## 📂 Repository Structure
 
 ```text
 .
 ├── assets/
-│   ├── _external/   # [DOWNLOADED] Runtime Assets (USD, Textures, HDRI) - Git Ignored
-│   │   ├── usd/
-│   │   ├── tex/
-│   │   └── hdri/
-│   └── local/       # Lightweight assets tracked by Git
-├── docs/        # ADRs and knowledge base
-│   ├── plans/   # Implementation plans & tech debt
-├── src/         # Core logic and scripts
-├── tests/       # Validation and testing suite
-└── tools/       # Internal pipeline utilities
+│   ├── _external/   # [GIT-IGNORED] Downloaded binary assets
+│   └── local/       # Lightweight git-tracked assets (UI icons, scripts)
+├── docs/            # Documentation & ADRs
+│   ├── main_concept.md  # Detailed Architecture & Implementation Plan
+│   └── adr/             # Architecture Decision Records
+├── src/             # Python source code (Data Provider, Logic)
+└── tools/           # Pipeline utilities (Jira Sync, Asset Validation)
 ```
 
-- [**View Composition Graph**](docs/composition_graph.mermaid) – Visual breakdown of the USD layering strategy.
+## 📜 License & Protocol
 
----
+This project adheres to the **Nvidia Showreel Protocol**.
 
-## 💾 Project Data / Assets
-
-### 🏭 The "Factory" Narrative
->
-> This repository follows a strict **"Source vs. Artifact"** philosophy:
->
-> - **Houdini (Fabricator):** The procedural "factory" where assets are generated. Source files (`.hip`) are proprietary and **excluded** from this repository.
-> - **USD (Artifact):** The "product" of the factory. These are the optimized files needed to run the Digital Twin in Omniverse.
-> - **Synthetic Data:** Telemetry streams are emulated via Python generators to simulate robust edge cases (e.g., extreme thermal loads) that are rarely captured in real-world data.
-
-### 📦 Asset Hydration
-
-To keep this repository lightweight, heavy binary assets (USD Crates, Textures, HDRIs) are stored externally.
-
-- [**Download Asset Pack (One Drive / S3 Link TBD)**](https://example.com/placeholder)
-
-**Hydration Steps:**
-
-1. Download the ZIP archive from the link above.
-2. **Extract contents** directly into the `assets/_external/` folder.
-    - *Note: This folder already exists (anchored by `.gitkeep`), so you simply unzip into it.*
-    - *Result:* Your local path should look like `assets/_external/usd/my_asset.usd`.
-
-## 🛠️ Setup & Installation
-
-1. **Clone:** `git clone https://github.com/MSP014/dt-openusd-showcase-case03-dc.git`
-2. **Hydration:** (See "Asset Hydration" above) - Extract assets to `assets/_external/`.
-3. **Env:** Create conda env: `conda create -n case03-env python=3.10`
-4. **Deps:** `pip install -r requirements.txt`
-5. **Hooks:** `pre-commit install`
-
----
-
-## 📜 Changelog
-
-- **2026-02-02:** Implemented external storage strategy for heavy assets (Git-agnostic).
-- **2026-01-22:** Initial repository bootstrap. Established **Nvidia Showreel Protocol** (ADRs, Pre-commit, Hybrid Access).
+- **Documentation**: British English (en-GB).
+- **Code**: Python 3.10 / USD 23.11+.

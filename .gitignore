@@ -11,14 +11,16 @@ cache/
 Refs/
 _incoming/
 geo/
-HIP/
+
 OUT/
 
 # --- Source/Project Files (Adobe and other software specific) ---
-AE/   # After Effects
-AI/   # Adobe Illustrator
-PRJ/  # Premiere Pro
-PSD/  # Photoshop Projects
+AE/
+AI/
+PRJ/
+PSD/
+
+HIP/
 
 # --- Media & Renders (Heavy) ---
 EXR/
