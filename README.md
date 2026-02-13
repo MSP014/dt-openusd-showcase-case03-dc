@@ -1,4 +1,4 @@
-# Case 03: Data Center (AI Inference Refinery)
+# Case 03: The "Forced-Flow" Inference Refinery
 
 > [!NOTE]
 > **Status:** Active Prototype (Internal Beta)
@@ -9,18 +9,23 @@
 ## 📋 Project Overview
 
 A **Reproducible Tech Pack** demonstrating an **L1 Digital Twin** of an AI Inference Farm.
-The project visualises a **"Viral Inference Surge"** — a dynamic scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
+The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
-Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's response in real-time based on normalised telemetry data.
+Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
+
+> **Deep Dive:**
+>
+> * [Architecture & Physics](./docs/knowledge_base/main_concept.md)
+> * [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
 ### Key Features
 
 | Feature | Description |
 | :--- | :--- |
-| **3x4 Simulation Matrix** | 4 Operational States (Idle, Nominal, Surge, Critical) across 3 Levels of Detail (Node, Rack, Room). |
-| **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / CFD** (Engineering) modes. |
-| **Hero Asset** | **Blackwell Rig GB203** (Custom 4U Inference Node featuring 3x NVIDIA RTX PRO 4500 (GB203) GPUs). |
-| **Data-Driven** | All visual cues (Fan RPM, LEDs, Heatmaps) are driven by a decoupled Data Provider, not keyframes. |
+| **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
+| **The Silent Heat (Node)** | **Precision Thermal Modelling:** Tracks waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
+| **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
+| **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / Fluid Dynamics** (Engineering) modes. |
 
 ---
 
@@ -32,17 +37,17 @@ The system follows a strict separation of concerns:
 
 *Generates the static and dynamic assets.*
 
-- **Solaris/PDG**: Procedural assembly of Racks and Room layouts.
-- **Simulation**: Pre-calculated CFD caches (VDB) for airflow and thermodynamics.
-- **Output**: Optimised USD assets (`.usd`, `.vdb`, `.bgeo`).
+* **Solaris/PDG**: Procedural assembly of Racks and Room layouts.
+* **Simulation**: Pre-calculated CFD caches (VDB) for airflow and thermodynamics.
+* **Output**: Optimised USD assets (`.usd`, `.vdb`, `.bgeo`).
 
 ### 2. The App (Nvidia Omniverse)
 
 *Runs the runtime logic and visualisation.*
 
-- **Extension**: `omni.ai.refinery` (Custom Kit App).
-- **Logic**: Listens to the Data Provider and swaps USD VariantSets based on the current State.
-- **UI**: Custom Control Panel for manual state override.
+* **Extension**: `omni.ai.refinery` (Custom Kit App).
+* **Logic**: Listens to the Data Provider and swaps USD VariantSets based on the current State.
+* **UI**: Custom Control Panel for manual state override.
 
 ---
 
@@ -103,7 +108,9 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 │   ├── _external/   # [GIT-IGNORED] Downloaded binary assets
 │   └── local/       # Lightweight git-tracked assets (UI icons, scripts)
 ├── docs/            # Documentation & ADRs
-│   ├── main_concept.md  # Detailed Architecture & Implementation Plan
+│   ├── knowledge_base/  # [NEW] Concept & Specs
+│   │   ├── main_concept.md
+│   │   └── hardware_specification.md
 │   └── adr/             # Architecture Decision Records
 ├── src/             # Python source code (Data Provider, Logic)
 └── tools/           # Pipeline utilities (Jira Sync, Asset Validation)
@@ -111,7 +118,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ## 📜 Technical Stack
 
-- **Python**: 3.10
-- **USD**: 23.11+
-- **Houdini FX**: 21.0.596
-- **NVIDIA Omniverse / Isaac Sim**: 5.1.0
+* **Python**: 3.10
+* **USD**: 23.11+
+* **Houdini FX**: 21.0.596
+* **NVIDIA Omniverse / Isaac Sim**: 5.1.0

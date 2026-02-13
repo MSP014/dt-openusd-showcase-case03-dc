@@ -1,5 +1,4 @@
 import argparse
-import json
 import os
 import sys
 from base64 import b64encode
@@ -35,7 +34,7 @@ def get_issue(issue_key):
     resp = requests.get(
         f"{base_url}/rest/api/3/issue/{issue_key}",
         headers=headers,
-        params={"fields": "summary,status,description,parent,timetracking"},
+        params={"fields": "summary,status,description,parent,timetracking,comment"},
         timeout=30,
     )
 
@@ -56,26 +55,40 @@ def get_issue(issue_key):
 
         print(f"Link: {base_url}/browse/{data['key']}")
 
+        def extract_text(node):
+            texts = []
+            if isinstance(node, dict):
+                if node.get("type") == "text":
+                    texts.append(node.get("text", ""))
+                elif "content" in node:
+                    for child in node["content"]:
+                        texts.extend(extract_text(child))
+            return texts
+
         description = fields.get("description")
         if description:
-            # Basic ADF extraction - Flattening all text
             try:
-
-                def extract_text(node):
-                    texts = []
-                    if node.get("type") == "text":
-                        texts.append(node.get("text", ""))
-                    elif "content" in node:
-                        for child in node["content"]:
-                            texts.extend(extract_text(child))
-                    return texts
-
                 all_text = extract_text(description)
                 print("\nDescription:")
                 print("".join(all_text))
             except Exception as e:
                 print(f"\n[Error Parsing Rich Text: {e}]")
-                print(json.dumps(description, indent=2))
+
+        if "comment" in fields and "comments" in fields["comment"]:
+            print("\nComments:")
+            for comment in fields["comment"]["comments"]:
+                author = comment["author"]["displayName"]
+                created = comment["created"]
+                body = comment.get("body")
+                if body:
+                    try:
+                        comment_texts = extract_text(body)
+                        print(f"--- [{created}] {author} ---")
+                        print("".join(comment_texts))
+                    except Exception as e:
+                        print(f"--- [{created}] {author} ---")
+                        print(f"(Error parsing comment: {e})")
+
     else:
         print(f"Error {resp.status_code}: {resp.text}")
 
