@@ -13,7 +13,7 @@
 #### 1. Level Node (Micro): Blackwell Rig GB203
 
 * **Base Unit:** Custom 4U Node (SilverStone RM44 chassis).
-* **Configuration:** AMD Threadripper PRO 7975WX + 3x NVIDIA RTX PRO 4500 (GB203).
+* **Configuration:** AMD Threadripper PRO 7975WX + 3x NVIDIA RTX PRO 4500 (GB203). **Note (Targeted Scaling):** While the RTX PRO 4500 was explicitly chosen for its unmatched ROI—saving over **$1.58 Million USD** across a 16-rack cluster—the node's underlying architecture (1600W PSU / High-Airflow 4U) is intentionally **over-provisioned**. This allows for a zero-hassle "drop-in upgrade" to the flagship RTX PRO 5000 72GB for clients demanding MIG capability entirely within the same thermal envelope.
 * **Dynamics:** Internal fans (Arctic P12/P8) act as *flow accelerators*, not primary pumps. The node maintains positive pressure to prevent dust ingress and dead zones.
 * **Thermodynamics:** The 1600W PSU is treated as an active heat source (~84W waste heat), ensuring correct thermal signatures in X-Ray mode.
 

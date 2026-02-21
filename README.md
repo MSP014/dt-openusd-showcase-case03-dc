@@ -11,6 +11,8 @@
 A **Reproducible Tech Pack** demonstrating an **L1 Digital Twin** of an AI Inference Farm.
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
+> **Targeted Scaling Architecture:** The physical platform (4U SilverStone RM44 + 1600W Titanium PSU) is deliberately **over-provisioned**. It serves as a highly scalable foundation that starts with the undisputed ROI champion—the **RTX PRO 4500 (GB203)**—while enabling a seamless "drop-in upgrade" to the flagship **RTX PRO 5000 (GB202) 72GB** for clients requiring massive VRAM or Multi-Instance GPU (MIG) support. *(Note: The RTX PRO 6000's 600W TDP exceeds the node's 1600W power envelope and requires a different architectural class).*
+
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
 
 > **Deep Dive:**
@@ -23,7 +25,7 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 | Feature | Description |
 | :--- | :--- |
 | **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
-| **The Silent Heat (Node)** | **Precision Thermal Modelling:** Tracks waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
+| **The Silent Heat (Node)** | **Precision Thermal Modelling:** Tracks waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array (chosen for its peak 17.9 TFLOPS/$1000 efficiency, saving **$1.58M** per 16-rack cluster compared to the RTX PRO 5000 72GB). |
 | **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
 | **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / Fluid Dynamics** (Engineering) modes. |
 
