@@ -1,8 +1,7 @@
 # Case 03: The "Forced-Flow" Inference Refinery
 
-> [!NOTE]
-> **Status:** Active Prototype (Internal Beta)
-> **Stack:** NVIDIA Omniverse Kit (Python) + SideFX Houdini (Solaris)
+> [!WARNING]
+> **Work in Progress:** This project is currently under active development. Some links and assets may be placeholders.
 
 ---
 
@@ -11,21 +10,18 @@
 A **Reproducible Tech Pack** demonstrating an **L1 Digital Twin** of an AI Inference Farm.
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
-> **Targeted Scaling Architecture:** The physical platform (4U SilverStone RM44 + 1600W Titanium PSU) is deliberately **over-provisioned**. It serves as a highly scalable foundation that starts with the undisputed ROI champion—the **RTX PRO 4500 (GB203)**—while enabling a seamless "drop-in upgrade" to the flagship **RTX PRO 5000 (GB202) 72GB** for clients requiring massive VRAM or Multi-Instance GPU (MIG) support. *(Note: The RTX PRO 6000's 600W TDP exceeds the node's 1600W power envelope and requires a different architectural class).*
+> **Why GB203, not the flagship?** The **RTX PRO 4500** delivers **17.9 TFLOPS per $1,000** — the best efficiency ratio at this tier. Across a 16-rack cluster, this translates to **$1.58M saved** versus the RTX PRO 5000 72GB, with no compromise on the architecture: the 4U chassis accepts a drop-in upgrade the moment VRAM requirements scale. *(The RTX PRO 6000's 600W TDP requires a different node class entirely.)*
+>
+> → [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
-
-> **Deep Dive:**
->
-> * [Architecture & Physics](./docs/knowledge_base/main_concept.md)
-> * [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
 ### Key Features
 
 | Feature | Description |
 | :--- | :--- |
 | **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
-| **The Silent Heat (Node)** | **Precision Thermal Modelling:** Tracks waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array (chosen for its peak 17.9 TFLOPS/$1000 efficiency, saving **$1.58M** per 16-rack cluster compared to the RTX PRO 5000 72GB). |
+| **The Silent Heat (Node)** | **Precision Thermal Modelling:** Tracks waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
 | **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
 | **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / Fluid Dynamics** (Engineering) modes. |
 
@@ -37,13 +33,15 @@ The system follows a strict separation of concerns:
 
 ### 1. The Factory (SideFX Houdini)
 
-*Generates the static and dynamic assets.*
+*Geometry authoring, simulation, and USD export.*
 
-* **Solaris/PDG**: Procedural assembly of Racks and Room layouts.
-* **Simulation**: Pre-calculated CFD caches (VDB) for airflow and thermodynamics.
-* **Output**: Optimised USD assets (`.usd`, `.vdb`, `.bgeo`).
+Houdini is the closed creative environment of this hybrid pipeline. Houdini project files (`.hip`) are **not distributed** — only the exported outputs are.
 
-### 2. The App (Nvidia Omniverse)
+* **Geometry**: Server Nodes, Racks, and Data Hall layouts modelled procedurally and exported as USD.
+* **Simulation**: CFD thermal and airflow dynamics computed in Houdini, baked to **VDB caches**. Playback and visualisation of these caches happens inside the Omniverse Extension.
+* **Output**: Optimised USD assets (`.usda`, `.vdb`) consumed by the App at runtime.
+
+### 2. The App (NVIDIA Omniverse)
 
 *Runs the runtime logic and visualisation.*
 
@@ -53,7 +51,7 @@ The system follows a strict separation of concerns:
 
 ---
 
-## 🚦 state Matrix
+## 🚦 State Matrix
 
 The Digital Twin operates in one of four discrete states at any given time:
 
@@ -63,6 +61,8 @@ The Digital Twin operates in one of four discrete states at any given time:
 | **Nominal** | 25% | Steady-state cooling, efficient PUE, green status LEDs. |
 | **Surge** | 50% | Fans ramping up, heat signatures visible on exhaust vents. |
 | **Critical** | 85% | Thermal throttling, turbulent airflow (Heat haze), red warning LEDs. |
+
+*The **Viral Inference Surge** scenario drives the transition cascade: `Nominal → Surge → Critical`.*
 
 ---
 
@@ -115,11 +115,10 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 │   │   ├── hardware_specification.md
 │   │   └── usd_architecture/ # Rigid OpenUSD Pipeline Protocols
 │   ├── plans/           # Actionable implementation guides
-│   │   ├── houdini_usd_export_guidelines.md
 │   │   └── case 03 - tech debt.md
 │   └── adr/             # Architecture Decision Records (e.g., 007 USD Pipeline)
 ├── src/             # Python source code (Data Provider, Logic)
-└── tools/           # Pipeline utilities (Jira Sync, Asset Validation)
+└── tools/           # Developer scripts (Jira integration, asset validation)
 ```
 
 ## 📜 Technical Stack

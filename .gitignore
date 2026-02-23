@@ -3,6 +3,7 @@
 # --- Internal Protocols & Planning (STRICT PRIVACY) ---
 protocols/
 docs/plans/case 03 - implementation.md
+docs/plans/houdini_usd_export_guidelines.md
 
 # --- Heavy Work Directories (Project Structure) ---
 assets/_external/*
