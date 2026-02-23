@@ -1,7 +1,7 @@
 # Case 03: The AI Inference Refinery (Main Concept)
 
 > [!NOTE]
-> For rules regarding how this hardware is translated into 3D assets (Scale, Instancing, Kinds, Telemetry), refer to the [USD Architecture Protocols](./usd_architecture/).
+> For rules regarding how this hardware is translated into 3D assets (Scale, Instancing, Kinds, Telemetry), refer to the [USD Architecture Guidelines](./usd_architecture/).
 
 ## 📋 High-Level Narrative
 

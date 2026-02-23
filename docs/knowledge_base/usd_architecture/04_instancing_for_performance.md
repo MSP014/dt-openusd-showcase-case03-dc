@@ -1,4 +1,4 @@
-# Protocol 04: Instancing for Performance
+# Guideline 04: Instancing for Performance
 
 When assembling highly repetitive architecture (e.g., 160 GB203 server nodes inside identical 42U racks), we must eliminate standard geometry references and enforce **USD Instancing**.
 
@@ -33,6 +33,7 @@ If simulating airflow VDBs, exhaust particulate matter, or dynamic heat fields, 
 
 ## ✅ Definition of Done (DoD)
 
-- [ ] The `instanceable=true` tag is verified on all 160 Server Reference pointers, not the Prototype.
+* [ ] The `instanceable=true` tag is verified on all 160 Server Reference pointers, not the Prototype.
+
 * [ ] Memory footprint confirms prototype geometry is loaded exactly once by the renderer.
 * [ ] Heatmap visualizers successfully read `primvars:` data to colorize physically identical instances differently.

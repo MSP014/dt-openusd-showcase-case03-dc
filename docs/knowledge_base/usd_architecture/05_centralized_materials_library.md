@@ -1,4 +1,4 @@
-# Protocol 05: Centralized Materials Library
+# Guideline 05: Centralized Materials Library
 
 We are operating with an industrial "Single Source of Truth" logic for our visual assets, strictly avoiding a scattered "game-dev" texturing approach where every asset holds its own internal folder of maps.
 
@@ -29,6 +29,7 @@ By assigning all 160 servers to `m_PolishedSteel_Rack`, we unlock global updates
 
 ## ✅ Definition of Done (DoD)
 
-- [ ] No local `materials/` folders exist nested inside individual Component asset folders.
+* [ ] No local `materials/` folders exist nested inside individual Component asset folders.
+
 * [ ] Material definitions (`.usda`/`.usdc`) and their raw Maps (`.png`/`.exr`) are physically split into two distinct root project folders.
 * [ ] Material Bindings on Component references trace back through relative cross-directory links (e.g., `../materials/...`).

@@ -145,7 +145,7 @@ A Kit-based application that assembles the logic.
 **Goal:** Assemble the "Switchable" USD assets using VariantSets.
 
 > [!NOTE]
-> **Architecture Contract:** All USD assembly, instancing, and telemetry formatting must strictly adhere to the engineering protocols defined in [ADR 007: USD Digital Twin Pipeline Architecture](../adr/007-usd-digital-twin-pipeline.md) and the `usd_architecture` knowledge base.
+> **Architecture Contract:** All USD assembly, instancing, and telemetry formatting must strictly adhere to the engineering guidelines defined in [ADR 007: USD Digital Twin Pipeline Architecture](../adr/007-usd-digital-twin-pipeline.md) and the `usd_architecture` knowledge base.
 
 #### 2.1. Material Library
 

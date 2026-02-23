@@ -1,4 +1,4 @@
-# Protocol 06: Custom Attributes & Telemetry
+# Guideline 06: Custom Attributes & Telemetry
 
 A critical difference between a 3D visual render and a "Digital Twin" is data.
 
@@ -46,6 +46,7 @@ The Digital Twin consumer (using Omniverse or a custom application) should **not
 
 ## ✅ Definition of Done (DoD)
 
-- [ ] The `primvars:telemetry:schemaVersion` attribute string returns `"1.0"` upon inspection.
+* [ ] The `primvars:telemetry:schemaVersion` attribute string returns `"1.0"` upon inspection.
+
 * [ ] Telemetry data (`tempC`, `powerW`) exists directly in the `primvars:` namespace, **not** inside standard user/`customData` metadata.
 * [ ] Omniverse Python API can query these 4 exact keys algorithmically.

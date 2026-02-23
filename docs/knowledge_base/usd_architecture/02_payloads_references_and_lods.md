@@ -1,4 +1,4 @@
-# Protocol 02: Payloads, References, and LODs
+# Guideline 02: Payloads, References, and LODs
 
 Managing memory and rendering performance is the most critical challenge when assembling 160 high-density server racks. We solve this using two orthogonal USD mechanics working together: **Composition Arcs** (RAM optimization) and **Purposes** (GPU optimization).
 
@@ -42,6 +42,7 @@ For final rendering, path-tracers (like Hydra/Iray) evaluate the **Render** purp
 
 ## ✅ Definition of Done (DoD)
 
-- [ ] Every heavily modeled Component (e.g., GB203 Server) has its main geometry stored as a Payload.
+* [ ] Every heavily modeled Component (e.g., GB203 Server) has its main geometry stored as a Payload.
+
 * [ ] The VariantSet for level of detail is universally named `LOD` across the project.
 * [ ] Purpose tags (`proxy`, `render`) are applied to Geometry leaf nodes, never to root Xforms.

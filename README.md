@@ -113,7 +113,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 │   ├── knowledge_base/  # Concept, Specs & Engineering Rules
 │   │   ├── main_concept.md
 │   │   ├── hardware_specification.md
-│   │   └── usd_architecture/ # Rigid OpenUSD Pipeline Protocols
+│   │   └── usd_architecture/ # Rigid OpenUSD Pipeline Guidelines
 │   ├── plans/           # Actionable implementation guides
 │   │   └── case 03 - tech debt.md
 │   └── adr/             # Architecture Decision Records (e.g., 007 USD Pipeline)

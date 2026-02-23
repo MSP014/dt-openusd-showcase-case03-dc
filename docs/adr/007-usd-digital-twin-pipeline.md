@@ -9,13 +9,13 @@ Case 03 (Data Center) requires assembling a massive Digital Twin comprising 160 
 
 ## Decision
 
-We have established a rigid "Case 03 Protocol Pack v0.1" for all OpenUSD authoring and assembly.
+We have established a rigid "Case 03 Guidelines Pack v0.1" for all OpenUSD authoring and assembly.
 This pipeline is not a recommendation; it is a strict engineering contract.
 
-The architecture is governed by the following atomic protocols located in `docs/knowledge_base/usd_architecture/`:
+The architecture is governed by the following atomic guidelines located in `docs/knowledge_base/usd_architecture/`:
 
 * **`00_project_usd_contract.md`**: The Master USD Contract defining variant names, geometry-level purposes, and schema versions.
-* **`01_scale_and_axis_protocol.md`**: Enforces a strict Y-Up, Meters local authoring standard (Houdini Native).
+* **`01_scale_and_axis_guidelines.md`**: Enforces a strict Y-Up, Meters local authoring standard (Houdini Native).
 * **`02_payloads_references_and_lods.md`**: Mandates Payloads for heavy geometry and explicitly separated LOD VariantSets for Proxy/Render purposes.
 * **`03_asset_validator_kinds.md`**: Defines project UX rules enforcing `Assembly` -> `Component` -> `Subcomponent` hierarchies.
 * **`04_instancing_for_performance.md`**: Mandates Point Instancing for server racks, utilizing Primvars for unique thermal overrides.

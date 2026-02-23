@@ -1,4 +1,4 @@
-# Protocol 03: Asset Validator Kinds (Hierarchy)
+# Guideline 03: Asset Validator Kinds (Hierarchy)
 
 The **Asset Validator** in Omniverse is the overarching quality-control tool that ensures our scene will not break downstream automation or UX selection. The most common error in mechanical assemblies relates to **Kinds** (metadata tags identifying what a prim functionally represents).
 
@@ -29,6 +29,7 @@ Without `Subcomponent`, clicking the GPU selects the whole server. Without `Asse
 
 ## ✅ Definition of Done (DoD)
 
-- [ ] Running the Asset Validator in Omniverse yields zero `KindChecker` errors.
+* [ ] Running the Asset Validator in Omniverse yields zero `KindChecker` errors.
+
 * [ ] Double-clicking a server rack in the Viewport selects the `Assembly`, not an internal mesh.
 * [ ] Individual GPUs or NICs are tagged as `Subcomponent` allowing focused inspection.

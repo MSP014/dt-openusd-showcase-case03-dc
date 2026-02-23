@@ -1,4 +1,4 @@
-# Protocol 01: Scale and Axis Setup
+# Guideline 01: Scale and Axis Setup
 
 ## 1. The Core Standard: Houdini Native
 
