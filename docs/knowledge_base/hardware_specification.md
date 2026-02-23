@@ -1,5 +1,8 @@
 # Case 03: The AI Inference Refinery (Main Concept)
 
+> [!NOTE]
+> For rules regarding how this hardware is translated into 3D assets (Scale, Instancing, Kinds, Telemetry), refer to the [USD Architecture Protocols](./usd_architecture/).
+
 ## 📋 High-Level Narrative
 
 The project visualises an **Industrial-Scale AI Inference Farm**, designed to serve flagship Large Language Models (LLMs) like **NVIDIA Nemotron-3**.

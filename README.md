@@ -110,10 +110,14 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 │   ├── _external/   # [GIT-IGNORED] Downloaded binary assets
 │   └── local/       # Lightweight git-tracked assets (UI icons, scripts)
 ├── docs/            # Documentation & ADRs
-│   ├── knowledge_base/  # [NEW] Concept & Specs
+│   ├── knowledge_base/  # Concept, Specs & Engineering Rules
 │   │   ├── main_concept.md
-│   │   └── hardware_specification.md
-│   └── adr/             # Architecture Decision Records
+│   │   ├── hardware_specification.md
+│   │   └── usd_architecture/ # Rigid OpenUSD Pipeline Protocols
+│   ├── plans/           # Actionable implementation guides
+│   │   ├── houdini_usd_export_guidelines.md
+│   │   └── case 03 - tech debt.md
+│   └── adr/             # Architecture Decision Records (e.g., 007 USD Pipeline)
 ├── src/             # Python source code (Data Provider, Logic)
 └── tools/           # Pipeline utilities (Jira Sync, Asset Validation)
 ```

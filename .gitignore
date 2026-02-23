@@ -1,7 +1,8 @@
 # NVIDIA Showreel - Unified .gitignore
 
-# --- Internal Protocols (STRICT PRIVACY) ---
+# --- Internal Protocols & Planning (STRICT PRIVACY) ---
 protocols/
+docs/plans/case 03 - implementation.md
 
 # --- Heavy Work Directories (Project Structure) ---
 assets/_external/*
