@@ -17,6 +17,15 @@
 * **Dynamics:** Internal fans (Arctic P12/P8) act as *flow accelerators*, not primary pumps. The node maintains positive pressure to prevent dust ingress and dead zones.
 * **Thermodynamics:** The 1600W PSU is treated as an active heat source (~84W waste heat), ensuring correct thermal signatures in X-Ray mode.
 
+## RTX PRO 4500 Hero Asset
+
+*Procedural modeling & texturing of the Blackwell GB203 node.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![RTX PRO 4500 Blackwell - 01](../img/rtx_pro_4500/rtx_pro_4500_-_01.png) | ![RTX PRO 4500 Blackwell - 02](../img/rtx_pro_4500/rtx_pro_4500_-_02.png) | ![RTX PRO 4500 Blackwell - 03](../img/rtx_pro_4500/rtx_pro_4500_-_07.png) | ![RTX PRO 4500 Blackwell - 04](../img/rtx_pro_4500/rtx_pro_4500_-_08.png) |
+| *RTX PRO 4500 Blackwell - 01* | *RTX PRO 4500 Blackwell - 02* | *RTX PRO 4500 Blackwell - 03* | *RTX PRO 4500 Blackwell - 04* |
+
 ### Key Features
 
 * **Data Abstraction Layer:** Decoupled logic where visual states are driven by normalised data streams (0.0 - 1.0), not keyframes.
@@ -95,9 +104,9 @@ Pre-calculated assets generated in Houdini (Solaris/PDG).
 
 A Kit-based application that assembles the logic.
 
-* **State Machine:** listents to Data Provider.
-* **USD Composition:** Swaps active VariantSets based on State.
-* **UI:** Custom window for "Manual Override" of the simulation parameters.
+* **State Machine:** Listens to Data Provider.
+* **USD Composition:** Swaps active VariantSets / attributes based on State.
+* **UI:** Viewport-embedded HUD panel (`omni.ui.scene` overlay) for state control and telemetry readout.
 
 ---
 
@@ -178,10 +187,11 @@ A Kit-based application that assembles the logic.
 
 * [ ] Create `exts/omni.ai.refinery/`.
   * [ ] `extension.toml`: Dependency declaration.
-  * [ ] `ui.py`: Window with:
-    * Dropdown: "LOD" (Camera Jump).
-    * Segmented Control: "State" (Idle -> Critical).
-    * Toggle: "X-Ray Mode".
+  * [ ] `ui.py`: Viewport-embedded HUD (`omni.ui.scene` overlay):
+    * **State Switcher**: segmented control `[IDLE] [NOMINAL] [SURGE] [CRITICAL]`.
+    * **Demo Mode toggle**: ON → Data Provider generates synthetic data; OFF → awaits real data stream (MQTT/Kafka placeholder).
+    * **Telemetry readout**: live display of `temp_celsius`, `fan_duty_cycle`, `power_draw_watts`.
+    * **LOD / Camera Jump**: dropdown for viewport navigation.
 
 #### 3.3. State Machine Wiring
 
