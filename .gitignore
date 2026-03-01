@@ -10,26 +10,26 @@ assets/_external/*
 !assets/**/.gitkeep
 
 cache/
-Refs/
+refs/
 _incoming/
 geo/
 
-OUT/
+out/
 
 # --- Source/Project Files (Adobe and other software specific) ---
-AE/
-AI/
-PRJ/
-PSD/
+ae/
+ai/
+prj/
+psd/
 
-HIP/
+hip/
 
 # --- Media & Renders (Heavy) ---
-EXR/
-MP4/
-GIF/
-MOV/
-PNG/
+exr/
+mp4/
+gif/
+mov/
+png/
 
 # --- File Extensions (Specific Blocklist) ---
 # USD (Heavy Binary Crates blocked, ASCII allowed if strictly needed, but guarding general USD)
