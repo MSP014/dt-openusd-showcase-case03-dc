@@ -16,6 +16,11 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
 
+> [!NOTE]
+> **No real data center required.** All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the `Data Provider` module to demonstrate the full pipeline end-to-end. **This is the competency on display:** the ability to design a convincing, production-grade Digital Twin with nothing but engineering knowledge and code.
+>
+> **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualization layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
+
 ## RTX PRO 4500 Hero Asset
 
 *Procedural modeling & texturing of the Blackwell GB203 node.*
@@ -147,3 +152,4 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 * **2026-02-16:** Dedicated sprint to Blackwell Rig GB203 detailing. Standardized asset naming conventions and updated cooling concepts (Forced-Flow & Metrics).
 * **2026-02-23:** Completed blockout of ConnectX-7 NIC and outer chassis panels. Initiated blockout for RTX PRO 4500 GPUs and ASUS Pro WS WRX90E-SAGE SE motherboard.
 * **2026-03-01:** Completed modeling of RTX PRO 4500 Blackwell, baked textures, and successfully exported the USD asset to the `..\assets\_external\usd\rtx_pro_4500` directory.
+* **2026-03-02:** Finalized ConnectX-7 & OSFP network architecture documentation, establishing standards for yellow SMF cabling and visual differentiation. Extensively refined the "Forced-Flow" Digital Twin concept, detailing procedural telemetry interpolation (noise-based heatmaps/LEDs), HUD-driven hierarchical LODs (Hall → Rack → Server), and color-coded velocity streamlines. Added rationale for synthetic data generation and documented the Live Mode placeholder for real-world telemetry integration.
