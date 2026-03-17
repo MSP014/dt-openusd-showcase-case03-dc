@@ -31,7 +31,7 @@ To maximise **high-fidelity hardware visualisation for thermal/airflow storytell
 | **Cooler** | **Noctua NH-D9 TR5-SP6** (4U) | Premium air-cooling solution that fits within 4U height constraints while providing visual detail for simulation. |
 | **Motherboard** | **ASUS Pro WS WRX90E-SAGE SE** (SSI-EEB) | Massive connectivity for 4x GPUs and PCIe 5.0 speeds. |
 | **PSU** | **be quiet! Dark Power Pro 13 1600W** (Titanium) | 1600W capacity handles the ~1400W peak load. 200mm length fits easily within the RM44's 255mm limit. |
-| **Networking** | **ConnectX-7** (InfiniBand/400GbE) | Occupies the 7th PCIe slot (freed by removing the 4th GPU). Essential for high-bandwidth RDMA in AI clusters. |
+| **Networking** | **ConnectX-7** (InfiniBand/400GbE) | Occupies the 7th (and final) PCIe slot. Essential for high-bandwidth RDMA in AI clusters. *See Network Constraint note below.* |
 
 > [!NOTE]
 > **Historical Config**: For a traditional *Render Farm* role, utilizing all 4 GPUs would be viable as rendering is less dependent on ultra-low latency inter-node communication (onboard 10GbE would suffice). However, the **AI Inference** role mandates the ConnectX-7 for RDMA, necessitating the 3-GPU tradeoff to free up a PCIe slot.
@@ -44,10 +44,15 @@ To maximise **high-fidelity hardware visualisation for thermal/airflow storytell
 * **Hardware Shift**: Dropping the 4th GPU reduces node power draw to **~1200W**, increasing PSU efficiency headroom to ~75% (sweet spot).
 * **Verdict**: The **1600W Titanium PSU** provides ample headroom. The decision to use 3 GPUs + 1 NIC solves the physical "PCIe crowding" issue on the ASUS WRX90, ensuring every component has breathing room.
 
-#### 2. Thermal & Aerodynamics
-
 * **Front-to-Back Airflow**: The SilverStone RM44 is selected specifically for its mesh front. The 4U height allows for large, low-RPM intake fans that create a massive volume of air movement.
 * **Connectors**: The RTX PRO 4500 (GB203)'s tail-end power connector is crucial. It eliminates the "cable clutter" above the cards typical of consumer GPUs, allowing laminar airflow over the backplates and through the CPU cooler.
+
+#### 3. The 400G Network Constraint (PCIe Bottleneck)
+
+* **The Problem**: A single ConnectX-7 400G (NDR) card requires `~100 GB/s` of bidirectional bandwidth to operate at true Full-Duplex 400G (400Gbps in *both* directions simultaneously). A single PCIe 5.0 x16 slot only provides `~64 GB/s`.
+* **The Official Nvidia Solution**: The *Nvidia ConnectX-7 Adapter Cards User Manual* specifies the use of an **Auxiliary Connection Card**, tethered to the main NIC via two internal Cabline CA-II Plus harnesses (black and white cables). This bridges a second PCIe 5.0 x16 slot to double the bandwidth to `128 GB/s`.
+* **The Physical Reality**: The ASUS Pro WS WRX90E-SAGE SE has exactly 7 PCIe slots. Three RTX PRO 4500 GPUs (dual-slot) occupy slots 1-6. The main ConnectX-7 card occupies slot 7. **There is no physical space for the Auxiliary Card.**
+* **The AI Inference Justification**: This `64 GB/s` bottleneck is acceptable. Unlike a traditional core router requiring massive bidirectional throughput, an LLM Inference node has highly asymmetric traffic (small prompt input, larger token output, internal P2P over PCIe). The single slot's `64 GB/s` is more than enough to saturate the 400G link in a single direction (which requires `~50 GB/s`), making the omission of the Auxiliary Card an acceptable, calculated engineering trade-off for maximum GPU density.
 
 #### 3. Strategic & Economic Positioning
 
@@ -72,6 +77,15 @@ To maximise **high-fidelity hardware visualisation for thermal/airflow storytell
 | :---: | :---: | :---: | :---: |
 | ![RTX PRO 4500 Blackwell - 01](../img/rtx_pro_4500/rtx_pro_4500_-_01.png) | ![RTX PRO 4500 Blackwell - 02](../img/rtx_pro_4500/rtx_pro_4500_-_02.png) | ![RTX PRO 4500 Blackwell - 03](../img/rtx_pro_4500/rtx_pro_4500_-_07.png) | ![RTX PRO 4500 Blackwell - 04](../img/rtx_pro_4500/rtx_pro_4500_-_08.png) |
 | *RTX PRO 4500 Blackwell - 01* | *RTX PRO 4500 Blackwell - 02* | *RTX PRO 4500 Blackwell - 03* | *RTX PRO 4500 Blackwell - 04* |
+
+## ConnectX-7 Hero Asset
+
+*Procedural modeling & texturing of the 400G NDR network interface card.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![ConnectX-7 - 01](../img/connectx_7/connectx-7_01.png) | ![ConnectX-7 - 04](../img/connectx_7/connectx-7_04.png) | ![ConnectX-7 - 07](../img/connectx_7/connectx-7_07.png) | ![ConnectX-7 - 08](../img/connectx_7/connectx-7_08.png) |
+| *ConnectX-7 - 01* | *ConnectX-7 - 04* | *ConnectX-7 - 07* | *ConnectX-7 - 08* |
 
 ### 5. Rack Integration Strategy ("The Glass Tube")
 
