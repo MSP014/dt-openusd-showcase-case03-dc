@@ -12,6 +12,8 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 
 > **Why GB203, not the flagship?** The **RTX PRO 4500** delivers **17.9 TFLOPS per $1,000** — the best efficiency ratio at this tier. Across a 16-rack cluster, this translates to **$1.58M saved** versus the RTX PRO 5000 72GB, with no compromise on the architecture: the 4U chassis accepts a drop-in upgrade the moment VRAM requirements scale. *(The RTX PRO 6000's 600W TDP requires a different node class entirely.)*
 >
+> **Why 3 GPUs, not 4?** The node requires a 400G ConnectX-7 NIC for RDMA. On the 7-slot WRX90E motherboard, three dual-slot GPUs + one NIC perfectly maxes out the physical PCIe layout without bottlenecking the network card.
+>
 > → [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
@@ -29,6 +31,15 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 | :---: | :---: | :---: | :---: |
 | ![RTX PRO 4500 Blackwell - 01](docs/img/rtx_pro_4500/rtx_pro_4500_-_01.png) | ![RTX PRO 4500 Blackwell - 02](docs/img/rtx_pro_4500/rtx_pro_4500_-_02.png) | ![RTX PRO 4500 Blackwell - 03](docs/img/rtx_pro_4500/rtx_pro_4500_-_07.png) | ![RTX PRO 4500 Blackwell - 04](docs/img/rtx_pro_4500/rtx_pro_4500_-_08.png) |
 | *RTX PRO 4500 Blackwell - 01* | *RTX PRO 4500 Blackwell - 02* | *RTX PRO 4500 Blackwell - 03* | *RTX PRO 4500 Blackwell - 04* |
+
+## ConnectX-7 Hero Asset
+
+*Procedural modeling & texturing of the 400G NDR network interface card.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![ConnectX-7 - 01](docs/img/connectx_7/connectx-7_01.png) | ![ConnectX-7 - 04](docs/img/connectx_7/connectx-7_04.png) | ![ConnectX-7 - 07](docs/img/connectx_7/connectx-7_07.png) | ![ConnectX-7 - 08](docs/img/connectx_7/connectx-7_08.png) |
+| *ConnectX-7 - 01* | *ConnectX-7 - 04* | *ConnectX-7 - 07* | *ConnectX-7 - 08* |
 
 ### Key Features
 

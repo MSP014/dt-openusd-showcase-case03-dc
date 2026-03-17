@@ -10,7 +10,7 @@ backports-asyncio-runner==1.2.0
     # via pytest-asyncio
 bandit==1.9.3
     # via -r requirements.in
-black==26.1.0
+black==26.3.1
     # via -r requirements.in
 boolean-py==5.0
     # via license-expression
