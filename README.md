@@ -7,7 +7,9 @@
 
 ## 📋 Project Overview
 
-A **Reproducible Tech Pack** demonstrating an **L1 Digital Twin** of an AI Inference Farm.
+A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
+Built strictly on the **Sim-to-Real** methodology, this pipeline demonstrates the complete lifecycle: *Geometry Foundation → Production Simulation → Enterprise IoT Integration → AI-Powered Operations*.
+
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
 > **Why GB203, not the flagship?** The **RTX PRO 4500** delivers **17.9 TFLOPS per $1,000** — the best efficiency ratio at this tier. Across a 16-rack cluster, this translates to **$1.58M saved** versus the RTX PRO 5000 72GB, with no compromise on the architecture: the 4U chassis accepts a drop-in upgrade the moment VRAM requirements scale. *(The RTX PRO 6000's 600W TDP requires a different node class entirely.)*
@@ -19,8 +21,7 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
 
 > [!NOTE]
-> **No real data center required.** All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the `Data Provider` module to demonstrate the full pipeline end-to-end. **This is the competency on display:** the ability to design a convincing, production-grade Digital Twin with nothing but engineering knowledge and code.
->
+> Synthetic Data Generation for Sim-to-Real: No real data center required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
 > **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualization layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
 
 ## RTX PRO 4500 Hero Asset
@@ -41,6 +42,15 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 | ![ConnectX-7 - 01](docs/img/connectx_7/connectx-7_01.png) | ![ConnectX-7 - 04](docs/img/connectx_7/connectx-7_04.png) | ![ConnectX-7 - 07](docs/img/connectx_7/connectx-7_07.png) | ![ConnectX-7 - 08](docs/img/connectx_7/connectx-7_08.png) |
 | *ConnectX-7 - 01* | *ConnectX-7 - 04* | *ConnectX-7 - 07* | *ConnectX-7 - 08* |
 
+## ASUS Pro WS WRX90E-SAGE SE Hero Asset
+
+*Procedural modeling & texturing of the WRX90E motherboard.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![ASUS Pro WS WRX90E-SAGE SE - 01](docs/img/ws_wrx90e/ws_wrx90e_01.png) | ![ASUS Pro WS WRX90E-SAGE SE - 03](docs/img/ws_wrx90e/ws_wrx90e_03.png) | ![ASUS Pro WS WRX90E-SAGE SE - 04](docs/img/ws_wrx90e/ws_wrx90e_04.png) | ![ASUS Pro WS WRX90E-SAGE SE - 05](docs/img/ws_wrx90e/ws_wrx90e_05.png) |
+| *ASUS Pro WS WRX90E-SAGE SE - 01* | *ASUS Pro WS WRX90E-SAGE SE - 03* | *ASUS Pro WS WRX90E-SAGE SE - 04* | *ASUS Pro WS WRX90E-SAGE SE - 05* |
+
 ### Key Features
 
 | Feature | Description |
@@ -56,7 +66,7 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 The system follows a strict separation of concerns:
 
-### 1. The Factory (SideFX Houdini)
+### 1. Geometry Foundation & Production Simulation (SideFX Houdini)
 
 *Geometry authoring, simulation, and USD export.*
 
@@ -66,7 +76,7 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 * **Simulation**: CFD thermal and airflow dynamics computed in Houdini, baked to **VDB caches**. Playback and visualisation of these caches happens inside the Omniverse Extension.
 * **Output**: Optimised USD assets (`.usda`, `.vdb`) consumed by the App at runtime.
 
-### 2. The App (NVIDIA Omniverse)
+### 2. Enterprise IoT & AI-Powered Operations (NVIDIA Omniverse)
 
 *Runs the runtime logic and visualisation.*
 
@@ -165,3 +175,4 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 * **2026-03-01:** Completed modeling of RTX PRO 4500 Blackwell, baked textures, and successfully exported the USD asset to the `..\assets\_external\usd\rtx_pro_4500` directory.
 * **2026-03-02:** Finalized ConnectX-7 & OSFP network architecture documentation, establishing standards for yellow SMF cabling and visual differentiation. Extensively refined the "Forced-Flow" Digital Twin concept, detailing procedural telemetry interpolation (noise-based heatmaps/LEDs), HUD-driven hierarchical LODs (Hall → Rack → Server), and color-coded velocity streamlines. Added rationale for synthetic data generation and documented the Live Mode placeholder for real-world telemetry integration.
 * **2026-03-17:** Finalised procedural modelling, UV unwrapping, and texturing of the ConnectX-7 Hero Asset across all Levels of Detail (LOD00, LOD01, LOD02, Proxy), and successfully exported the USD asset to the `..\assets\_external\usd\connectx7` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (PCB components, extruded heatsink fins, OSFP connector).
+* **2026-04-06:** Finalised procedural modelling, UV unwrapping, and texturing of the ASUS Pro WS WRX90E-SAGE SE Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\ws_wrx90e` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (I/O Bracket, VRM Block, STR5 Socket, RAM Ports).
