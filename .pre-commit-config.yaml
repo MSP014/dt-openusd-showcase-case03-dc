@@ -13,25 +13,25 @@ repos:
     hooks:
       - id: black
         name: black
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m black
+        entry: conda run -n case03-env python -m black
         language: system
         types: [python]
 
       - id: isort
         name: isort
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m isort
+        entry: conda run -n case03-env python -m isort
         language: system
         types: [python]
 
       - id: flake8
         name: flake8
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m flake8
+        entry: conda run -n case03-env python -m flake8
         language: system
         types: [python]
 
       - id: bandit
         name: bandit
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m bandit
+        entry: conda run -n case03-env python -m bandit
         language: system
         types: [python]
         args: ["-r", "src", "tools"]
@@ -40,7 +40,7 @@ repos:
       # Dependency Consistency Check (ADR 003 Protection)
       - id: pip-compile-check
         name: pip-compile-check
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m piptools compile --no-header --quiet --dry-run requirements.in
+        entry: conda run -n case03-env python -m piptools compile --no-header --quiet --dry-run requirements.in
         language: system
         files: ^requirements\.(in|txt)$
         pass_filenames: false
@@ -49,7 +49,7 @@ repos:
       # Dependency Vulnerability Scanning
       - id: pip-audit
         name: pip-audit
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m pip_audit -r requirements.txt --desc=off --progress-spinner=off
+        entry: conda run -n case03-env python -m pip_audit -r requirements.txt --desc=off --progress-spinner=off
         language: system
         pass_filenames: false
         always_run: true
@@ -57,7 +57,7 @@ repos:
       # Tests
       - id: pytest
         name: pytest
-        entry: C:/Users/SpeLL/anaconda3/envs/case03-env/python.exe -m pytest
+        entry: conda run -n case03-env python -m pytest
         language: system
         pass_filenames: false
         always_run: true
