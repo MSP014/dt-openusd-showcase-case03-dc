@@ -8,9 +8,9 @@
 ## 📋 Project Overview
 
 A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
-Built strictly on the **Sim-to-Real** methodology, this pipeline demonstrates the complete lifecycle: *Geometry Foundation → Production Simulation → Enterprise IoT Integration → AI-Powered Operations*.
+Built strictly on the **Sim-to-Real** methodology, this pipeline demonstrates the complete architectural lifecycle: *Geometry Foundation → Synthetic Data Simulation → Live Data Integration → Real-time Telemetry Visualization*.
 
-The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in AI model requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
+The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
 > **Why GB203, not the flagship?** The **RTX PRO 4500** delivers **17.9 TFLOPS per $1,000** — the best efficiency ratio at this tier. Across a 16-rack cluster, this translates to **$1.58M saved** versus the RTX PRO 5000 72GB, with no compromise on the architecture: the 4U chassis accepts a drop-in upgrade the moment VRAM requirements scale. *(The RTX PRO 6000's 600W TDP requires a different node class entirely.)*
 >
