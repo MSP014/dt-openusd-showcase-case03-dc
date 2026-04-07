@@ -7,7 +7,7 @@
 
 The project visualises an **Industrial-Scale AI Inference Farm**, designed to serve flagship Large Language Models (LLMs) like **NVIDIA Nemotron-3**.
 
-Unlike a traditional "batch" render farm, this "Refinery" acts as a live machine that transforms electrical energy into digital "intelligence" (tokens). The showreel focus is on **Dynamic Scaling**: showing how the infrastructure physically responds to a sudden surge in global AI traffic.
+Unlike a traditional "batch" render farm, this "Refinery" acts as a live machine that transforms enormous electrical capacity into mass token generation. The showreel focus is on **Dynamic Scaling**: showing how the physical infrastructure responds to a sudden surge in LLM request volumes.
 
 ## 🎯 The Scenario: "Viral Inference Surge"
 
