@@ -110,7 +110,7 @@
 109:
 110: ### Scenario
 111:
-112: Visualisation of a high-load Render Farm/Supercomputer cluster. The digital twin displays critical infrastructure parameters: Power consumption (active load), Cooling efficiency (temperature hot/cold aisles), and Network throughput.
+112: Visualisation of a high-load AI Inference Farm cluster. The digital twin displays critical infrastructure parameters: Power consumption (active load), Cooling efficiency (temperature hot/cold aisles), and Network throughput.
 113:
 114: ### L1 Characteristics Present
 115:
@@ -121,7 +121,7 @@
 120:
 121: ### Why Not L0?
 122:
-123: It connects the visual state of the server LEDs and heat haze to simulated data streams (Simulated "Render Job").
+123: It connects the visual state of the server LEDs and heat haze to simulated data streams (Simulated "Inference Surge").
 124:
 125: ### Why Not L2?
 126:
