@@ -16,7 +16,7 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 >
 > **Why 3 GPUs, not 4?** The node requires a 400G ConnectX-7 NIC for RDMA. On the 7-slot WRX90E motherboard, three dual-slot GPUs + one NIC perfectly maxes out the physical PCIe layout without bottlenecking the network card.
 >
-> → [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
+> → [📚 Knowledge Base Hub (Index)](./docs/knowledge_base/README.md) · [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
 
@@ -146,6 +146,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 │   └── local/       # Lightweight git-tracked assets (UI icons, scripts)
 ├── docs/            # Documentation & ADRs
 │   ├── knowledge_base/  # Concept, Specs & Engineering Rules
+│   │   ├── README.md         # 📚 Knowledge Base Index Hub
 │   │   ├── main_concept.md
 │   │   ├── hardware_specification.md
 │   │   └── usd_architecture/ # Rigid OpenUSD Pipeline Guidelines
