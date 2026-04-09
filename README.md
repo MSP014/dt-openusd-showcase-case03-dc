@@ -85,13 +85,13 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 * **Simulation**: CFD thermal and airflow dynamics computed in Houdini, baked to **VDB caches**. Playback and visualisation of these caches happens inside the Omniverse Extension.
 * **Output**: Optimised USD assets (`.usda`, `.vdb`) consumed by the App at runtime.
 
-### 2. Enterprise IoT & AI-Powered Operations (NVIDIA Omniverse)
+### 2. Interactive Digital Twin Frontend (NVIDIA Omniverse)
 
-*Runs the runtime logic and visualisation.*
+*The real-time visualization layer and state machine.*
 
 * **Extension**: `omni.ai.refinery` (Custom Kit App).
-* **Logic**: Listens to the Data Provider and swaps USD VariantSets based on the current State.
-* **UI**: Custom Control Panel for manual state override.
+* **Logic**: A robust State Machine that listens to the Python Data Provider, dynamically swapping pre-cached USD VariantSets (Pyro sims, vector streamlines, thermal heatmaps) based on the active operational state.
+* **UI**: Viewport-embedded HUD (`omni.ui.scene` overlay) for hierarchical LOD navigation (Hall → Rack → Node) and manual stress-test overrides.
 
 ---
 
