@@ -51,6 +51,15 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 | ![ASUS Pro WS WRX90E-SAGE SE - 01](docs/img/ws_wrx90e/ws_wrx90e_01.png) | ![ASUS Pro WS WRX90E-SAGE SE - 03](docs/img/ws_wrx90e/ws_wrx90e_03.png) | ![ASUS Pro WS WRX90E-SAGE SE - 04](docs/img/ws_wrx90e/ws_wrx90e_04.png) | ![ASUS Pro WS WRX90E-SAGE SE - 05](docs/img/ws_wrx90e/ws_wrx90e_05.png) |
 | *ASUS Pro WS WRX90E-SAGE SE - 01* | *ASUS Pro WS WRX90E-SAGE SE - 03* | *ASUS Pro WS WRX90E-SAGE SE - 04* | *ASUS Pro WS WRX90E-SAGE SE - 05* |
 
+## Noctua NH-D9 TR5-SP6 Hero Asset
+
+*Procedural modeling & texturing of the 4U Threadripper CPU cooler.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![Noctua NH-D9 - 01](docs/img/cpu_fan/cpu_fan_01.png) | ![Noctua NH-D9 - 03](docs/img/cpu_fan/cpu_fan_03.png) | ![Noctua NH-D9 - 06](docs/img/cpu_fan/cpu_fan_06.png) | ![Noctua NH-D9 - 07](docs/img/cpu_fan/cpu_fan_07.png) |
+| *Noctua NH-D9 - 01* | *Noctua NH-D9 - 03* | *Noctua NH-D9 - 06* | *Noctua NH-D9 - 07* |
+
 ### Key Features
 
 | Feature | Description |
@@ -177,3 +186,4 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 * **2026-03-02:** Finalized ConnectX-7 & OSFP network architecture documentation, establishing standards for yellow SMF cabling and visual differentiation. Extensively refined the "Forced-Flow" Digital Twin concept, detailing procedural telemetry interpolation (noise-based heatmaps/LEDs), HUD-driven hierarchical LODs (Hall → Rack → Server), and color-coded velocity streamlines. Added rationale for synthetic data generation and documented the Live Mode placeholder for real-world telemetry integration.
 * **2026-03-17:** Finalised procedural modelling, UV unwrapping, and texturing of the ConnectX-7 Hero Asset across all Levels of Detail (LOD00, LOD01, LOD02, Proxy), and successfully exported the USD asset to the `..\assets\_external\usd\connectx7` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (PCB components, extruded heatsink fins, OSFP connector).
 * **2026-04-06:** Finalised procedural modelling, UV unwrapping, and texturing of the ASUS Pro WS WRX90E-SAGE SE Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\ws_wrx90e` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (I/O Bracket, VRM Block, STR5 Socket, RAM Ports).
+* **2026-04-09:** Finalised procedural modelling and texturing of the Noctua NH-D9 TR5-SP6 CPU cooler Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\cpu_fan` directory. Restructured documentation to establish a unified Hero Asset Gallery and cleansed files of legacy marketing terminology.
