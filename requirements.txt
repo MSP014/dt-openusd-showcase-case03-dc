@@ -137,7 +137,7 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
-pytest==9.0.2
+pytest==9.0.3
     # via
     #   -r requirements.in
     #   pytest-asyncio
@@ -146,7 +146,7 @@ pytest-asyncio==1.3.0
     # via -r requirements.in
 pytest-cov==7.0.0
     # via -r requirements.in
-python-dotenv==1.2.1
+python-dotenv==1.2.2
     # via -r requirements.in
 pytokens==0.4.0
     # via black

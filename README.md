@@ -60,6 +60,15 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 | ![Noctua NH-D9 - 01](docs/img/cpu_fan/cpu_fan_01.png) | ![Noctua NH-D9 - 03](docs/img/cpu_fan/cpu_fan_03.png) | ![Noctua NH-D9 - 06](docs/img/cpu_fan/cpu_fan_06.png) | ![Noctua NH-D9 - 07](docs/img/cpu_fan/cpu_fan_07.png) |
 | *Noctua NH-D9 - 01* | *Noctua NH-D9 - 03* | *Noctua NH-D9 - 06* | *Noctua NH-D9 - 07* |
 
+## be quiet! Dark Power Pro 13 1600W Hero Asset
+
+*Procedural modelling & texturing of the Titanium 1600W PSU.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![be quiet! Dark Power Pro 13 - 01](docs/img/psu/psu_01.png) | ![be quiet! Dark Power Pro 13 - 03](docs/img/psu/psu_03.png) | ![be quiet! Dark Power Pro 13 - 05](docs/img/psu/psu_05.png) | ![be quiet! Dark Power Pro 13 - 06](docs/img/psu/psu_06.png) |
+| *be quiet! Dark Power Pro 13 - 01* | *be quiet! Dark Power Pro 13 - 03* | *be quiet! Dark Power Pro 13 - 05* | *be quiet! Dark Power Pro 13 - 06* |
+
 ### Key Features
 
 | Feature | Description |
@@ -187,3 +196,4 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 * **2026-03-17:** Finalised procedural modelling, UV unwrapping, and texturing of the ConnectX-7 Hero Asset across all Levels of Detail (LOD00, LOD01, LOD02, Proxy), and successfully exported the USD asset to the `..\assets\_external\usd\connectx7` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (PCB components, extruded heatsink fins, OSFP connector).
 * **2026-04-06:** Finalised procedural modelling, UV unwrapping, and texturing of the ASUS Pro WS WRX90E-SAGE SE Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\ws_wrx90e` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (I/O Bracket, VRM Block, STR5 Socket, RAM Ports).
 * **2026-04-09:** Finalised procedural modelling and texturing of the Noctua NH-D9 TR5-SP6 CPU cooler Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\cpu_fan` directory. Restructured documentation to establish a unified Hero Asset Gallery and cleansed files of legacy marketing terminology.
+* **2026-04-29:** Finalised procedural modelling and texturing of the be quiet! Dark Power Pro 13 1600W PSU Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\psu` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (LOD 00, LOD 01, and internals).
