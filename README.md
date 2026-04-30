@@ -39,8 +39,8 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 | | | | |
 | :---: | :---: | :---: | :---: |
-| ![ConnectX-7 - 01](docs/img/connectx_7/connectx-7_01.png) | ![ConnectX-7 - 04](docs/img/connectx_7/connectx-7_04.png) | ![ConnectX-7 - 07](docs/img/connectx_7/connectx-7_07.png) | ![ConnectX-7 - 08](docs/img/connectx_7/connectx-7_08.png) |
-| *ConnectX-7 - 01* | *ConnectX-7 - 04* | *ConnectX-7 - 07* | *ConnectX-7 - 08* |
+| ![ConnectX-7 - 01](docs/img/connectx_7/connectx-7_01.png) | ![ConnectX-7 - 02](docs/img/connectx_7/connectx-7_04.png) | ![ConnectX-7 - 03](docs/img/connectx_7/connectx-7_07.png) | ![ConnectX-7 - 04](docs/img/connectx_7/connectx-7_08.png) |
+| *ConnectX-7 - 01* | *ConnectX-7 - 02* | *ConnectX-7 - 03* | *ConnectX-7 - 04* |
 
 ## ASUS Pro WS WRX90E-SAGE SE Hero Asset
 
@@ -48,8 +48,8 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 | | | | |
 | :---: | :---: | :---: | :---: |
-| ![ASUS Pro WS WRX90E-SAGE SE - 01](docs/img/ws_wrx90e/ws_wrx90e_01.png) | ![ASUS Pro WS WRX90E-SAGE SE - 03](docs/img/ws_wrx90e/ws_wrx90e_03.png) | ![ASUS Pro WS WRX90E-SAGE SE - 04](docs/img/ws_wrx90e/ws_wrx90e_04.png) | ![ASUS Pro WS WRX90E-SAGE SE - 05](docs/img/ws_wrx90e/ws_wrx90e_05.png) |
-| *ASUS Pro WS WRX90E-SAGE SE - 01* | *ASUS Pro WS WRX90E-SAGE SE - 03* | *ASUS Pro WS WRX90E-SAGE SE - 04* | *ASUS Pro WS WRX90E-SAGE SE - 05* |
+| ![ASUS Pro WS WRX90E-SAGE SE - 01](docs/img/ws_wrx90e/ws_wrx90e_01.png) | ![ASUS Pro WS WRX90E-SAGE SE - 02](docs/img/ws_wrx90e/ws_wrx90e_03.png) | ![ASUS Pro WS WRX90E-SAGE SE - 03](docs/img/ws_wrx90e/ws_wrx90e_04.png) | ![ASUS Pro WS WRX90E-SAGE SE - 04](docs/img/ws_wrx90e/ws_wrx90e_05.png) |
+| *ASUS Pro WS WRX90E-SAGE SE - 01* | *ASUS Pro WS WRX90E-SAGE SE - 02* | *ASUS Pro WS WRX90E-SAGE SE - 03* | *ASUS Pro WS WRX90E-SAGE SE - 04* |
 
 ## Noctua NH-D9 TR5-SP6 Hero Asset
 
@@ -57,8 +57,8 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 | | | | |
 | :---: | :---: | :---: | :---: |
-| ![Noctua NH-D9 - 01](docs/img/cpu_fan/cpu_fan_01.png) | ![Noctua NH-D9 - 03](docs/img/cpu_fan/cpu_fan_03.png) | ![Noctua NH-D9 - 06](docs/img/cpu_fan/cpu_fan_06.png) | ![Noctua NH-D9 - 07](docs/img/cpu_fan/cpu_fan_07.png) |
-| *Noctua NH-D9 - 01* | *Noctua NH-D9 - 03* | *Noctua NH-D9 - 06* | *Noctua NH-D9 - 07* |
+| ![Noctua NH-D9 - 01](docs/img/cpu_fan/cpu_fan_01.png) | ![Noctua NH-D9 - 02](docs/img/cpu_fan/cpu_fan_03.png) | ![Noctua NH-D9 - 03](docs/img/cpu_fan/cpu_fan_06.png) | ![Noctua NH-D9 - 04](docs/img/cpu_fan/cpu_fan_07.png) |
+| *Noctua NH-D9 - 01* | *Noctua NH-D9 - 02* | *Noctua NH-D9 - 03* | *Noctua NH-D9 - 04* |
 
 ## be quiet! Dark Power Pro 13 1600W Hero Asset
 
@@ -66,8 +66,8 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 | | | | |
 | :---: | :---: | :---: | :---: |
-| ![be quiet! Dark Power Pro 13 - 01](docs/img/psu/psu_01.png) | ![be quiet! Dark Power Pro 13 - 03](docs/img/psu/psu_03.png) | ![be quiet! Dark Power Pro 13 - 05](docs/img/psu/psu_05.png) | ![be quiet! Dark Power Pro 13 - 06](docs/img/psu/psu_06.png) |
-| *be quiet! Dark Power Pro 13 - 01* | *be quiet! Dark Power Pro 13 - 03* | *be quiet! Dark Power Pro 13 - 05* | *be quiet! Dark Power Pro 13 - 06* |
+| ![be quiet! Dark Power Pro 13 - 01](docs/img/psu/psu_01.png) | ![be quiet! Dark Power Pro 13 - 02](docs/img/psu/psu_03.png) | ![be quiet! Dark Power Pro 13 - 03](docs/img/psu/psu_05.png) | ![be quiet! Dark Power Pro 13 - 04](docs/img/psu/psu_06.png) |
+| *be quiet! Dark Power Pro 13 - 01* | *be quiet! Dark Power Pro 13 - 02* | *be quiet! Dark Power Pro 13 - 03* | *be quiet! Dark Power Pro 13 - 04* |
 
 ### Key Features
 
