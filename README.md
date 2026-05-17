@@ -8,7 +8,7 @@
 ## 📋 Project Overview
 
 A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
-Built strictly on the **Sim-to-Real** methodology, this pipeline demonstrates the complete architectural lifecycle: *Geometry Foundation → Synthetic Data Simulation → Live Data Integration → Real-time Telemetry Visualization*.
+Built strictly on the **Sim-to-Real** methodology, this pipeline demonstrates the complete architectural lifecycle: *Geometry Foundation → Synthetic Data Simulation → Live Data Integration → Real-time Telemetry Visualisation*.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -21,12 +21,12 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
 
 > [!NOTE]
-> Synthetic Data Generation for Sim-to-Real: No real data center required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
-> **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualization layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
+> Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
+> **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualisation layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
 
 ## RTX PRO 4500 Hero Asset
 
-*Procedural modeling & texturing of the Blackwell GB203 node.*
+*Procedural modelling & texturing of the Blackwell GB203 node.*
 
 | | | | |
 | :---: | :---: | :---: | :---: |
@@ -35,7 +35,7 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 ## ConnectX-7 Hero Asset
 
-*Procedural modeling & texturing of the 400G NDR network interface card.*
+*Procedural modelling & texturing of the 400G NDR network interface card.*
 
 | | | | |
 | :---: | :---: | :---: | :---: |
@@ -44,7 +44,7 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 ## ASUS Pro WS WRX90E-SAGE SE Hero Asset
 
-*Procedural modeling & texturing of the WRX90E motherboard.*
+*Procedural modelling & texturing of the WRX90E motherboard.*
 
 | | | | |
 | :---: | :---: | :---: | :---: |
@@ -53,7 +53,7 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 ## Noctua NH-D9 TR5-SP6 Hero Asset
 
-*Procedural modeling & texturing of the 4U Threadripper CPU cooler.*
+*Procedural modelling & texturing of the 4U Threadripper CPU cooler.*
 
 | | | | |
 | :---: | :---: | :---: | :---: |
@@ -68,6 +68,15 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 | :---: | :---: | :---: | :---: |
 | ![be quiet! Dark Power Pro 13 - 01](docs/img/psu/psu_01.png) | ![be quiet! Dark Power Pro 13 - 02](docs/img/psu/psu_03.png) | ![be quiet! Dark Power Pro 13 - 03](docs/img/psu/psu_05.png) | ![be quiet! Dark Power Pro 13 - 04](docs/img/psu/psu_06.png) |
 | *be quiet! Dark Power Pro 13 - 01* | *be quiet! Dark Power Pro 13 - 02* | *be quiet! Dark Power Pro 13 - 03* | *be quiet! Dark Power Pro 13 - 04* |
+
+## SilverStone RM44 Chassis Hero Asset
+
+*Procedural modelling & texturing of the 4U industrial server chassis.*
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![SilverStone RM44 - 01](docs/img/chassis_rm44/rm44_01.png) | ![SilverStone RM44 - 02](docs/img/chassis_rm44/rm44_02.png) | ![SilverStone RM44 - 03](docs/img/chassis_rm44/rm44_03.png) | ![SilverStone RM44 - 04](docs/img/chassis_rm44/rm44_04.png) |
+| *SilverStone RM44 - 01* | *SilverStone RM44 - 02* | *SilverStone RM44 - 03* | *SilverStone RM44 - 04* |
 
 ### Key Features
 
@@ -96,7 +105,7 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 
 ### 2. Interactive Digital Twin Frontend (NVIDIA Omniverse)
 
-*The real-time visualization layer and state machine.*
+*The real-time visualisation layer and state machine.*
 
 * **Extension**: `omni.ai.refinery` (Custom Kit App).
 * **Logic**: A robust State Machine that listens to the Python Data Provider, dynamically swapping pre-cached USD VariantSets (Pyro sims, vector streamlines, thermal heatmaps) based on the active operational state.
@@ -191,9 +200,10 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 * **2026-02-09:** Focused development on Hero Asset (Blackwell Rig v1.0), detailing the server front panel and cooler chassis. Implemented external storage strategy (ADR 005).
 * **2026-02-16:** Dedicated sprint to Blackwell Rig GB203 detailing. Standardized asset naming conventions and updated cooling concepts (Forced-Flow & Metrics).
 * **2026-02-23:** Completed blockout of ConnectX-7 NIC and outer chassis panels. Initiated blockout for RTX PRO 4500 GPUs and ASUS Pro WS WRX90E-SAGE SE motherboard.
-* **2026-03-01:** Completed modeling of RTX PRO 4500 Blackwell, baked textures, and successfully exported the USD asset to the `..\assets\_external\usd\rtx_pro_4500` directory.
+* **2026-03-01:** Completed modelling of RTX PRO 4500 Blackwell, baked textures, and successfully exported the USD asset to the `..\assets\_external\usd\rtx_pro_4500` directory.
 * **2026-03-02:** Finalized ConnectX-7 & OSFP network architecture documentation, establishing standards for yellow SMF cabling and visual differentiation. Extensively refined the "Forced-Flow" Digital Twin concept, detailing procedural telemetry interpolation (noise-based heatmaps/LEDs), HUD-driven hierarchical LODs (Hall → Rack → Server), and color-coded velocity streamlines. Added rationale for synthetic data generation and documented the Live Mode placeholder for real-world telemetry integration.
 * **2026-03-17:** Finalised procedural modelling, UV unwrapping, and texturing of the ConnectX-7 Hero Asset across all Levels of Detail (LOD00, LOD01, LOD02, Proxy), and successfully exported the USD asset to the `..\assets\_external\usd\connectx7` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (PCB components, extruded heatsink fins, OSFP connector).
 * **2026-04-06:** Finalised procedural modelling, UV unwrapping, and texturing of the ASUS Pro WS WRX90E-SAGE SE Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\ws_wrx90e` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (I/O Bracket, VRM Block, STR5 Socket, RAM Ports).
 * **2026-04-09:** Finalised procedural modelling and texturing of the Noctua NH-D9 TR5-SP6 CPU cooler Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\cpu_fan` directory. Restructured documentation to establish a unified Hero Asset Gallery and cleansed files of legacy marketing terminology.
 * **2026-04-29:** Finalised procedural modelling and texturing of the be quiet! Dark Power Pro 13 1600W PSU Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\psu` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (LOD 00, LOD 01, and internals).
+* **2026-05-17:** Finalised procedural modelling and texturing of the SilverStone RM44 server chassis Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\chassis_rm44` directory. Integrated final high-resolution renders showcasing the engineering-grade geometry (front mesh panel, internal drive cages, motherboard tray, and rear I/O layout) into the documentation.
