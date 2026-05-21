@@ -1,14 +1,24 @@
 # Case 03 Technical Debt
 
-## [SECURITY] Pip 25.3 Vulnerability (CVE-2026-1703)
+## 1. Unresolved Technical Debt
 
-- **Status:** Mitigation Enforced (Upstream Lock)
+_No open items at the moment._
+
+## 2. Resolved Technical Debt
+
+### [SECURITY] Pip 25.3 Vulnerability (CVE-2026-1703)
+
+- **Status:** Resolved (Upstream Compatibility Released)
 - **Severity:** High (Security) / Critical (Dependency Chain)
 - **Description:**
-  - `case03-env` is running `pip 25.3`, which is flagged for **CVE-2026-1703**.
-  - **Constraint:** We CANNOT upgrade to `pip 26.0+` because it breaks `pip-tools` (current version).
+  - Legacy state: `case03-env` ran `pip 25.3`, flagged by **CVE-2026-1703**.
+  - Resolution: `pip-tools 7.5.3` provides compatibility with `pip 26.x`, so the lock has been removed.
 - **Action Plan:**
-  - [x] **DO NOT UPGRADE PIP** until `pip-tools` releases a compatible fix (ETA Late March 2026).
-  - [ ] **Weekly check for `pip-tools` updates** (Last Check: 2026.04.29).
-    - *Rule: If the current date is more than 7 days past the Last Check date, run `pip index versions pip-tools`. If no update >= 26.0 compatibility is available, update the Last Check date here to today.*
-  - [ ] Once fixed, upgrade `pip` and `pip-tools` simultaneously.
+  - [x] Keep `pip` pinned below 26.0 until compatible `pip-tools` release lands.
+  - [x] Track `pip-tools` releases weekly until compatibility confirmation.
+  - [x] Upgrade `pip` and `pip-tools` in `case03-env` once compatibility is confirmed.
+  - [x] Rebuild dependency lockfile and run validation checks.
+- **Closure Log (2026.05.21):**
+  - Upgraded environment tooling to `pip 26.1.1` and `pip-tools 7.5.3`.
+  - Recompiled `requirements.txt` from `requirements.in` with `pip-compile --upgrade`.
+  - Validation: `pytest` passed (`1 passed`).
