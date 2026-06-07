@@ -188,7 +188,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 * **Python**: 3.10
 * **USD**: 23.11+
-* **Houdini FX**: 21.0.596
+* **Houdini FX**: 21.0.700
 * **NVIDIA Omniverse / Isaac Sim**: 5.1.0
 
 ---
@@ -207,3 +207,4 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 * **2026-04-09:** Finalised procedural modelling and texturing of the Noctua NH-D9 TR5-SP6 CPU cooler Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\cpu_fan` directory. Restructured documentation to establish a unified Hero Asset Gallery and cleansed files of legacy marketing terminology.
 * **2026-04-29:** Finalised procedural modelling and texturing of the be quiet! Dark Power Pro 13 1600W PSU Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\psu` directory. Integrated final high-resolution renders into the documentation to showcase the engineering-grade geometry (LOD 00, LOD 01, and internals).
 * **2026-05-17:** Finalised procedural modelling and texturing of the SilverStone RM44 server chassis Hero Asset, and successfully exported the USD asset to the `..\assets\_external\usd\rm44` directory. Integrated final high-resolution renders showcasing the engineering-grade geometry (front mesh panel, internal drive cages, motherboard tray, and rear I/O layout) into the documentation.
+* **2026-06-07:** Finalised the Blackwell Rig internal cabling pass, including routed PSU/GPU/fan/header cable bundles, colour-coded ties, and braided material treatment for the main high-current runs. Successfully exported the completed cabling asset to the `..\assets\_external\usd\cables` directory.
