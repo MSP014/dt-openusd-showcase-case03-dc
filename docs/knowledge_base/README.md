@@ -13,6 +13,8 @@ The overarching mechanics, definitions, and logics of the Digital Twin.
   Power loads, dimensional guidelines, and Cooling Efficiency Factors (CEF) calculations defining the physical constraints of the 16-rack layout.
 * **[Digital Twin Maturity Levels](./digital_twin_maturity_levels.md)**
   Strategic justification identifying this project precisely as a **Level 1** Digital Twin. *(Includes authoritative PDF reference).*
+* **[Runtime Packaging Guardrail](./runtime_packaging_guardrail.md)**
+  Defines the future viewer/runtime packaging boundary: Houdini remains the production factory, exported USD/cache packages become runtime inputs, and containerisation stays deferred until a minimal local viewer contract exists.
 
 ---
 
