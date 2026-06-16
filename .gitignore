@@ -2,6 +2,7 @@
 
 # --- Internal Protocols & Planning (STRICT PRIVACY) ---
 protocols/
+.codex/
 docs/plans/case 03 - implementation.md
 docs/plans/houdini_usd_export_guidelines.md
 
@@ -65,6 +66,8 @@ venv/
 .pytest_cache/
 
 # --- Tools & System ---
+tool/tmp/
+tools/tmp/
 .idea/
 .vscode/
 *.code-workspace
