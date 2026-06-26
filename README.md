@@ -24,6 +24,19 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
 > **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualisation layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
 
+## Blackwell Rig Airflow Simulation Preview
+
+*Technical viewport preview of the 4U Blackwell Rig GB203 node used as the first airflow validation pass.*
+
+The current simulation pass turns the hero server from a static hardware model into a testable airflow volume: chassis intake, rear exhaust, GPU bodies, CPU cooler, PSU mass, cable bundles, and internal obstructions are all evaluated inside the same simulation domain.
+
+→ [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![Blackwell Rig airflow simulation preview - 01](docs/img/previews/option.1.A.1150.png) | ![Blackwell Rig airflow simulation preview - 02](docs/img/previews/option.1.B.1150.png) | ![Blackwell Rig airflow simulation preview - 03](docs/img/previews/option.1.C.1150.png) | ![Blackwell Rig airflow simulation preview - 04](docs/img/previews/option.1.D.1150.png) |
+| *Simulation domain / intake view* | *Internal airflow obstruction pass* | *Rear exhaust and fan interaction* | *Cable-side airflow validation* |
+
 ## RTX PRO 4500 Hero Asset
 
 *Procedural modelling & texturing of the Blackwell GB203 node.*
@@ -147,7 +160,7 @@ pip install -r requirements.txt
 
 To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) are stored externally.
 
-1. **Download** the Asset Pack: `[LINK_TBD]`
+1. **Download** the Asset Pack: [Google Drive folder](https://drive.google.com/drive/folders/1qV2-NQr9HLf-maKPOiB4z9TwodqvK_sh?usp=sharing)
 2. **Extract** contents to: `assets/_external/`
 3. **Verify** structure:
 
@@ -195,8 +208,8 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ## 📜 Changelog
 
+* **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a testable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport validation frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
 * **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a container-ready runtime packaging guardrail for future viewer delivery.
-
 * **2026-01-22:** Initial repository bootstrap. Established Readme-driven structure: Tech Pack, ADR documentation, pre-commit hooks, and `case03-env` constraints.
 * **2026-02-01:** Finalized Case 03 core concept (AI Inference Refinery) and hardware specification (Blackwell Rig v1.0).
 * **2026-02-09:** Focused development on Hero Asset (Blackwell Rig v1.0), detailing the server front panel and cooler chassis. Implemented external storage strategy (ADR 005).
