@@ -8,7 +8,7 @@
 ## 📋 Project Overview
 
 A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
-Built strictly on the **Sim-to-Real** methodology, this pipeline demonstrates the complete architectural lifecycle: *Geometry Foundation → Synthetic Data Simulation → Live Data Integration → Real-time Telemetry Visualisation*.
+The current repository validates the first production stages of the lifecycle: *Geometry Foundation → Houdini Simulation Cache → USD/OpenVDB Packaging*. The planned runtime stages are documented as architecture contracts and WIP implementation notes: *Synthetic Telemetry → State Switching → Omniverse Visualisation*.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -113,8 +113,8 @@ The system follows a strict separation of concerns:
 Houdini is the closed creative environment of this hybrid pipeline. Houdini project files (`.hip`) are **not distributed** — only the exported outputs are.
 
 * **Geometry**: Server Nodes, Racks, and Data Hall layouts modelled procedurally and exported as USD.
-* **Simulation**: CFD thermal and airflow dynamics computed in Houdini, baked to **VDB caches**. Playback and visualisation of these caches happens inside the Omniverse Extension.
-* **Output**: Optimised USD assets (`.usda`, `.vdb`) consumed by the App at runtime.
+* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, baked to **VDB caches**. Playback and visualisation of these caches is planned for the Omniverse Extension runtime layer.
+* **Output**: Optimised USD assets (`.usda`, `.vdb`) prepared for runtime consumption by the App.
 
 ### 2. Interactive Digital Twin Frontend (NVIDIA Omniverse)
 
