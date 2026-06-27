@@ -37,6 +37,13 @@ The current simulation pass turns the hero server from a static hardware model i
 | ![Blackwell Rig airflow simulation preview - 01](docs/img/previews/option.1.A.1150.png) | ![Blackwell Rig airflow simulation preview - 02](docs/img/previews/option.1.B.1150.png) | ![Blackwell Rig airflow simulation preview - 03](docs/img/previews/option.1.C.1150.png) | ![Blackwell Rig airflow simulation preview - 04](docs/img/previews/option.1.D.1150.png) |
 | *Simulation domain / intake view* | *Internal airflow obstruction pass* | *Rear exhaust and fan interaction* | *Cable-side airflow validation* |
 
+The streamline visualisation pass exposes the velocity-field behaviour more directly, showing the fan-driven flow paths, cooler interactions, exhaust directionality, and turbulence around internal cable and component obstructions.
+
+| | | | |
+| :---: | :---: | :---: | :---: |
+| ![Blackwell Rig airflow streamline preview - 01](docs/img/previews/option.0.0051.A.1124.png) | ![Blackwell Rig airflow streamline preview - 02](docs/img/previews/option.0.0051.B.1124.png) | ![Blackwell Rig airflow streamline preview - 03](docs/img/previews/option.0.0051.C.1124.png) | ![Blackwell Rig airflow streamline preview - 04](docs/img/previews/option.0.0051.D.1124.png) |
+| *Velocity field overview* | *CPU cooler and rear fan flow paths* | *Rear exhaust directionality* | *Cable-side turbulence and intake/exhaust flow* |
+
 ## RTX PRO 4500 Hero Asset
 
 *Procedural modelling & texturing of the Blackwell GB203 node.*
