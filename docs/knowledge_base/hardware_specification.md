@@ -45,6 +45,15 @@ To maximise **high-fidelity hardware visualisation for thermal/airflow storytell
 * **Hardware Shift**: Dropping the 4th GPU reduces node power draw to **~1200W**, increasing PSU efficiency headroom to ~75% (sweet spot).
 * **Verdict**: The **1600W Titanium PSU** provides ample headroom. The decision to use 3 GPUs + 1 NIC solves the physical "PCIe crowding" issue on the ASUS WRX90, ensuring every component has breathing room.
 
+#### 1a. Power Distribution & Redundancy Boundary
+
+* **Facility-Level Resilience:** The 16-rack layout assumes upstream power protection outside the compute racks: facility/row UPS, generator-backed distribution, overhead busway or power cable trays, and tap boxes feeding each rack.
+* **Rack-Level Distribution:** Compute racks have no spare U-space for 1U UPS or rack ATS units. Power enters through rear vertical 0U PDU strips fed from the facility distribution layer, keeping protection and switching hardware outside the occupied 42U envelope.
+* **A/B Load Allocation:** Single-cord compute nodes are distributed across the two rear PDU strips in an alternating pattern: Nodes 01/03/05/07/09 connect to Feed A, while Nodes 02/04/06/08/10 connect to Feed B. This balances rack load and limits a single feed or PDU failure to half of the compute nodes rather than the full rack.
+* **Switch Power Redundancy:** Each QM9700 leaf or spine switch uses 1+1 redundant, hot-swappable power supplies. PSU 1 connects to Feed A and PSU 2 connects to Feed B, so the network fabric remains powered through a single feed or PDU failure.
+* **Node-Level Trade-off:** Each Blackwell Rig GB203 uses a single 1600W PSU, so node-local PSU redundancy is intentionally omitted. A PSU failure removes that node from service; resilience is handled by workload rescheduling across the cluster rather than by hot-swap 1+1 PSUs inside each RM44 chassis.
+* **Design Rationale:** This boundary preserves GPU density, airflow clarity, and the cost-optimised "acceptable compute" premise. It should be represented explicitly in HUD/telemetry as a reliability trade-off, not hidden as an enterprise HA claim.
+
 #### 2. Cooling & Airflow
 
 * **Front-to-Back Airflow**: The SilverStone RM44 is selected specifically for its mesh front. The 4U height allows for large, low-RPM intake fans that create a massive volume of air movement.
@@ -77,9 +86,20 @@ To maximise **high-fidelity hardware visualisation for thermal/airflow storytell
 The choice of the **SilverStone RM44** (consumer chassis) over a barebone sled is driven by the **"Forced Flow"** containment architecture:
 
 * **Sealed Containment:** The rack features a **hermetic Glass Door** (front) and sealed steel side panels and rear wall. All active exhaust is handled by the servers' and switch's own internal fans — no separate exhaust turbine at the top of the rack.
-* **Bottom Feed (Supply-Side Only):** A single **centrifugal supply blower** (blue) mounts in the bottom 1U slot. Its flat 1U diffuser plate sits flush inside the rack and distributes pressurised cold air along the glass door. Its cylindrical turbine body drops down through the raised floor into the underfloor plenum, where it connects to the chilled airduct from the CRAC unit. The turbine height is irrelevant to rack U-space.
+* **Bottom Feed (Supply-Side Only):** A sealed bottom **intake plenum / air guide interface** occupies the bottom 1U slot. It does not contain the active fan hardware; it captures supply air from the raised-floor tile below and redirects it upward along the glass front door.
 * **Forced Trajectory:** The rack acts as a pressurised plenum: cold air streams upward along the glass door and is drawn through the mesh fronts of all 10 servers and the QM9700 switch by their own ~100+ internal fans. Hot exhaust exits through the sealed rear wall into the Hot Aisle and returns to the CRAC via the overhead return duct.
 * **No Top Exhaust Turbine:** The combined airflow capacity of the internal fans (3× Arctic 120 Biome + 2× Arctic P8 + CPU cooler + 3× GPU blowers + 1× PSU fan per server, ×10 servers + 6× QM9700 fans) is sufficient to create the necessary negative pressure at the rear. A red exhaust turbine at the top is architecturally redundant and physically impossible given the fully occupied 42U.
+
+#### Raised-Floor Fan Tile & Bottom Intake Plenum
+
+The rack supply-air concept is based on active raised-floor fan tiles. The reference class is a **JetPanel-style fan-supported raised-floor tile**: a 600×600 mm perforated steel floor tile with integrated EC fans, approximately 39% free surface area, and performance classes around 2700-4000 m3/h per tile. For the full airflow estimate, see the [Rack Airflow Budget](./rack_airflow_budget.md).
+
+For Case 03, the tile is treated as part of the facility floor system, while the rack retains a passive 1U intake interface:
+
+* **Active Floor Layer:** A powered fan tile sits under the cold-side footprint of each compute rack, supplying cold air on demand from the underfloor plenum.
+* **Rack Interface Layer:** The bottom 1U plenum seals against the floor tile area and turns the incoming vertical airflow into a front-door pressure zone.
+* **Serviceability:** Because the fan module belongs to the raised-floor grid, the rack remains mechanically movable and easier to service.
+* **Visual Contract:** Model the active component as a perforated floor tile with a visible EC-fan cassette below the grid, and model the rack component as a blue supply-air guide behind the glass door.
 
 #### Compute Rack U-Space (Final)
 
@@ -87,7 +107,7 @@ The choice of the **SilverStone RM44** (consumer chassis) over a barebone sled i
 | :--- | :--- | :---: |
 | 42U (top) | NVIDIA Quantum-2 QM9700 Leaf Switch | 1U |
 | 41U – 2U | 10× Blackwell Rig GB203 (4U each) | 40U |
-| 1U (bottom) | Supply Blower Diffuser Plate (centrifugal, underfloor turbine) | 1U |
+| 1U (bottom) | Bottom Intake Plenum / Air Guide Interface | 1U |
 | **Total** | **42U — zero free slots** | **42U** |
 
 #### Central Network Rack U-Space (Final)
@@ -100,7 +120,7 @@ The choice of the **SilverStone RM44** (consumer chassis) over a barebone sled i
 | 23U – 20U | NVIDIA UFM Telemetry Appliances (×2 Primary + Standby) | 4U |
 | 19U – 8U | NVMe AI Storage Arrays | 12U |
 | 7U – 2U | *(Reserved — future expansion / cable management panels)* | 6U |
-| 1U (bottom) | Supply Blower Diffuser Plate (centrifugal, underfloor turbine) | 1U |
+| 1U (bottom) | Bottom Intake Plenum / Air Guide Interface | 1U |
 | **Total** | **42U — 6U reserved for expansion** | **42U** |
 
 > [!NOTE]
@@ -133,6 +153,30 @@ To orchestrate the massive RDMA traffic generated by 160 ConnectX-7 NICs, the re
 * **Intra-Node (P2P)**: High-speed memory sharing between the **3 GPUs** via PCIe 5.0. Visualised as rapid flashes within the server case.
 * **Inter-Node (RDMA)**: Distributed memory pooling across the cluster via the Fat-Tree fabric. Visualised as **luminous flows** (Houdini VEX/VOPS) travelling through the overhead yellow cable trays between compute racks and the central Network Rack.
 * **Deployment Scale**: 16 Compute Racks (8 vs 8 arrangement) + 1 Central Network Rack. 160 Nodes total (480 Blackwell GPUs). 21× QM9700 switches (16 Leaf + 5 Spine).
+
+## Blackwell Rig Airflow Simulation Preview
+
+Technical viewport preview of the 4U Blackwell Rig GB203 node used as the first airflow validation pass.
+
+The current simulation turns the hero server from a static asset into a testable airflow volume: front intake, internal component obstruction, CPU cooler flow, rear exhaust fans, PSU exhaust, and cable-side turbulence are represented as separate flow regions.
+
+Video preview: [Blackwell Rig Airflow Simulation Test](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
+
+|  |  |
+| --- | --- |
+| ![Simulation domain / intake view](../img/previews/option.1.A.1150.png) | ![Internal airflow obstruction pass](../img/previews/option.1.B.1150.png) |
+| Simulation domain / intake view | Internal airflow obstruction pass |
+| ![Rear exhaust and fan interaction](../img/previews/option.1.C.1150.png) | ![Cable-side airflow validation](../img/previews/option.1.D.1150.png) |
+| Rear exhaust and fan interaction | Cable-side airflow validation |
+
+The streamline visualisation pass exposes velocity-field behaviour through the server interior and rear cable zone. These frames are used as technical preview material for the airflow look-dev stage before the rack-level simulation is promoted into the Omniverse scene.
+
+|  |  |
+| --- | --- |
+| ![Velocity field overview](../img/previews/option.0.0051.A.1124.png) | ![CPU cooler and rear fan flow paths](../img/previews/option.0.0051.B.1124.png) |
+| Velocity field overview | CPU cooler and rear fan flow paths |
+| ![Rear exhaust directionality](../img/previews/option.0.0051.C.1124.png) | ![Cable-side turbulence and intake/exhaust flow](../img/previews/option.0.0051.D.1124.png) |
+| Rear exhaust directionality | Cable-side turbulence and intake/exhaust flow |
 
 ## 🖼️ Hero Asset Gallery
 

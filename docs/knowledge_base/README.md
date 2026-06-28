@@ -11,6 +11,8 @@ The overarching mechanics, definitions, and logics of the Digital Twin.
   The foundational design document. Explains the "Forced-Flow" aerodynamic logic, the Procedural Telemetry system (Noise/Grades), and the hierarchical HUD-driven Level of Detail (LOD) visualization.
 * **[Hardware Specification](./hardware_specification.md)**
   Power loads, dimensional guidelines, and Cooling Efficiency Factors (CEF) calculations defining the physical constraints of the 16-rack layout.
+* **[Rack Airflow Budget](./rack_airflow_budget.md)**
+  Working airflow estimates for the RM44 nodes, QM9700 switch, and JetPanel-style active raised-floor fan tile feeding the sealed front cold plenum.
 * **[Digital Twin Maturity Levels](./digital_twin_maturity_levels.md)**
   Strategic justification identifying this project precisely as a **Level 1** Digital Twin. *(Includes authoritative PDF reference).*
 * **[Runtime Packaging Guardrail](./runtime_packaging_guardrail.md)**
