@@ -32,6 +32,8 @@ The current simulation pass turns the hero server from a static hardware model i
 
 → [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
+→ See also: [Rack Airflow Budget](./docs/knowledge_base/rack_airflow_budget.md)
+
 | | | | |
 | :---: | :---: | :---: | :---: |
 | ![Blackwell Rig airflow simulation preview - 01](docs/img/previews/option.1.A.1150.png) | ![Blackwell Rig airflow simulation preview - 02](docs/img/previews/option.1.B.1150.png) | ![Blackwell Rig airflow simulation preview - 03](docs/img/previews/option.1.C.1150.png) | ![Blackwell Rig airflow simulation preview - 04](docs/img/previews/option.1.D.1150.png) |
