@@ -1,4 +1,4 @@
-# Case 03: The AI Inference Refinery (Main Concept)
+# Case 03: Hardware Specification & Rack Integration
 
 > [!NOTE]
 > For rules regarding how this hardware is translated into 3D assets (Scale, Instancing, Kinds, Telemetry), refer to the [USD Architecture Guidelines](./usd_architecture/).
