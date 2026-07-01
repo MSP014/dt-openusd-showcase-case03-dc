@@ -1,6 +1,6 @@
 # Case 03: Data Center (AI Inference Refinery) concept
 
-> **Philosophy:** "Reproducible Tech Pack" — A self-contained, data-driven Digital Twin prototype that demonstrates the complete loop from telemetry to physical simulation.
+> **Philosophy:** "Reproducible Tech Pack" — A self-contained, data-driven Digital Twin prototype that demonstrates the loop from telemetry to Houdini-solved simulation caches, USD/OpenVDB packaging, and interactive Omniverse state switching.
 
 ## 1. High-Level Concept: The "Forced-Flow" Inference Refinery
 
@@ -31,7 +31,7 @@
 * **Data Abstraction Layer (Procedural Telemetry Interpolation):** A core pipeline feature of the Digital Twin is transforming sparse, generic telemetry (e.g., standard HWiNFO or Grafana outputs like "Average GPU Temp" or "GPU Hotspot Temp") into highly granular, visually complex "per-component" data.
   * **The Algorithm:** The Python Data Provider takes the generic temperature value and uses a combination of proximity gradients and procedural noise to distribute hypothetical temperatures across the micro-components of the PCB. Components physically closer to the GB203 die (the hotspot) render hotter, while VRAM chips, inductors, and capacitors closer to the cooling turbine or further along the exhaust path render cooler.
   * **LED Traffic Simulation:** This exact same procedural noise engine—which calculates the thermal distribution during X-Ray mode—is repurposed when X-Ray is *inactive* (Normal Mode). It generates chaotic, erratic signals that drive the blinking of the network LEDs on the OSFP (ConnectX-7) and RJ-45 management ports, perfectly simulating heavy network traffic without the overhead of simulating actual data packets.
-* **Physical Correctness:** Aerodynamic and thermal behaviours are pre-simulated (**Fluid Dynamics**) but triggered dynamically.
+* **Physically Informed Flow:** Airflow and thermal behaviours are pre-simulated in Houdini, then triggered dynamically as qualitative engineering visualisation layers. The goal is to expose intake paths, component occlusion, recirculation hints, and heat-source proxies, not to claim a validated CFD benchmark.
 * **Hybrid Visualisation:** Seamless switching between "Photorealistic" (Marketing View) and "Engineering X-Ray" (Technical View), controlled directly via the HUD.
 
 #### 2. Level Rack (Meso): The Containment System
@@ -79,7 +79,7 @@ Navigating *up* (e.g., from Server back to Rack or Hall) simply deselects the cu
 
 #### 1. Level Node (Micro - Server Scale)
 
-* **Normal Mode:** Displays a specific server (e.g., pulled from a rack) with the top cover removed. Omniverse renders the pre-cached Pyro-simulation showing exactly how air moves through the chassis. **HUD overlays** pop up to display precise metrics: temperatures inside the GPUs, CPU, and PSU, alongside specific RPM values for the front chassis fans, rear exhaust fans, the PSU's internal fan, and the CPU cooler.
+* **Normal Mode:** Displays a specific server (e.g., pulled from a rack) with the top cover removed. Omniverse renders the pre-cached airflow layer, making designed intake paths, obstruction zones, recirculation hints, and state-dependent cooling behaviour visible. **HUD overlays** pop up to display precise metrics: temperatures inside the GPUs, CPU, and PSU, alongside specific RPM values for the front chassis fans, rear exhaust fans, the PSU's internal fan, and the CPU cooler.
 * **X-Ray Thermal Mode:** The Pyro smoke is hidden. A highly detailed **Thermal Heatmap** is projected directly onto the intricate internal geometry (extrapolated via the noise/gradient algorithm). To prevent visual clutter, the complex floating HUD numbers are disabled, replaced by a simple, clean temperature color scale (e.g., Blue = 30°C, Red = 95°C).
 * **Velocity Vectors (Streamlines):** A dedicated toggle independent of the mapping. The node's solid geometry transitions into a semi-transparent 'hologram' (utilizing a Fresnel shader or wireframe mesh). Through these translucent guts, the user sees constantly evolving vector lines depicting the airflow. **Color-coding by Velocity:** These lines are colored based on airspeed magnitude—areas where the flow is calm appear Blue or Green (matching the lowest temps on the thermal scale), but as the flow is sucked through the front chassis fans, GPU turbines, CPU coolers, or PSU fans, the lines sharply transition to Red to visualize rapid acceleration.
 
@@ -120,6 +120,7 @@ Pre-calculated assets generated in Houdini (Solaris/PDG).
 
 * **Format:** USD VariantSets.
 * **Matrix:** 12 Cached States (3 LODs x 4 Ops).
+* **Input Contract:** Demo Mode consumes Houdini-solved VDB sequences and streamline caches as controlled, reproducible inputs. The Omniverse visualisation layer is cache/live agnostic, so a future Live Mode can consume externally generated live volumetric/vector-field data without changing the presentation contract.
 * **Artifacts:**
   * `.vdb` (Density/Temperature grids)
   * `.usd` (BasisCurves for streamlines)
@@ -157,7 +158,7 @@ A Kit-based application that assembles the logic.
 
 #### 1.2. Simulation Setup (Dynamic)
 
-* [ ] **CFD / Fluid Sim:** Setup generic "Airflow" VDB sim box.
+* [ ] **Houdini Airflow / VDB Sim:** Setup a qualitative airflow VDB simulation box.
   * [ ] **Input:** Collision geometry from Rack.
   * [ ] **States:**
     * Idle (Laminar, low velocity).
@@ -242,8 +243,9 @@ A Kit-based application that assembles the logic.
 
 ### 1. Pyro: State Caches + Trigger Logic
 
-* All airflow simulations are **pre-baked in Houdini** (Solaris/PDG) into a 12-state matrix: `[Node, Rack, Hall] × [Idle, Nominal, Surge, Critical]`.
-* Cached as USD VariantSets (`.vdb` volumes + `BasisCurves` streamlines) — no live sim at runtime.
+* For Demo Mode, airflow simulations are **pre-baked in Houdini** (Solaris/PDG) into a 12-state matrix: `[Node, Rack, Hall] × [Idle, Nominal, Surge, Critical]`.
+* Cached as USD VariantSets (`.vdb` volumes + `BasisCurves` streamlines) — no live sim is required at runtime for the default demonstration path.
+* Future Live Mode can reuse the same visualisation contract with externally generated live volumetric/vector-field data.
 * State transitions use a **5-frame Cross-Dissolve** on the Pyro Shader layer (Fade-Out old / Fade-In new), applied only to the visual layer; static geometry is never touched.
 * The Omniverse Kit State Machine listens to the Data Provider and triggers the appropriate VariantSet swap.
 
