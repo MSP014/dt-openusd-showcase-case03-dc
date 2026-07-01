@@ -18,7 +18,7 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 >
 > → [📚 Knowledge Base Hub (Index)](./docs/knowledge_base/README.md) · [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
-Unlike traditional linear animation, this ecosystem is a **State Machine**. It simulates the facility's physical response in real-time based on normalised telemetry data.
+Unlike traditional linear animation, this ecosystem is structured as a **State Machine**. Runtime telemetry drives interactive visual responses: precomputed airflow caches, streamlines, heatmaps, lighting, and HUD cues can switch by operational state instead of being locked to a fixed shot.
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
@@ -26,9 +26,13 @@ Unlike traditional linear animation, this ecosystem is a **State Machine**. It s
 
 ## Blackwell Rig Airflow Simulation Preview
 
-*Technical viewport preview of the 4U Blackwell Rig GB203 node used as the first airflow validation pass.*
+*Technical viewport preview of the 4U Blackwell Rig GB203 node used as the first airflow layout validation pass.*
 
 The current simulation pass turns the hero server from a static hardware model into a testable airflow volume: chassis intake, rear exhaust, GPU bodies, CPU cooler, PSU mass, cable bundles, and internal obstructions are all evaluated inside the same simulation domain.
+
+These Houdini-solved airflow caches are the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. They are not presented as a validated CFD benchmark; the goal is a qualitative engineering visualisation layer that makes intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
+
+The Omniverse runtime is intentionally cache/live agnostic: the same visualisation layer can consume precomputed VDB sequences for Demo Mode or externally generated live volumetric/vector-field data for a future Live Mode. In that sense, cached airflow plays the same role as synthetic telemetry: it proves the pipeline now without narrowing the final digital-twin architecture.
 
 → [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
