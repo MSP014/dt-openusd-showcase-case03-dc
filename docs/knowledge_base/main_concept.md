@@ -133,6 +133,7 @@ A Kit-based application that assembles the logic.
 * **State Machine:** Listens to Data Provider.
 * **USD Composition:** Swaps active VariantSets / attributes based on State.
 * **UI:** Viewport-embedded HUD panel (`omni.ui.scene` overlay) for state control and telemetry readout.
+* **Template Reference Boundary:** `E:\omniverse_kit_app` may be inspected as a read-only NVIDIA Omniverse Kit App Template reference for app structure, extension layout, launch/build workflow, and startup/controller patterns. The template folder is not authored Case 03 content and must not receive Case 03 USD/VDB assets, documentation, or source files unless a specific integration task is approved.
 
 ---
 

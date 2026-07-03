@@ -188,6 +188,16 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 > *Coming Soon: Instructions for launching the Omniverse Extension*
 
+### 4. Local Omniverse Reference
+
+`E:\omniverse_kit_app` is a read-only local reference copy of NVIDIA Omniverse
+Kit App Template and the generated `msp.case03.blackwell` test application. It
+may be inspected to understand Omniverse Kit app structure, extension layout,
+build/launch workflow, startup/playback/controller patterns, and future runtime
+viewer architecture. Do not modify this folder, do not treat it as authored Case
+03 content, and do not mix project assets or documentation into it unless
+explicitly instructed.
+
 ---
 
 ## 📂 Repository Structure
