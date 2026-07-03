@@ -10,7 +10,7 @@ The goal is to build the rack as an engineering container for airflow, power, ca
 
 ## Modelling Rule
 
-Finish the current rail latch because it is already nearly complete and can be reused procedurally. After that, freeze micro-detail work until the full rack reads correctly as:
+The reusable rail latch module is complete enough for the rack blockout and can be reused procedurally. Freeze further rail-latch micro-detail work until the full rack reads correctly as:
 
 ```text
 rack frame
@@ -72,8 +72,8 @@ This is the short operational checklist for the current modelling pass. Update i
 
 Immediate next steps:
 
-- [ ] Lock the geometry datum and U-space coordinate system.
-- [ ] Finish the reusable rail latch detail.
+- [x] Lock the geometry datum and U-space coordinate system.
+- [x] Finish the reusable rail latch detail.
 - [ ] Build the inner cabinet skeleton / support frame.
 - [ ] Add attachment brackets between the inner skeleton and the 19-inch mounting-post core.
 - [ ] Add door and side-panel mounting edges on the cabinet skeleton.
@@ -120,9 +120,9 @@ Block the rack as a measurable engineering volume.
 
 - [x] 42U rack bounding box.
 - [x] Front/cold side and rear/hot side orientation markers.
-- [ ] External cabinet envelope datum.
-- [ ] Raised-floor top datum.
-- [ ] Internal 42U mounting-envelope datum.
+- [x] External cabinet envelope datum.
+- [x] Raised-floor top datum.
+- [x] Internal 42U mounting-envelope datum.
 - [ ] U1-U42 coordinate labels tied to the mounting-post core.
 - [x] Internal depth zones:
   - [x] Glass door zone.
@@ -163,7 +163,7 @@ Populate the rack with proxy/detail assets at the correct scale.
 - [x] 1x QM9700 leaf switch placeholder in the top 1U slot.
 - [ ] QM9700 medium-detail rack model.
 - [x] Sliding rail base assemblies for each server.
-- [ ] Reusable rail latch final detail.
+- [x] Reusable rail latch final detail.
 - [ ] Procedural U-number markings on front mounting rails.
 - [ ] Minimal rack screws or cage-nut hints only where visible.
 
@@ -329,7 +329,7 @@ Do not route the hot-air hood through the same physical space needed by the QM97
 
 Promote small details only after the full rack reads correctly.
 
-- [ ] Final rail latch detail.
+- [x] Final rail latch detail.
 - [ ] Refined visible captive fasteners.
 - [ ] Small mounting brackets.
 - [ ] Refined visible panel seams.
