@@ -162,7 +162,7 @@ The project relies on a specific Conda environment (`case03-env`) to ensure repr
 
 ```bash
 # Create and activate environment
-conda create -n case03-env python=3.10
+conda create -n case03-env python=3.11.15
 conda activate case03-env
 
 # Install dependencies
@@ -212,15 +212,16 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ## 📜 Technical Stack
 
-* **Python**: 3.10
-* **USD**: 23.11+
-* **Houdini FX**: 21.0.700
-* **NVIDIA Omniverse / Isaac Sim**: 5.1.0
+- **Python**: 3.11.15
+- **Houdini**: 21.0.729 (PDG, Pyro, Fluid)
+- **Nvidia Omniverse**: 110.1.2
+- **Conda**: Environment isolation (`case03-env`)
 
 ---
 
 ## 📜 Changelog
 
+* **Week of 29 June, 2026:** Advanced Case 03 from node-scale airflow proof toward rack-level production planning, added Omniverse MCP helper tooling, clarified the visualisation contract, and migrated the project baseline to Python 3.11.15.
 * **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a testable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport validation frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
 * **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a container-ready runtime packaging guardrail for future viewer delivery.
 * **2026-01-22:** Initial repository bootstrap. Established Readme-driven structure: Tech Pack, ADR documentation, pre-commit hooks, and `case03-env` constraints.
