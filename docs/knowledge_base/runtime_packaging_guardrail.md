@@ -61,6 +61,12 @@ respect:
 * **Simulation data is not live runtime simulation.** Airflow and thermal
   behaviour are expected to be precomputed in Houdini and consumed as exported
   USD/VDB/curve/cache artefacts.
+* **Kit app template references are not content.** The local
+  `E:\omniverse_kit_app` folder is a read-only reference copy of NVIDIA
+  Omniverse Kit App Template and the generated `msp.case03.blackwell` test
+  application. It can inform app structure, extension layout, build/launch
+  workflow, startup/playback/controller patterns, and future runtime viewer
+  architecture, but it is not part of the authored Case 03 content repository.
 
 Therefore the first runtime package should consume existing exports. It should
 not require Houdini, raw production scenes, or workstation-specific absolute
@@ -136,6 +142,11 @@ The likely future runtime can still be described as layers:
 The first implementation may be a local Omniverse runtime rather than a web
 application. A web frontend, render-streaming service, or multi-container stack
 should be introduced only when there is a concrete viewer to wrap.
+
+Local Kit template inspection is allowed during this phase, but template code,
+generated app files, repo tooling, USD/VDB assets, and documentation must not be
+mixed between `E:\omniverse_kit_app` and this repository unless a specific
+integration task is approved.
 
 ---
 
