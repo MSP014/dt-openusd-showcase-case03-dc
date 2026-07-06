@@ -7,6 +7,9 @@ The application layer consumes the USD/VDB asset package and owns the
 interactive runtime experience: viewport presentation, status UI, future
 telemetry controls, operational state switching, and scene-level review tools.
 
+Use `start_bms.bat` from this directory to launch the current local Kit runtime
+when a built Omniverse Kit App Template release is available.
+
 This layer is part of the Case 03 tech pack. The tech pack includes the
 documentation, USD contracts, asset packaging rules, validation tools,
 development helpers, and the Blackwell Monitoring Suite runtime.

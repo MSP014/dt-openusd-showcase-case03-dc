@@ -194,7 +194,36 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ### 3. Running the App
 
-> *Coming Soon: Instructions for launching Blackwell Monitoring Suite v0.1*
+Blackwell Monitoring Suite v0.1 launches as a dedicated Omniverse Kit
+application config. The quickest local launch path is:
+
+```powershell
+.\src\blackwell_monitoring_suite\start_bms.bat
+```
+
+Use `.\src\blackwell_monitoring_suite\start_bms.bat --check` to verify the
+resolved Kit paths without launching the app.
+
+The launcher uses `BMS_KIT_RELEASE` or `KIT_RELEASE` when either environment
+variable is set. If neither is set, it searches the current drive for a built
+Kit App Template release directory.
+
+For an explicit manual launch, point `$kitRelease` at a built Omniverse Kit App
+Template release directory:
+
+```powershell
+$kitRelease = "path\to\kit-app-template\_build\windows-x86_64\release"
+& "$kitRelease\kit\kit.exe" `
+  ".\src\blackwell_monitoring_suite\apps\blackwell_monitoring_suite.v0.1.kit" `
+  --ext-folder "$kitRelease\exts" `
+  --ext-folder "$kitRelease\extscache" `
+  --ext-folder "$kitRelease\apps"
+```
+
+The Stage 1 runtime reads
+`configs/blackwell_monitoring_suite.v0.1.toml`, resolves the hydrated asset
+package under `assets/_external/`, and opens the configured Noctua NH-D9
+TR5-SP6 CPU cooler asset in the RTX viewport.
 
 ---
 
