@@ -11,8 +11,8 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and planning documents in progress. The Blackwell
-Monitoring Suite application itself is not implemented yet.
+external asset layout, planning documents in progress, and the first runnable
+Blackwell Monitoring Suite asset-preview slice.
 
 Current decisions already made:
 
@@ -31,6 +31,10 @@ Jira tracking:
 - Runtime epic: `DC-38` - Blackwell Monitoring Suite Runtime.
 - Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
 - Active implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
+- When a delivery stage is completed, update the matching Jira task before
+  moving to the next stage: add a concise completion comment, log the actual
+  work time, move the task through Review to Done, run Jira sync, and mark the
+  next stage task In Progress when work on that stage starts.
 
 The local authoring and tooling environment still uses `case03-env`. Blackwell
 Monitoring Suite runtime code, however, runs inside Kit's Python environment
@@ -44,10 +48,10 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Start with Stage 1 only: create the smallest runnable Blackwell Monitoring
-Suite v0.1 surface that reads runtime config, opens the configured Noctua
-NH-D9 TR5-SP6 USD asset, shows it in the Kit RTX viewport, and reports load
-status.
+Close Stage 1 implementation hygiene, then move to Stage 2 only. Stage 1 now
+launches Blackwell Monitoring Suite v0.1, reads runtime config, opens the
+configured Noctua NH-D9 TR5-SP6 USD asset, shows it in the Kit RTX viewport,
+and reports load status.
 
 Do not implement canonical Case 03 stage loading, camera bookmarks, scene
 groups, diagnostics, workload modes, recording tools, or telemetry until the
@@ -183,11 +187,11 @@ from making future capabilities sound like v0.1 requirements.
 
 | Capability | First Stage | v0.1 Status |
 | :--- | :--- | :--- |
-| Dedicated BMS app launch | Stage 1 | Required |
-| Runtime TOML config loading | Stage 1 | Required |
-| Hydrated asset path resolution | Stage 1 | Required |
-| Noctua CPU cooler USD load | Stage 1 | Required |
-| Basic load/render/runtime status | Stage 1 | Required |
+| Dedicated BMS app launch | Stage 1 | Implemented |
+| Runtime TOML config loading | Stage 1 | Implemented |
+| Hydrated asset path resolution | Stage 1 | Implemented |
+| Noctua CPU cooler USD load | Stage 1 | Implemented |
+| Basic load/render/runtime status | Stage 1 | Implemented |
 | Review lighting preset | Stage 2 | Future |
 | Synthetic telemetry values | Stage 3 | Future |
 | Fan motion driven by telemetry | Stage 4 | Future |
@@ -479,9 +483,17 @@ The application should be built in small slices that keep Blackwell Monitoring
 Suite runnable after each step. Each stage carries its own completion rule; no
 separate "first slice acceptance" ceremony is needed.
 
+At the end of each stage, update the linked Jira task before starting the next
+stage. The update should record what shipped, any validation performed, and the
+actual time spent; then the task should move through the available workflow to
+Done. The next stage task should only be moved to In Progress when active work
+on that stage begins.
+
 ### Stage 1 - Blackwell Monitoring Suite v0.1 Asset Preview Slice
 
 Jira: `DC-40`
+
+Status: implemented locally.
 
 Build the smallest useful app surface: launch Blackwell Monitoring Suite v0.1,
 show the RTX viewport, load one configured USD asset from the hydrated asset
@@ -491,6 +503,17 @@ TR5-SP6 CPU cooler exported at `assets/_external/usd/cpu_fan/cpu_fan.usd`.
 Done when the selected asset is visible in the viewport, the load path/result is
 visible in status, and the slice does not require a hidden absolute workstation
 path.
+
+Implementation notes:
+
+- The app launches through `src/blackwell_monitoring_suite/start_bms.bat` or a
+  direct Kit invocation with the BMS `.kit` file.
+- The runtime config is `configs/blackwell_monitoring_suite.v0.1.toml`.
+- The extension id is `msp.bw.monitoring`.
+- The current default asset is `usd/cpu_fan/cpu_fan.usd` under the hydrated
+  external asset package.
+- Runtime review camera and light helpers are created in the session layer so
+  the hydrated asset is not modified.
 
 ### Stage 2 - Look Review Slice
 

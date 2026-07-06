@@ -1,0 +1,13 @@
+[package]
+title = "Blackwell Monitoring Suite"
+version = "0.1.0"
+description = "Stage 1 runtime controls for the Case 03 OpenUSD viewer."
+category = "Viewer"
+keywords = ["openusd", "kit", "viewer", "runtime"]
+
+[dependencies]
+"omni.kit.uiapp" = {}
+"omni.kit.viewport.window" = {}
+
+[[python.module]]
+name = "msp.bw.monitoring"

@@ -1,0 +1,15 @@
+[app]
+name = "Blackwell Monitoring Suite"
+version = "0.1"
+
+[paths]
+app_root = "src/blackwell_monitoring_suite"
+asset_root = "../../assets/_external"
+
+[assets]
+default_asset_id = "noctua_nh_d9_tr5_sp6"
+
+[assets.entries.noctua_nh_d9_tr5_sp6]
+label = "Noctua NH-D9 TR5-SP6"
+path = "usd/cpu_fan/cpu_fan.usd"
+kind = "usd_stage"

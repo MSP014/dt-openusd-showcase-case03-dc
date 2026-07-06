@@ -1,0 +1,68 @@
+[package]
+title = "Blackwell Monitoring Suite"
+version = "0.1.0"
+description = "Case 03 OpenUSD runtime viewer for staged asset review."
+keywords = ["app", "openusd", "omniverse", "viewer"]
+
+[dependencies]
+"omni.activity.profiler" = {}
+"omni.activity.pump" = {}
+"omni.hydra.rtx" = {}
+"omni.kit.loop-default" = {}
+"omni.kit.mainwindow" = {}
+"omni.kit.manipulator.camera" = {}
+"omni.kit.renderer.core" = {}
+"omni.kit.uiapp" = {}
+"omni.kit.viewport.ready" = {}
+"omni.kit.viewport.utility" = {}
+"omni.kit.viewport.window" = {}
+"omni.kit.window.status_bar" = {}
+"msp.bw.monitoring" = { order = 1000 }
+
+[settings.persistent.app]
+viewport.autoFrame.mode = "first_open"
+
+[settings.app]
+content.emptyStageOnStart = true
+fastShutdown = true
+name = "Blackwell Monitoring Suite"
+renderer.skipWhileMinimized = true
+titleVersion = "0.1"
+
+[settings.app.environment]
+name = "Blackwell Monitoring Suite"
+
+[settings.app.exts.folders]
+'++' = [
+    "${app}/../ext",
+]
+
+[settings.app.file]
+ignoreUnsavedOnExit = true
+
+[settings.app.font]
+file = "${fonts}/OpenSans-SemiBold.ttf"
+size = 16
+
+[settings.app.viewport.defaults]
+fillViewport = true
+guide.axis.visible = false
+guide.grid.visible = false
+
+[settings.app.window]
+title = "Blackwell Monitoring Suite"
+width = 1920
+height = 1080
+x = -1
+y = -1
+
+[settings.exts."msp.bw.monitoring"]
+autoLoad = true
+configPath = "${app}/../../../configs/blackwell_monitoring_suite.v0.1.toml"
+sourceRoot = "${app}/.."
+
+[settings]
+crashreporter.compressDumpFiles = true
+renderer.enabled = "rtx"
+renderer.multiGpu.enabled = true
+rtx.ecoMode.enabled = true
