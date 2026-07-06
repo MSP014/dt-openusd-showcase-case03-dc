@@ -39,7 +39,47 @@ When telemetry attributes are authored in Houdini:
 - validate the exported data with `pxr` or Omniverse before wiring runtime UI
   to it.
 
-## 4. Runtime Direction
+If a future stage needs placeholder values at export time, author static values
+only. Do not animate these attributes in Houdini for BMS runtime behaviour.
+
+Example placeholder intent:
+
+```c
+// SOP or LOP wrangle intent: static export value, overwritten at runtime.
+f@telemetry:tempC = 20.0;
+```
+
+## 4. Addressable Thermal Components
+
+Every object that needs an independent telemetry value must have a unique USD
+path. In Houdini, create stable `name` values or explicit hierarchy before
+export, especially for repeated parts such as GPU dies, VRAM chips, VRMs,
+capacitors, inductors, and fan blades.
+
+When a heat-significant surface needs a visible thermal gradient, give that
+surface enough topology for interpolation. A single large polygon can only show
+a flat value. For later heatmap stages, chip top faces may need a small polygon
+grid so centre-hot and edge-cool values can interpolate cleanly.
+
+Aggregate telemetry values can still map to multiple visual prims. For example,
+a provider may report one `gpu_01_vram_tempC` value while the runtime
+distributes it across `VRAM_01`, `VRAM_02`, and similar prims with stable
+per-chip offsets. Those offsets should use deterministic seeds so the visual
+state does not flicker frame to frame.
+
+## 5. Fan RPM and Visual Rotation
+
+Fans should be exported as static, independently addressable prims with pivots
+centred on their rotation axes. Blackwell Monitoring Suite can then drive
+rotation from telemetry while keeping the visual motion readable.
+
+True fan RPM is data, not necessarily the displayed angular speed. At 30 or 60
+FPS, physically accurate RPM can create strobing, stationary-looking blades, or
+backwards apparent motion. The runtime may clamp or remap RPM to a pleasing
+visual speed, add phase offsets between repeated fans, or use motion blur while
+still preserving the real telemetry value for UI and state logic.
+
+## 6. Runtime Direction
 
 Blackwell Monitoring Suite should treat telemetry as runtime data, not as a DCC
 timeline.

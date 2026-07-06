@@ -61,7 +61,25 @@ When scale requires them:
 - `instanceable = true` should live on instance pointers, not on the shared
   prototype asset itself.
 
-## 5. Materials
+## 5. Export and Runtime Mutation Boundary
+
+Houdini exports should describe clean, static authored assets. Blackwell
+Monitoring Suite should apply runtime state on top of those assets.
+
+For runtime-addressable moving or monitored parts:
+
+- export separate prims for parts that need independent control;
+- keep stable, readable prim paths;
+- set pivots at the physical rotation or transform origin before export;
+- do not bake DCC timeline animation into parts that BMS will drive from
+  telemetry.
+
+For fans, this means the blade geometry should be a separate addressable prim
+with its pivot centred on the fan axis. The runtime may then map true RPM values
+to a visually stable rotation speed without fighting Houdini-authored
+animation.
+
+## 6. Materials
 
 Current assets may ship with practical material structure as exported from
 Houdini, provided all texture/material paths are portable.
@@ -69,7 +87,7 @@ Houdini, provided all texture/material paths are portable.
 Centralized material libraries remain a future-scale recommendation when the
 same material families are shared across many assets.
 
-## 6. Telemetry
+## 7. Telemetry
 
 Telemetry primvars are future runtime data bindings. They are not required for
 v0.1 asset preview.
