@@ -1,35 +1,46 @@
-# Guideline 05: Centralized Materials Library
+# Guideline 05: Materials and Texture Portability
 
-We are operating with an industrial "Single Source of Truth" logic for our visual assets, strictly avoiding a scattered "game-dev" texturing approach where every asset holds its own internal folder of maps.
+Material organization must support portable OpenUSD assets and future
+large-scale look development without blocking the current staged runtime.
 
-In large-scale Omniverse scenes, duplicating the same physical property (e.g., "Polished Black Server Rack Metal") across a multitude of individual Component USDs creates severe overhead. It makes mass-updates physically impossible without destructive bulk-edits.
+## 1. Current Baseline
 
-## 1. The Global Library Paradigm
+For the current asset-preview stage:
 
-There is **one** master materials file for the Case 03 Datacenter: `materials_library.usda` (or `.usdc`). This strictly stores Shader Graphs in OpenUSD.
+- material and texture paths must be relative or explicitly configurable;
+- no material binding should depend on a workstation-only absolute path;
+- Houdini-exported material structure is acceptable if it renders correctly in
+  Omniverse and stays portable;
+- texture payloads remain under the hydrated external asset package.
 
-To comply with the Master USD Contract:
+## 2. Future Shared Material Library
 
-* All material architectures sit centrally in the `materials/` directory of the project path.
-* **Every single 3D asset** generated in Houdini (from the screws to the 42U Server Racks) must reference their surface definitions *exclusively* from this target file.
-* All associated bitmap textures (Albedo, Roughness, Normal) must be rigorously separated and stored exclusively in a sister `textures/` directory.
-* Do not allow the material `.usda` file to become a dumping ground for `.png` files.
+A centralized material library becomes useful when many assets share the same
+material families, such as rack metal, plastic, glass, PCB surfaces, labels, or
+cooling hardware.
 
-## 2. Omniverse Nucleus-Friendly Binding
+When that scale arrives, the target is:
 
-Prefix your materials internally with `m_` within the central library (e.g., `m_PolishedSteel_Rack`, `m_MattePlastic_Fan`).
+- shared material definitions in a stable material layer;
+- reusable material names;
+- texture files separated from material graph definitions;
+- relative bindings from component assets to shared materials.
 
-By assigning all 160 servers to `m_PolishedSteel_Rack`, we unlock global updates. If the art director requests the servers appear sleeker, adjusting the roughness parameter *once* in `materials_library.usda` instantly updates it across the entire datacenter.
+This is a target architecture, not a v0.1 requirement.
 
-> [!TIP]
-> **Houdini Implementation:**
-> When configuring the `Material Library` LOP and exporting from Solaris, explicitly strip local USD textures and write the **relative material path** (e.g., `../materials/materials_library.usd`). This structure guarantees seamless transport across workstations and Omniverse Nucleus servers without broken absolute `C:/` drives.
+## 3. Houdini Export Guidance
 
----
+When using Solaris Material Library LOPs:
 
-## ✅ Definition of Done (DoD)
+- prefer relative paths;
+- avoid embedding workstation-local texture paths;
+- keep material bindings inspectable in USD;
+- test the exported asset in Omniverse before treating the material layout as
+  runtime-ready.
 
-* [ ] No local `materials/` folders exist nested inside individual Component asset folders.
+## Definition of Done
 
-* [ ] Material definitions (`.usda`/`.usdc`) and their raw Maps (`.png`/`.exr`) are physically split into two distinct root project folders.
-* [ ] Material Bindings on Component references trace back through relative cross-directory links (e.g., `../materials/...`).
+- The asset renders in Omniverse without missing material or texture paths.
+- Material and texture paths survive repo relocation and asset hydration.
+- Shared material libraries are introduced only when they reduce real
+  duplication or make lookdev updates easier.

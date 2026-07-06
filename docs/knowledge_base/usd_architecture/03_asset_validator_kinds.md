@@ -1,35 +1,51 @@
-# Guideline 03: Asset Validator Kinds (Hierarchy)
+# Guideline 03: Asset Validator Kinds and Hierarchy
 
-The **Asset Validator** in Omniverse is the overarching quality-control tool that ensures our scene will not break downstream automation or UX selection. The most common error in mechanical assemblies relates to **Kinds** (metadata tags identifying what a prim functionally represents).
+Kinds are metadata hints that help Omniverse and USD tools understand what a
+prim represents. They matter most when the scene grows from individual assets to
+server, rack, and data hall assemblies.
 
-## 1. Project UX Rule
+## 1. Current Baseline
 
-To ensure a clean UI selection experience and pass project validation, we enforce the following structural guideline: **A `Component` or `Subcomponent` must live inside a `Group` or an `Assembly`.**
+For v0.1, the main requirement is readable hierarchy and stable prim names for
+runtime-addressable parts.
 
-### Definitions for Case 03
+The CPU cooler asset already exposes meaningful structure such as:
 
-* **Group:** A logical collection of assemblies. Example: `/World/Datacenter/Row_A`
-* **Assembly:** A collection of components that form a system. Example: `/World/Datacenter/Row_A/Rack_05`
-* **Component:** An indivisible piece of *primary* equipment. Example: `/World/Datacenter/Row_A/Rack_05/Server_12`
-* **Subcomponent:** Critical internals requiring independent selection/inspection. Example: `/World/Datacenter/Row_A/Rack_05/Server_12/GPU_01`
+```text
+/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades
+```
 
-### Why This Matters
+This is enough for Stage 1 asset preview and gives Stage 4 a candidate fan
+blade prim for telemetry-driven rotation once pivot and axis are checked.
 
-Without `Subcomponent`, clicking the GPU selects the whole server. Without `Assembly`, clicking the rack might randomly select a single screw. When Kinds are configured perfectly, clicking anywhere on the rack highlights the entire `Assembly` by default.
+## 2. Future Hierarchy Target
 
-> [!TIP]
-> **Houdini Implementation:**
-> Do not leave USD prims untagged. Use the `Configure Primitive` node in Solaris:
->
-> 1. Select your top-level rack group -> Set Kind to `Assembly`.
-> 2. Select the individual server instances -> Set Kind to `Component`.
-> 3. Select internals (ConnectX-7, Blackwell VMs) -> Set Kind to `Subcomponent`.
+As full server and rack scenes mature, use a clear hierarchy:
 
----
+- **Group:** logical collection of assemblies, such as a row or data hall zone.
+- **Assembly:** a system made of components, such as a rack.
+- **Component:** a primary equipment unit, such as a server or switch.
+- **Subcomponent:** an internal part that needs independent review, such as a
+  GPU, NIC, PSU, fan, or CPU cooler.
 
-## ✅ Definition of Done (DoD)
+## 3. Why This Matters
 
-* [ ] Running the Asset Validator in Omniverse yields zero `KindChecker` errors.
+Good hierarchy keeps selection predictable and makes future review controls
+possible. A reviewer should be able to focus a server, rack, GPU, or fan without
+digging through anonymous meshes.
 
-* [ ] Double-clicking a server rack in the Viewport selects the `Assembly`, not an internal mesh.
-* [ ] Individual GPUs or NICs are tagged as `Subcomponent` allowing focused inspection.
+## 4. Houdini Implementation
+
+Use Solaris `Configure Primitive` where appropriate:
+
+1. Tag rack or system roots as `Assembly`.
+2. Tag server or device roots as `Component`.
+3. Tag important internals as `Subcomponent`.
+
+Do this when the asset hierarchy is stable enough to justify the metadata.
+
+## Definition of Done
+
+- Runtime-addressable parts have stable, readable prim paths.
+- Full server/rack scenes eventually pass relevant Omniverse validation checks.
+- Kind metadata is added deliberately where it improves selection and review.

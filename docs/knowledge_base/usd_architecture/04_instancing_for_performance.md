@@ -1,39 +1,55 @@
 # Guideline 04: Instancing for Performance
 
-When assembling highly repetitive architecture (e.g., 160 GB203 server nodes inside identical 42U racks), we must eliminate standard geometry references and enforce **USD Instancing**.
+Instancing is a future-scale optimization for repeated servers, racks, and
+other high-count assets. It is not required for Blackwell Monitoring Suite v0.1.
 
-> [!WARNING]
-> Without instancing, a Digital Twin datacenter will quickly choke both RAM and GPU memory.
+## 1. Current Baseline
 
-## 1. Instancing Architecture Contract
+The v0.1 CPU cooler asset preview should prioritize correctness, readable
+hierarchy, path portability, and stable rendering in Omniverse.
 
-Instancing is USD's solution to repetitive loading. It loads a single **Prototype** (the blueprint) and generates 160 lightweight **Instances** (pointers) to it.
+Do not introduce instancing until the scene scale makes it necessary.
 
-To execute this correctly, adhere to this hierarchy:
+## 2. Future Instancing Target
 
-1. **The Prototype:** Store the heavy asset (the Component USD) under a designated prototype scope (e.g., `/World/Prototypes/Server_GB203`).
-2. **The Payload:** The heavy geometry Payload must be loaded *inside* this Prototype.
-3. **The Instances:** Generate the 160 layout pointers (e.g., `/World/Row_A/Rack_1/Server_...`). **This** is where the `instanceable = true` flag is placed. Never place it on the Prototype itself.
+When Case 03 reaches rack and data hall scale, repeated server nodes should be
+composed with USD instancing or point instancing where it meaningfully reduces
+memory and scene load cost.
 
-## 2. Material Overrides on Instances (Primvars)
->
-> [!IMPORTANT]
-> If we instance 160 servers, they geometrically share the same Prototype and material. Point Instancing does not natively allow direct material changes per-instance.
+Recommended structure:
 
-To visualize dynamic data (e.g., a Thermal Heatmap where Server A glows red and Server B stays blue), we must use **Primitive Variables (Primvars)**.
+1. **Prototype:** shared heavy asset under a stable prototype scope, such as
+   `/World/Prototypes/Server_GB203`.
+2. **Payload:** heavy geometry loaded inside the prototype when lazy loading is
+   useful.
+3. **Instances:** layout pointers under rows/racks/nodes with
+   `instanceable = true` on the pointers, not the prototype asset.
 
-* Author `primvars:displayColor` or custom namespace primvars on the instance points in Houdini.
-* The Hydra render engine dynamically reads these primvars at render-time and passes them into the shader attached to the Prototype, allowing identical instances to render with unique visual states.
+## 3. Per-Instance Visual Data
 
-## 3. Dynamic Simulation Restriction
+If repeated instances need unique visual state, such as heatmap color or
+workload status, use runtime-readable data bindings rather than duplicating
+geometry.
 
-If simulating airflow VDBs, exhaust particulate matter, or dynamic heat fields, each rack has a unique thermal profile. **Do not instance volatile simulation data.** Treat fluid/gas dynamics as unique Per-Asset logic.
+Candidate approaches:
 
----
+- primvars on instance points;
+- authored per-instance attributes;
+- material parameters driven by runtime state;
+- external telemetry mapping in Blackwell Monitoring Suite.
 
-## ✅ Definition of Done (DoD)
+The exact approach becomes mandatory only when workload, telemetry, or scale
+navigation stages need it.
 
-* [ ] The `instanceable=true` tag is verified on all 160 Server Reference pointers, not the Prototype.
+## 4. Simulation Data
 
-* [ ] Memory footprint confirms prototype geometry is loaded exactly once by the renderer.
-* [ ] Heatmap visualizers successfully read `primvars:` data to colorize physically identical instances differently.
+Do not instance volatile simulation data blindly. Airflow, heat, smoke, and
+streamline caches may need unique layers per rack, state, or scene scale.
+
+## Definition of Done
+
+- v0.1 does not add instancing just for architecture purity.
+- Future repeated server/rack layout proves memory benefit before instancing is
+  treated as mandatory.
+- Instance-specific visual state has a documented data path before it appears
+  in the runtime.

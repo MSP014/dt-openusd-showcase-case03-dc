@@ -1,48 +1,62 @@
 # Guideline 02: Payloads, References, and LODs
 
-Managing memory and rendering performance is the most critical challenge when assembling 160 high-density server racks. We solve this using two orthogonal USD mechanics working together: **Composition Arcs** (RAM optimization) and **Purposes** (GPU optimization).
+This guideline separates the current staged runtime baseline from the future
+large-scale data center target.
 
----
+Blackwell Monitoring Suite v0.1 only needs to load one configured asset from
+the hydrated asset package. Payload-heavy rack composition and LOD switching
+become mandatory only when the runtime reaches server, rack, and data hall
+scale.
 
-## 1. Composition: References vs. Payloads (RAM Optimization)
+## 1. Current Baseline
 
-This dictates *when* a file is loaded into the system's active memory.
+- Heavy assets remain under `assets/_external/`.
+- Paths must be relative or explicitly configurable.
+- LOD variants should stay disabled or deferred until LOD00 is stable in
+  Omniverse.
+- `render`, `proxy`, and `guide` purposes may be authored, but they must be
+  tested in Omniverse before they become runtime assumptions.
 
-### References (Orange Arrow)
+## 2. References
 
-* **What it is:** Immediate load.
-* **When to use:** Use for lightweight structures, metadata, Xforms, and high-level scene layout.
-* **Rule for Case 03:** Server racks as empty container structures can be referenced.
+References are immediate composition arcs. Use them for lightweight structure,
+metadata, layout, and explicit scene assembly where eager loading is acceptable.
 
-### Payloads (Blue Arrow)
+For v0.1, a direct configured USD asset path is sufficient.
 
-* **What it is:** Deferred load (lazy loading).
-* **When to use:** Use for ALL heavy geometry (the 160 GB203 servers, complex cabling meshes).
-* **Rule for Case 03:** The actual heavy servers must be saved behind Payloads. When the file is opened, the user sees bounding boxes or empty locators, saving 80GB+ of RAM. They can right-click and "Load Payload" only on the specific row or rack they are actively inspecting.
+## 3. Payloads
 
----
+Payloads are deferred-load composition arcs. They are recommended for heavy
+server, rack, cabling, VDB, or data hall assets when the scene becomes too large
+to load eagerly.
 
-## 2. LODs and Purpose Contract (GPU Optimization)
+Payloads are not a blanket requirement for the CPU cooler asset preview.
 
-This dictates *what* the graphics card draws once the asset is actually loaded into RAM.
+## 4. LOD and Purpose Target
 
-To avoid chaos between VariantSets and Purposes, Case 03 follows this strict contract (as defined in `00_project_usd_contract.md`):
+When LODs are reintroduced, use a stable project convention:
 
-1. **VariantSet Naming:** You must use a VariantSet named exactly `LOD` (not `lod` or `Lods`).
-2. **Variants:** Inside the `LOD` VariantSet, build variants like `LOD0` (highest), `LOD1`, `LOD2`.
-3. **Purpose Application:** Within any given LOD variant, attach the Purpose metadata (`proxy`, `render`, `guide`) strictly to the **Geom prims** (the actual meshes), **not** to the root Component Xform.
+1. VariantSet name: `LOD`.
+2. Variant names: `LOD0`, `LOD1`, `LOD2`.
+3. Purpose metadata (`render`, `proxy`, `guide`) should be placed on geometry
+   leaf prims, not on root component Xforms.
+4. Each LOD variant must be validated in Omniverse before it is exposed in
+   Blackwell Monitoring Suite.
 
-### The Omniverse Viewport Workflow
+## 5. Future Omniverse Workflow
 
-Because of this contract, a visualizer can load the payloads for the entire datacenter, but set the Omniverse viewport display filter to **Proxy**. Omniverse will instantly hide millions of polygons and display 160 lightweight proxy boxes.
+At server/rack/data hall scale, the desired workflow is:
 
-For final rendering, path-tracers (like Hydra/Iray) evaluate the **Render** purpose, dynamically swapping the geometry at compute time.
+- load only the payloads needed for the current review scale;
+- use proxy or simplified geometry for navigation;
+- use render geometry for close inspection;
+- keep invalid LOD variants out of the runtime until they are fixed upstream.
 
----
+## Definition of Done
 
-## ✅ Definition of Done (DoD)
-
-* [ ] Every heavily modeled Component (e.g., GB203 Server) has its main geometry stored as a Payload.
-
-* [ ] The VariantSet for level of detail is universally named `LOD` across the project.
-* [ ] Purpose tags (`proxy`, `render`) are applied to Geometry leaf nodes, never to root Xforms.
+- v0.1 asset loads from config without hidden absolute paths.
+- LOD variants are not exposed unless they are known to render correctly in
+  Omniverse.
+- Future heavy scene components use payloads only when scale makes lazy loading
+  valuable.
+- Purpose tags, when used, live on geometry leaf prims.

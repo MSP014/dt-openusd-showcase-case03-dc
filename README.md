@@ -1,4 +1,4 @@
-# Case 03: The "Forced-Flow" Inference Refinery
+# Blackwell Monitoring Suite
 
 > [!WARNING]
 > **Work in Progress:** This project is currently under active development. Some links and assets may be placeholders.
@@ -6,6 +6,11 @@
 ---
 
 ## 📋 Project Overview
+
+**Blackwell Monitoring Suite** is the Case 03 runtime and technical showreel
+application for presenting a high-density Blackwell inference data hall through
+hydrated OpenUSD assets, synthetic telemetry, and staged Omniverse runtime
+capabilities.
 
 A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
 The current repository validates the first production stages of the lifecycle: *Geometry Foundation → Houdini Simulation Cache → USD/OpenVDB Packaging*. The planned runtime stages are documented as architecture contracts and WIP implementation notes: *Synthetic Telemetry → State Switching → Omniverse Visualisation*.
@@ -32,7 +37,7 @@ The current simulation pass turns the hero server from a static hardware model i
 
 These Houdini-solved airflow caches are the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. They are not presented as a validated CFD benchmark; the goal is a qualitative engineering visualisation layer that makes intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
 
-The Omniverse runtime is intentionally cache/live agnostic: the same visualisation layer can consume precomputed VDB sequences for Demo Mode or externally generated live volumetric/vector-field data for a future Live Mode. In that sense, cached airflow plays the same role as synthetic telemetry: it proves the pipeline now without narrowing the final digital-twin architecture.
+The Blackwell Monitoring Suite runtime is intentionally cache/live agnostic: the same visualisation layer can consume precomputed VDB sequences for Demo Mode or externally generated live volumetric/vector-field data for a future Live Mode. In that sense, cached airflow plays the same role as synthetic telemetry: it proves the pipeline now without narrowing the final digital-twin architecture.
 
 → [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
@@ -126,14 +131,15 @@ The system follows a strict separation of concerns:
 Houdini is the closed creative environment of this hybrid pipeline. Houdini project files (`.hip`) are **not distributed** — only the exported outputs are.
 
 * **Geometry**: Server Nodes, Racks, and Data Hall layouts modelled procedurally and exported as USD.
-* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, baked to **VDB caches**. Playback and visualisation of these caches is planned for the Omniverse Extension runtime layer.
-* **Output**: Optimised USD assets (`.usda`, `.vdb`) prepared for runtime consumption by the App.
+* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, baked to **VDB caches**. Playback and visualisation of these caches is planned for the Blackwell Monitoring Suite runtime layer.
+* **Output**: Optimised USD assets (`.usda`, `.vdb`) prepared for runtime consumption by Blackwell Monitoring Suite.
 
 ### 2. Interactive Digital Twin Frontend (NVIDIA Omniverse)
 
 *The real-time visualisation layer and state machine.*
 
-* **Extension**: `omni.ai.refinery` (Custom Kit App).
+* **Application**: **Blackwell Monitoring Suite**.
+* **Extension**: `msp.bw.monitoring`.
 * **Logic**: A robust State Machine that listens to the Python Data Provider, dynamically swapping pre-cached USD VariantSets (Pyro sims, vector streamlines, thermal heatmaps) based on the active operational state.
 * **UI**: Viewport-embedded HUD (`omni.ui.scene` overlay) for hierarchical LOD navigation (Hall → Rack → Node) and manual stress-test overrides.
 
@@ -141,14 +147,16 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 
 ## 🚦 State Matrix
 
-The Digital Twin operates in one of four discrete states at any given time:
+The planned runtime operates in one of four synthetic workload states. These
+are demo/monitoring loads, not literal power-off percentages; even the minimum
+operational state keeps the server active.
 
-| State | Load | Visual Cues |
+| State | Synthetic Load | Visual Cues |
 | :--- | :--- | :--- |
-| **Idle** | 0% | Laminar airflow, cool ambient lighting, minimal power draw. |
-| **Nominal** | 25% | Steady-state cooling, efficient PUE, green status LEDs. |
-| **Surge** | 50% | Fans ramping up, heat signatures visible on exhaust vents. |
-| **Critical** | 85% | Thermal throttling, turbulent airflow (Heat haze), red warning LEDs. |
+| **Idle** | 25% | Minimum operational baseline, laminar airflow, cool ambient lighting, low power draw. |
+| **Nominal** | 50% | Steady-state cooling, efficient PUE, stable green status LEDs. |
+| **Surge** | 75% | Fans ramping up, stronger heat signatures visible on exhaust vents. |
+| **Critical** | 96% | Near-saturation load, thermal-risk cues, turbulent airflow, red warning LEDs. |
 
 *The **Viral Inference Surge** scenario drives the transition cascade: `Nominal → Surge → Critical`.*
 
@@ -186,17 +194,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ### 3. Running the App
 
-> *Coming Soon: Instructions for launching the Omniverse Extension*
-
-### 4. Local Omniverse Reference
-
-`E:\omniverse_kit_app` is a read-only local reference copy of NVIDIA Omniverse
-Kit App Template and the generated `msp.case03.blackwell` test application. It
-may be inspected to understand Omniverse Kit app structure, extension layout,
-build/launch workflow, startup/playback/controller patterns, and future runtime
-viewer architecture. Do not modify this folder, do not treat it as authored Case
-03 content, and do not mix project assets or documentation into it unless
-explicitly instructed.
+> *Coming Soon: Instructions for launching Blackwell Monitoring Suite v0.1*
 
 ---
 
@@ -216,7 +214,7 @@ explicitly instructed.
 │   ├── plans/           # Actionable implementation guides
 │   │   └── case 03 - tech debt.md
 │   └── adr/             # Architecture Decision Records (e.g., 007 USD Pipeline)
-├── src/             # Python source code (Data Provider, Logic)
+├── src/             # Blackwell Monitoring Suite runtime source
 └── tools/           # Developer scripts (Jira integration, asset validation)
 ```
 
@@ -233,7 +231,7 @@ explicitly instructed.
 
 * **Week of 29 June, 2026:** Advanced Case 03 from node-scale airflow proof toward rack-level production planning, added Omniverse MCP helper tooling, clarified the visualisation contract, and migrated the project baseline to Python 3.11.15.
 * **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a testable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport validation frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
-* **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a container-ready runtime packaging guardrail for future viewer delivery.
+* **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a path-portable runtime packaging guardrail for future viewer delivery.
 * **2026-01-22:** Initial repository bootstrap. Established Readme-driven structure: Tech Pack, ADR documentation, pre-commit hooks, and `case03-env` constraints.
 * **2026-02-01:** Finalized Case 03 core concept (AI Inference Refinery) and hardware specification (Blackwell Rig v1.0).
 * **2026-02-09:** Focused development on Hero Asset (Blackwell Rig v1.0), detailing the server front panel and cooler chassis. Implemented external storage strategy (ADR 005).
