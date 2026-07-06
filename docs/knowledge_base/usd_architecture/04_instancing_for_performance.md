@@ -41,7 +41,15 @@ Candidate approaches:
 The exact approach becomes mandatory only when workload, telemetry, or scale
 navigation stages need it.
 
-## 4. Simulation Data
+## 4. Houdini Authoring Note
+
+For final USD intended to benefit from instancing, prefer Solaris/USD
+instancing patterns over baking repeated server copies into raw meshes. Houdini
+copy-to-points style workflows are useful while modelling, but the exported
+runtime stage should keep prototypes, instances, and per-instance data
+inspectable.
+
+## 5. Simulation Data
 
 Do not instance volatile simulation data blindly. Airflow, heat, smoke, and
 streamline caches may need unique layers per rack, state, or scene scale.

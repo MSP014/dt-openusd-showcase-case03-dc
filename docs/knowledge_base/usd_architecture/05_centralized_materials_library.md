@@ -35,6 +35,8 @@ When using Solaris Material Library LOPs:
 - prefer relative paths;
 - avoid embedding workstation-local texture paths;
 - keep material bindings inspectable in USD;
+- when exporting a shared material layer, save it beside or above the component
+  package with a relative reference such as `../materials/materials.usda`;
 - test the exported asset in Omniverse before treating the material layout as
   runtime-ready.
 

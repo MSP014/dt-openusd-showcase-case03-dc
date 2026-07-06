@@ -27,6 +27,11 @@ Use a `Configure Layer` LOP before writing USD:
 2. Set **Meters Per Unit** to `1.0`.
 3. Confirm the exported root layer contains the expected metadata.
 
+Place this rule before the final `usd_rop`, `usdrender_rop`, or Component
+Builder output layer. The exported USD should be self-describing; importing it
+into Omniverse must not require a manual rotation, scale correction, or
+workstation-only transform.
+
 ## 4. External Asset Ingest
 
 Purchased or library assets may use different conventions, especially Z-up or

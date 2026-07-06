@@ -26,6 +26,12 @@ Current decisions already made:
 - The first Kit extension id is `msp.bw.monitoring`.
 - The app should launch through Kit with a dedicated `.kit` application config.
 
+Jira tracking:
+
+- Runtime epic: `DC-38` - Blackwell Monitoring Suite Runtime.
+- Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
+- Active implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
+
 The local authoring and tooling environment still uses `case03-env`. Blackwell
 Monitoring Suite runtime code, however, runs inside Kit's Python environment
 when launched through `kit.exe`. Any Python dependency used by runtime code must
@@ -475,6 +481,8 @@ separate "first slice acceptance" ceremony is needed.
 
 ### Stage 1 - Blackwell Monitoring Suite v0.1 Asset Preview Slice
 
+Jira: `DC-40`
+
 Build the smallest useful app surface: launch Blackwell Monitoring Suite v0.1,
 show the RTX viewport, load one configured USD asset from the hydrated asset
 package, and show basic load status. The first target asset is the Noctua NH-D9
@@ -486,6 +494,8 @@ path.
 
 ### Stage 2 - Look Review Slice
 
+Jira: `DC-41`
+
 Add review lighting for the selected asset: one or more HDRI/dome/environment
 presets and the minimum exposure controls needed for clear viewport review.
 
@@ -493,6 +503,8 @@ Done when the selected asset can be viewed under the chosen lighting preset and
 the operator can see whether the preset loaded successfully.
 
 ### Stage 3 - Synthetic Telemetry Slice
+
+Jira: `DC-42`
 
 Add a minimal synthetic telemetry source that runs with the application. This is
 not DCC timeline playback; it is runtime data produced or received while the app
@@ -502,6 +514,8 @@ Done when changing telemetry values are visible in the app and are independent
 of pressing Play in Houdini or another DCC.
 
 ### Stage 4 - Telemetry Driven Motion Slice
+
+Jira: `DC-43`
 
 Connect telemetry to a visible hardware behaviour. The first practical target is
 fan rotation on the CPU cooler: when the app runs and telemetry updates, the fan
@@ -517,6 +531,8 @@ reload without requiring manual timeline animation.
 
 ### Stage 5 - Server Review Slice
 
+Jira: `DC-44`
+
 Move from the single hardware asset to the full server or Blackwell Rig scene.
 Keep the controls minimal: load, focus/navigation, status, and any lighting
 control already proven in earlier slices.
@@ -526,6 +542,8 @@ and can be reviewed without returning to Houdini or editing USD manually.
 
 ### Stage 6 - Cached Simulation Playback Slice
 
+Jira: `DC-45`
+
 Introduce cached simulation playback or a cached simulation visual layer only
 when the asset package contains a real cache or layer to drive.
 
@@ -533,6 +551,8 @@ Done when the app can enable or play the cached simulation state and report its
 load/playback status without pretending to generate the simulation live.
 
 ### Stage 7 - Manual Workload State Preview Slice
+
+Jira: `DC-46`
 
 Add manual workload states such as `25%`, `50%`, `75%`, and `96%` only after the
 USD package, material overrides, cache states, or runtime data hooks exist.
@@ -543,6 +563,8 @@ Done when each workload state changes documented runtime inputs or visual state.
 If those hooks do not exist yet, the workload controls remain out of the UI.
 
 ### Stage 8 - Scale Navigation Slice
+
+Jira: `DC-47`
 
 Add deliberate navigation between supported scales: server, rack, and data
 center. The exact camera bookmarks and scene group controls are deferred until
