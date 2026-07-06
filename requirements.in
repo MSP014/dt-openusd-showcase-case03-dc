@@ -24,3 +24,4 @@ pytest-cov
 pydantic
 numpy
 scipy
+usd-core

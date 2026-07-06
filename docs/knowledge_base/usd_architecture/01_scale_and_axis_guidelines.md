@@ -1,37 +1,44 @@
 # Guideline 01: Scale and Axis Setup
 
-## 1. The Core Standard: Houdini Native
+## 1. Current Standard
 
-In the Case 03 Digital Twin project, the local authoring standard utilizes Houdini's native settings. This ensures the initial procedural generation happens cleanly without continuous conversion math.
+Case 03 authored USD assets should use Houdini-native project units:
 
-The fundamental laws for exported authored assets are:
+- **Meters Per Unit:** `1.0`
+- **Up Axis:** `Y`
 
-* **Meters Per Unit**: `1.0` (1 Unit = 1 Meter)
-* **Up-Axis**: `Y` (Y-Up)
+This keeps Houdini procedural authoring predictable and makes exported layers
+self-describing for downstream OpenUSD and Omniverse tools.
 
-## 2. Omniverse Auto-Resolution
+## 2. Omniverse Behavior
 
-OpenUSD is a self-describing format. As long as Houdini correctly embeds the layer metadata upon export, compliant platforms (like Omniverse) will read the `upAxis = "Y"` and `metersPerUnit = 1` and automatically apply a `unitsResolve` transform to ensure the assets appear at the mathematically correct scale relative to Z-Up/Centimeter worlds.
+OpenUSD layers carry `metersPerUnit` and `upAxis` metadata. When those values
+are authored correctly, Omniverse and other compliant consumers can resolve the
+asset scale and orientation without manual rotation or scale fixes.
 
-## 3. Configuring in Houdini (Solaris)
+If a runtime scene uses a different world convention, the conversion must be
+explicit and documented. It must not be hidden as a local workstation transform.
 
-To ensure compliance, use the `Configure Layer` LOP before writing to disk:
+## 3. Houdini Export Rule
 
-1. Append a **Configure Layer** node before your USD ROP.
-2. In the properties, ensure **Up Axis** is set to `Y`.
-3. Ensure **Meters Per Unit** is set to `1.0`.
+Use a `Configure Layer` LOP before writing USD:
 
-## 4. Pipeline Defense: Ingesting External Assets
->
-> [!CAUTION]
-> Purchased assets or libraries (e.g., NVIDIA Isaac Sim assets) often default to Z-Up and Centimeters (0.01).
-> **Rule:** All external assets must pass through an automated ingestion script that reads their `metersPerUnit` and `upAxis`. The script must either bake the transform or apply a rigid root `Xform` correction before the asset is allowed into the Case 03 master assembly.
+1. Set **Up Axis** to `Y`.
+2. Set **Meters Per Unit** to `1.0`.
+3. Confirm the exported root layer contains the expected metadata.
 
----
+## 4. External Asset Ingest
 
-## ✅ Definition of Done (DoD)
+Purchased or library assets may use different conventions, especially Z-up or
+centimeter scale.
 
-* [ ] Every exported root layer explicitly contains `metersPerUnit=1.0` and `upAxis=Y`.
+External assets should be inspected before they enter the Case 03 package. If
+they differ, either bake the correction into the asset or apply a documented
+root `Xform` correction as part of ingest.
 
-* [ ] Omniverse import requires **zero** manual rotation or scaling adjustments.
-* [ ] An automated pre-flight script reads the root layer metadata and fails the pipeline if external assets conflict without a resolving `Xform`.
+## Definition of Done
+
+- Root USD layers expose `metersPerUnit = 1.0` and `upAxis = "Y"` unless an
+  explicit ingest exception exists.
+- Omniverse loading requires no manual rotation or scale correction.
+- Any non-native external asset has a documented conversion.

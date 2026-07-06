@@ -1,52 +1,61 @@
-# Guideline 06: Custom Attributes & Telemetry
+# Guideline 06: Custom Attributes and Telemetry
 
-A critical difference between a 3D visual render and a "Digital Twin" is data.
+Telemetry is a future Blackwell Monitoring Suite capability. It is not required
+for the v0.1 CPU cooler asset preview.
 
-To bridge the gap between Houdini's assembly environment, the Hydra render engine, and external telemetry software, we leverage **Primvars (Primitive Variables)** strictly defined by a formal versioned schema. This operates faster than standard `customData` dictionaries and connects directly to viewport color tinting (heatmaps).
+## 1. Current Baseline
 
-## 1. The Telemetry Schema Contract (v1.0)
+Current assets should have stable hierarchy and readable prim paths so future
+runtime code can attach behavior or read state deliberately.
 
-We establish the following fixed fields across the Case 03 architecture. By storing this in the `primvars:` namespace, Hydra can read it instantly for shading, and Python can query it for UI/logic.
+No asset is required to carry telemetry primvars until the Synthetic Telemetry,
+Telemetry Driven Motion, workload preview, or scale navigation stages need
+them.
 
-If integrating external databases, map them precisely to these keys:
+## 2. Future Telemetry Schema Direction
 
-### 1. `primvars:telemetry:schemaVersion` = `"1.0"` (String)
+When telemetry becomes runtime scope, use a versioned schema that can be read by
+Kit Python, USD tooling, and shaders where appropriate.
 
-* **What it is:** The global tracker so future automation scripts know which parsing logic to use.
+Candidate fields:
 
-### 2. `primvars:server:id` (String)
+- `primvars:telemetry:schemaVersion` = `"1.0"`;
+- `primvars:server:id`;
+- `primvars:telemetry:tempC`;
+- `primvars:telemetry:powerW`;
+- future fields for fan duty, airflow, workload, health, or LED behavior when
+  the runtime actually consumes them.
 
-* **What it is:** Unique node identifier matching external monitoring logs or CRM.
-* **Example:** `"DC01_RACK05_NODE12"`
+The final schema should be documented before Stage 3 or Stage 7 depends on it.
 
-### 3. `primvars:telemetry:tempC` (Float)
+## 3. Houdini Authoring Direction
 
-* **What it is:** The real-time temperature telemetry status in Celsius (used by visualizers to tint objects red, orange, or green at render time without unpacking payloads).
-* **Example:** `45.5`
+When telemetry attributes are authored in Houdini:
 
-### 4. `primvars:telemetry:powerW` (Float)
+- write them as USD-readable primvars or documented custom attributes;
+- keep interpolation and scope explicit;
+- avoid one-off Python tagging after export when the data can be generated
+  procedurally during asset build;
+- validate the exported data with `pxr` or Omniverse before wiring runtime UI
+  to it.
 
-* **What it is:** The strict wattage drawn by the system for power load simulation and cooling capacity calculations.
-* **Example:** `1500.0`
+## 4. Runtime Direction
 
----
+Blackwell Monitoring Suite should treat telemetry as runtime data, not as a DCC
+timeline.
 
-## 2. Authoring Data in Houdini (The Workflow)
+The first telemetry target is simple:
 
-The Digital Twin consumer (using Omniverse or a custom application) should **not** need to manually tag 160 servers with Python scripts. The geometry must arrive fully self-labeled according to v1.0 schema.
+- generate values while the app is running;
+- display or log those values in the UI;
+- then drive CPU cooler fan motion from those values.
 
-> [!IMPORTANT]
-> **Houdini Implementation:**
-> Inject these attributes globally through an **Attribute Wrangle** in SOPs/LOPs.
-> Write them as explicitly varying or constant primvars so they translate natively to OpenUSD.
-> Example: `@server:id = "RACK01_N01"`, `@telemetry:tempC = 40.0;`.
-> This creates a robust, API-queryable, and *Shader-readable* data contract.
+Only later stages should map telemetry to heatmaps, LEDs, cached simulation
+states, or data hall scale.
 
----
+## Definition of Done
 
-## ✅ Definition of Done (DoD)
-
-* [ ] The `primvars:telemetry:schemaVersion` attribute string returns `"1.0"` upon inspection.
-
-* [ ] Telemetry data (`tempC`, `powerW`) exists directly in the `primvars:` namespace, **not** inside standard user/`customData` metadata.
-* [ ] Omniverse Python API can query these 4 exact keys algorithmically.
+- v0.1 does not require telemetry attributes.
+- Before telemetry UI ships, the schema is documented and inspectable.
+- Runtime code reads telemetry through a clear data provider boundary rather
+  than hardcoded UI callbacks.
