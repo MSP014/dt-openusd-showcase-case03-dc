@@ -13,6 +13,9 @@ The overarching mechanics, definitions, and logics of the Digital Twin.
   Power loads, dimensional guidelines, and Cooling Efficiency Factors (CEF) calculations defining the physical constraints of the 16-rack layout.
 * **[Rack Airflow Budget](./rack_airflow_budget.md)**
   Working airflow estimates for the RM44 nodes, QM9700 switch, and JetPanel-style active raised-floor fan tile feeding the sealed front cold plenum.
+* **[BMS Telemetry Provider Contract](./bms_telemetry_contract.md)**
+  Defines the Stage 3 synthetic telemetry subset and the future live-provider
+  superset for mapping real monitoring feeds into Blackwell Monitoring Suite.
 * **[Digital Twin Maturity Levels](./digital_twin_maturity_levels.md)**
   Strategic justification identifying this project precisely as a **Level 1** Digital Twin. *(Includes authoritative PDF reference).*
 * **[Runtime Packaging Guardrail](./runtime_packaging_guardrail.md)**

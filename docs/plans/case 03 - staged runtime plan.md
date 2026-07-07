@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-07
+**Last Updated**: 2026-07-08
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -59,6 +59,11 @@ HDRI loading, exposure/intensity controls, optional review key light with
 intensity control, HDRI background visibility control, dome rotation controls,
 local lighting settings persistence, a configurable review grid, and camera
 save/apply/reset support for repeatable look review sessions.
+
+Stage 3 UI discussion should start from the shared left-sidebar model: keep one
+docked BMS panel beside the viewport and switch between `Config` and
+`Telemetry` inside that panel, instead of adding separate dock panels that
+consume additional viewport space.
 
 Do not implement canonical Case 03 stage loading, camera bookmarks, scene
 groups, diagnostics, workload modes, recording tools, or telemetry until the
@@ -569,6 +574,218 @@ is open.
 
 Done when changing telemetry values are visible in the app and are independent
 of pressing Play in Houdini or another DCC.
+
+Stage 3 telemetry scope:
+
+- Implement the first-layer node telemetry subset defined in
+  `docs/knowledge_base/bms_telemetry_contract.md`.
+- Keep the future live-provider superset documented there, but do not implement
+  real monitoring feed adapters in Stage 3.
+- Group Stage 3 telemetry visually by operator meaning, not by raw sensor
+  origin.
+
+Stage 3 UI shell decision:
+
+- Keep a single left-docked BMS sidebar so the viewport is only constrained by
+  one stable panel width.
+- Convert the current `Config` panel content into a `Config` tab inside that
+  sidebar.
+- Add a sibling `Telemetry` tab for synthetic Stage 3 runtime values.
+- Implement the tabs as an internal OmniUI switcher over content frames, not as
+  multiple independent docked windows, unless a later UX pass deliberately
+  chooses native Kit dock tabs.
+- The selected tab may change, but both tabs should occupy the same sidebar
+  footprint and must not cause extra viewport shrinkage.
+
+Left sidebar tab registry:
+
+| Order | Tab | Stage | Purpose |
+| :--- | :--- | :--- | :--- |
+| 1 | `Telemetry` | Stage 3 | Primary runtime monitoring surface for synthetic telemetry values. |
+| 2 | `Config` | Stage 2 / Stage 3 | Operator controls for asset loading, lighting, grid, camera, and local runtime settings. |
+
+Future BMS modules should add their sidebar tabs to this registry before
+implementation so the left-slot navigation remains deliberate as the app grows.
+
+Stage 3 runtime snapshot model:
+
+- Use a latest-only in-memory `TelemetrySnapshot` produced by the synthetic
+  provider.
+- Do not add a database, persistent telemetry store, or historical buffer in
+  Stage 3.
+- The telemetry UI reads the latest snapshot; future scene behaviours should
+  read the same snapshot rather than duplicating generator logic.
+- Each snapshot contains the current timestamp, selected operational state,
+  refresh interval, and current metric values.
+- Each metric value should carry its unit and `quality = synthetic` so a future
+  live provider can replace the generator without forcing UI rewrites.
+- Default refresh interval is 1 second. The Telemetry tab may expose a
+  `1 / 5 / 10 / 30 s` refresh selector so the operator can reduce update
+  frequency if needed.
+- Timestamp display is part of the synthetic live-monitoring illusion, but the
+  Stage 3 implementation only needs the current snapshot, not stored time
+  series data.
+
+Stage 3 data provider boundary:
+
+- Implement the synthetic telemetry provider as a separate application module,
+  not as inline UI callback logic.
+- Stage 3 keeps the provider in the same Kit application process, but the module
+  should be shaped so it can later move behind a process or container boundary.
+- UI code should consume provider snapshots through a small provider/state API,
+  not by reaching into generator internals.
+- The provider should start producing data as soon as BMS starts, before the
+  operator manually loads or changes scene content.
+- Containerisation, network transport, credentials, service discovery, and live
+  provider adapters remain out of Stage 3 scope.
+
+Stage 3 provider lifecycle:
+
+- Start the synthetic telemetry provider during BMS extension startup, not only
+  after the operator loads the asset.
+- Keep the provider running while the application is open so the `Telemetry`
+  tab has data immediately and remains independent from asset reloads.
+- Asset loading may subscribe scene behaviour to the latest provider snapshot,
+  but it must not be the source of provider lifetime.
+- Stop provider update tasks cleanly during extension shutdown so Kit does not
+  leave orphaned async tasks, callbacks, or timers.
+- Provider shutdown should be idempotent so repeated shutdown or failed startup
+  paths do not raise extra errors.
+
+Stage 3 provider testing:
+
+- Add focused unit tests for the synthetic data provider module as part of
+  Stage 3.
+- Tests should cover the happy path and 5-8 boundary cases, including invalid
+  workload mode, unsupported refresh interval, freeze/resume behaviour,
+  timestamp monotonicity after resume, metric unit/quality presence, expected
+  metric keys, value clamping inside safe ranges, and deterministic output when
+  a seeded generator is used.
+- Keep these tests independent of Kit UI so the provider boundary remains
+  portable and can later move behind a process or container boundary.
+
+Stage 3 generator behaviour:
+
+- Stage 3 workload mode switching is manual. The operator selects `Idle`,
+  `Nominal`, `Surge`, or `Critical`; automatic state cycling is out of scope
+  for this slice.
+- The selected mode defines target values for each synthetic metric.
+- When the selected mode changes, metric values should move smoothly towards the
+  new targets instead of jumping instantly.
+- The provider may add bounded jitter around the current mode target so the
+  telemetry reads as live data without becoming noisy or distracting.
+- Provider cadence is driven by Kit runtime/app update time or another monotonic
+  runtime clock, not by Houdini or DCC timeline playback.
+- The UI timestamp may use wall-clock time for live-monitoring readability, but
+  generator progression must not depend on DCC playback state.
+- When `Freeze` is active, displayed telemetry remains fixed on the current
+  snapshot until `Resume` is clicked.
+
+Stage 3 telemetry provider config:
+
+- Metric targets and ranges are config-driven, not hardcoded into the
+  generator.
+- Add a separate telemetry provider config file owned by the telemetry/data
+  provider module. Do not store telemetry targets in the existing BMS local
+  operator override config used for lighting, grid, camera, and look-review
+  settings.
+- The `Config` tab may expose telemetry provider settings, but persistence must
+  go through the provider config path/API, not through the current BMS
+  `.local.toml` override.
+- The provider config file layout should let the telemetry module move later
+  into a separate process or container with its own config and without breaking
+  the BMS data flow.
+- The config should define global telemetry defaults such as default workload
+  mode, default refresh interval, and allowed refresh intervals.
+- The config should define per-mode targets for `Idle`, `Nominal`, `Surge`, and
+  `Critical`, grouped by the Stage 3 telemetry groups.
+- Numeric metrics should support `target`, `jitter`, `min`, and `max`.
+- Boolean and string metrics should support direct per-mode values.
+- Initial values may be rough but plausible; tuning after runtime inspection is
+  expected.
+
+Temporary workload mode control:
+
+- Until the BMS shell has a dedicated global mode selector, the first control in
+  the `Telemetry` tab should select the global workload mode:
+  `Idle`, `Nominal`, `Surge`, or `Critical`.
+- This selector is a temporary UI placement decision. The selected mode is still
+  global BMS runtime state, not telemetry-tab-local state.
+- Stage 3 uses the selected mode to drive synthetic telemetry values.
+- Later stages may move the same mode selector into a more global app-level
+  control area when scene behaviour, fan motion, overlays, LEDs, or other BMS
+  modules need the same state.
+- The Telemetry tab should include a `Freeze` toggle. When active, the provider
+  keeps the current snapshot visible and pauses displayed updates so the
+  operator can capture a stable UI frame. The same control should switch its
+  label to `Resume` while frozen and resume normal updates when clicked again.
+
+Stage 3 telemetry UI acceptance:
+
+- The `Telemetry` tab is read-only for displayed telemetry values in Stage 3.
+- The first implementation shows current values from the latest
+  `TelemetrySnapshot` only.
+- Do not add charts, history, sparklines, min/max columns, averages, trend
+  buffers, or telemetry persistence in this slice.
+- The top of the tab should expose the temporary workload mode selector,
+  refresh interval selector, and `Freeze` / `Resume` control.
+- Show a timestamp at the top of the telemetry view as `Last update` while
+  running and as `Frozen at` while the view is frozen.
+- Present metric values by the first-layer groups below: `State`, `Thermals`,
+  `Power`, `Cooling`, and `Limits`.
+- Each visible metric row or compact card should show a human-readable label,
+  current value, and unit.
+- Metric `quality` is part of the runtime snapshot contract, but because all
+  Stage 3 values are synthetic it does not need to be prominent in the first UI;
+  it may stay hidden or appear only in a later detail/diagnostics surface.
+- Use health/state colour only for high-level status readability: neutral/OK for
+  normal state, amber for warning or degraded state, and red for critical state.
+- Surface `throttling_active = true` as a clear warning indicator, row, or badge.
+
+Stage 3 explicit non-goals:
+
+- No charts, sparklines, trend lines, historical tables, or min/max/average
+  sensor history.
+- No telemetry storage beyond the latest in-memory snapshot needed by the UI and
+  future scene consumers.
+- No telemetry-driven fan motion or animated hardware behaviour; that starts in
+  Stage 4.
+- No live monitoring source, external feed adapter, network transport, or
+  containerised provider runtime.
+- No alert/rule engine beyond displaying simple `health_state` and
+  `throttling_active` status from the synthetic snapshot.
+
+Stage 3 manual validation:
+
+- Max can launch BMS and switch the left sidebar to the `Telemetry` tab.
+- Telemetry values are visible and update without pressing Play in Houdini, Kit
+  timeline, or any other DCC timeline.
+- Changing the workload mode changes the telemetry targets and values move
+  towards the new mode range.
+- `Freeze` stops visible telemetry updates and `Resume` continues them.
+- Switching between `Telemetry` and `Config` does not resize, overlap, or damage
+  the viewport/sidebar layout.
+
+First-layer node telemetry groups:
+
+| Group | Metrics | Purpose |
+| :--- | :--- | :--- |
+| State | `timestamp`, `operational_state`, `workload_percent`, `health_state` | Shows whether the node is idle, nominal, surging, or critical, and anchors every value in runtime time. |
+| Thermals | `cpu_temp_c`, `gpu_temp_c_max`, `gpu_memory_temp_c_max`, `gpu_hotspot_temp_c_max`, `thermal_headroom_percent` | Provides the heat story for the CPU cooler, GPU array, memory junctions, hotspots, and remaining safety margin. |
+| Power | `cpu_power_w`, `gpu_power_w_total`, `psu_load_estimate_w`, `node_power_w_total` | Connects workload to heat generation and keeps the PSU load contribution visible without claiming unavailable PSU sensor fidelity. |
+| Cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent`, `node_airflow_cfm` | Connects the thermal state to fan response and the airflow values already defined in the rack airflow budget. |
+| Limits | `throttling_active` | Gives the operator a clear warning flag when the synthetic node reaches a thermal or power limit. |
+
+Deferred rack/facility telemetry fields and the extended live-provider contract
+belong in `docs/knowledge_base/bms_telemetry_contract.md`. They should not
+appear in the Stage 3 UI unless the slice explicitly grows to server/rack
+scale.
+
+The current Case 03 node uses a consumer/workstation PSU. Stage 3 therefore
+treats PSU contribution as `psu_load_estimate_w`, not as a direct PSU sensor
+reading. Server-class PSU fields are reserved for future live providers that
+can actually supply them through digital PSU, smart PDU, UPS, branch circuit,
+BMC, Redfish, IPMI, or PMBus data sources.
 
 ### Stage 4 - Telemetry Driven Motion Slice
 
