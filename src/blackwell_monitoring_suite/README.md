@@ -19,8 +19,8 @@ development helpers, and the Blackwell Monitoring Suite runtime.
 - `docs/` explains the architecture, contracts, and implementation decisions.
 - `assets/_external/` contains the heavy hydrated assets outside version
   control.
-- `configs/blackwell_monitoring_suite.v0.1.toml` will hold the first runtime
-  config for Stage 1.
+- `configs/blackwell_monitoring_suite.v0.1.toml` holds the current runtime
+  asset and lighting config.
 - `tools/mcp/` provides a small NVIDIA Omniverse USD/Kit MCP helper for
   development-time API lookup.
 - External NVIDIA repositories such as `kit-usd-agents` remain outside this
@@ -39,3 +39,8 @@ that folder as part of the BMS runtime package.
 Heavy USD, VDB, texture, and HDRI payloads remain under `assets/_external/`.
 Application modules may reference those files through relative config paths, but
 they must not copy those assets into this source tree.
+
+The Stage 2 look-review baseline uses
+`assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr` by default
+and applies it through a transient `/BMS_Runtime/Lighting` session-layer dome
+light.
