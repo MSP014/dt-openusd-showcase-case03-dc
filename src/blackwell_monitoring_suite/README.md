@@ -43,4 +43,5 @@ they must not copy those assets into this source tree.
 The Stage 2 look-review baseline uses
 `assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr` by default
 and applies it through a transient `/BMS_Runtime/Lighting` session-layer dome
-light.
+light. The Config panel can hide the HDRI background from the primary viewport
+while keeping the dome light active.

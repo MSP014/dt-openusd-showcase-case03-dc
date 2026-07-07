@@ -228,7 +228,8 @@ applies the configured look-review lighting baseline.
 Stage 2 lighting uses the Config panel in the Kit UI. Its default HDRI is
 `assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr`; exposure,
 intensity, and dome XYZ rotation are runtime controls applied through a
-transient `/BMS_Runtime/Lighting` session-layer setup.
+transient `/BMS_Runtime/Lighting` session-layer setup. The HDRI background can
+be hidden from the primary viewport while preserving its lighting contribution.
 
 ---
 

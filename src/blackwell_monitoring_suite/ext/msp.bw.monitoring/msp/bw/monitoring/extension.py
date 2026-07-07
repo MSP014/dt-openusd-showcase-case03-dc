@@ -63,6 +63,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._hdri_model = None
         self._exposure_model = None
         self._intensity_model = None
+        self._show_hdri_background_model = None
         self._review_key_model = None
         self._review_key_intensity_model = None
         self._rotation_x_model = None
@@ -134,6 +135,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._hdri_model = ui.SimpleStringModel(lighting.hdri_path)
         self._exposure_model = ui.SimpleFloatModel(lighting.exposure)
         self._intensity_model = ui.SimpleFloatModel(lighting.intensity)
+        self._show_hdri_background_model = ui.SimpleBoolModel(
+            lighting.show_hdri_background
+        )
         self._review_key_model = ui.SimpleBoolModel(lighting.review_key_light_enabled)
         self._review_key_intensity_model = ui.SimpleFloatModel(
             lighting.review_key_light_intensity
@@ -211,6 +215,10 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
                 self._build_float_row("Exposure", self._exposure_model)
                 self._build_float_row("HDRI intensity", self._intensity_model)
+
+                with ui.HStack(height=24, spacing=6, content_clipping=True):
+                    ui.Label("Show HDRI", width=ROW_LABEL_WIDTH)
+                    ui.CheckBox(model=self._show_hdri_background_model)
 
                 with ui.HStack(height=24, spacing=6, content_clipping=True):
                     ui.Label("Key", width=ROW_LABEL_WIDTH)
@@ -417,6 +425,8 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             self._exposure_model.set_value(lighting.exposure)
         if self._intensity_model:
             self._intensity_model.set_value(lighting.intensity)
+        if self._show_hdri_background_model:
+            self._show_hdri_background_model.set_value(lighting.show_hdri_background)
         if self._review_key_model:
             self._review_key_model.set_value(lighting.review_key_light_enabled)
         if self._review_key_intensity_model:
@@ -484,6 +494,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             hdri_path=self._hdri_model.as_string.strip(),
             exposure=float(self._exposure_model.as_float),
             intensity=float(self._intensity_model.as_float),
+            show_hdri_background=bool(self._show_hdri_background_model.as_bool),
             review_key_light_enabled=bool(self._review_key_model.as_bool),
             review_key_light_intensity=float(self._review_key_intensity_model.as_float),
             rotation=RotationConfig(
