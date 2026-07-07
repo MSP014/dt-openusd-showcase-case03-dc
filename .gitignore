@@ -55,6 +55,9 @@ png/
 *.exr
 *.hdr
 
+# --- Local Runtime Overrides ---
+configs/*.local.toml
+
 # --- Python ---
 __pycache__/
 *.py[cod]

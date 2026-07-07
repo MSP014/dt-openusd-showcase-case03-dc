@@ -220,10 +220,15 @@ $kitRelease = "path\to\kit-app-template\_build\windows-x86_64\release"
   --ext-folder "$kitRelease\apps"
 ```
 
-The Stage 1 runtime reads
-`configs/blackwell_monitoring_suite.v0.1.toml`, resolves the hydrated asset
-package under `assets/_external/`, and opens the configured Noctua NH-D9
-TR5-SP6 CPU cooler asset in the RTX viewport.
+The current runtime reads `configs/blackwell_monitoring_suite.v0.1.toml`,
+resolves the hydrated asset package under `assets/_external/`, opens the
+configured Noctua NH-D9 TR5-SP6 CPU cooler asset in the RTX viewport, and
+applies the configured look-review lighting baseline.
+
+Stage 2 lighting uses the Config panel in the Kit UI. Its default HDRI is
+`assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr`; exposure,
+intensity, and dome XYZ rotation are runtime controls applied through a
+transient `/BMS_Runtime/Lighting` session-layer setup.
 
 ---
 

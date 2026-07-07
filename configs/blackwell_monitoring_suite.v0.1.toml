@@ -13,3 +13,15 @@ default_asset_id = "noctua_nh_d9_tr5_sp6"
 label = "Noctua NH-D9 TR5-SP6"
 path = "usd/cpu_fan/cpu_fan.usd"
 kind = "usd_stage"
+
+[lighting]
+default_hdri_path = "hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr"
+exposure = 0.0
+intensity = 500.0
+review_key_light_enabled = true
+review_key_light_intensity = 1200.0
+
+[lighting.rotation]
+x = 0.0
+y = 0.0
+z = 0.0

@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-06
+**Last Updated**: 2026-07-07
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -30,7 +30,8 @@ Jira tracking:
 
 - Runtime epic: `DC-38` - Blackwell Monitoring Suite Runtime.
 - Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
-- Active implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
+- Completed implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
+- Completed implementation task: `DC-41` - Stage 2 Look Review Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
@@ -48,10 +49,20 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Close Stage 1 implementation hygiene, then move to Stage 2 only. Stage 1 now
-launches Blackwell Monitoring Suite v0.1, reads runtime config, opens the
-configured Noctua NH-D9 TR5-SP6 USD asset, shows it in the Kit RTX viewport,
-and reports load status.
+Resolve the deferred HDRI-background visibility control before starting Stage 3.
+The operator request is to keep HDRI lighting and reflections active while
+hiding the HDRI image from the primary viewport/render background. The first
+attempted DomeLight `inputs:visibleInPrimaryRay` route did not affect the Kit
+RTX viewport background, so the next implementation pass should investigate the
+Kit/RTX environment or viewport background settings path before exposing the
+control again.
+
+Stage 2 is complete: Blackwell Monitoring Suite v0.1 now provides a docked
+Config panel with asset load controls, review lighting controls, Kloofendal
+HDRI loading, exposure/intensity controls, optional review key light with
+intensity control, dome rotation controls, local lighting settings persistence,
+a configurable review grid, and camera save/apply/reset support for repeatable
+look review sessions.
 
 Do not implement canonical Case 03 stage loading, camera bookmarks, scene
 groups, diagnostics, workload modes, recording tools, or telemetry until the
@@ -192,7 +203,9 @@ from making future capabilities sound like v0.1 requirements.
 | Hydrated asset path resolution | Stage 1 | Implemented |
 | Noctua CPU cooler USD load | Stage 1 | Implemented |
 | Basic load/render/runtime status | Stage 1 | Implemented |
-| Review lighting preset | Stage 2 | Future |
+| Review lighting preset | Stage 2 | Implemented |
+| Configurable review grid | Stage 2 | Implemented |
+| Review camera persistence | Stage 2 | Implemented |
 | Synthetic telemetry values | Stage 3 | Future |
 | Fan motion driven by telemetry | Stage 4 | Future |
 | Full server / Blackwell Rig stage | Stage 5 | Future |
@@ -460,11 +473,16 @@ Minimum v0.1 fields:
 - `assets.entries.noctua_nh_d9_tr5_sp6.label`: `Noctua NH-D9 TR5-SP6`
 - `assets.entries.noctua_nh_d9_tr5_sp6.path`: `usd/cpu_fan/cpu_fan.usd`
 - `assets.entries.noctua_nh_d9_tr5_sp6.kind`: `usd_stage`
+- `lighting.default_hdri_path`:
+  `hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr`
+- `lighting.exposure`: default review exposure.
+- `lighting.intensity`: default dome light intensity.
+- `lighting.rotation`: default XYZ dome rotation in degrees.
 
-Later stages may extend this contract with canonical stage paths, camera
-config, scene group config, lighting presets, telemetry source config,
-diagnostics summaries, and optional package manifests. Those fields are not
-part of the v0.1 implementation unless a later stage pulls them in.
+Later stages may extend this contract with canonical stage paths, camera config,
+scene group config, multiple named lighting presets, telemetry source config,
+diagnostics summaries, and optional package manifests. Those fields are not part
+of the v0.1 implementation unless a later stage pulls them in.
 
 ### Reference boundary
 
@@ -519,11 +537,29 @@ Implementation notes:
 
 Jira: `DC-41`
 
-Add review lighting for the selected asset: one or more HDRI/dome/environment
-presets and the minimum exposure controls needed for clear viewport review.
+Status: implemented locally.
 
-Done when the selected asset can be viewed under the chosen lighting preset and
-the operator can see whether the preset loaded successfully.
+Add review lighting for the selected asset: a Config panel Lighting section,
+default Kloofendal HDRI from the hydrated asset package, minimum
+exposure/intensity controls, dome XYZ rotation, and clear lighting status.
+
+Done when the selected asset can be viewed under the chosen lighting preset, the
+operator can adjust exposure/intensity and dome rotation, and the operator can
+see whether the preset loaded successfully.
+
+Implementation notes:
+
+- The Config panel is docked to the left side of the BMS viewport.
+- Lighting settings can be applied and saved into the local ignored runtime
+  override config.
+- The review key light can be enabled or disabled and has its own intensity
+  control.
+- The review grid can be enabled or disabled, with configurable step and line
+  width.
+- Camera position can be saved, restored, and reset for repeatable look review.
+- HDRI background visibility is intentionally deferred: the next pass must use a
+  verified Kit/RTX background or environment setting rather than a non-working
+  DomeLight primary-ray attribute.
 
 ### Stage 3 - Synthetic Telemetry Slice
 
