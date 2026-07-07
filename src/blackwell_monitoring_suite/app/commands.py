@@ -622,6 +622,11 @@ class RuntimeController:
                 float(lighting.intensity),
                 Sdf.ValueTypeNames.Float,
             )
+            self._set_hdri_background_visibility(
+                dome_light.GetPrim(),
+                lighting.show_hdri_background,
+                Sdf,
+            )
             dome_xform = UsdGeom.Xformable(dome_light.GetPrim())
             dome_xform.ClearXformOpOrder()
             dome_xform.AddRotateXYZOp().Set(
@@ -645,6 +650,16 @@ class RuntimeController:
         )
 
     @staticmethod
+    def _set_hdri_background_visibility(dome_prim, show_background: bool, Sdf) -> None:
+        visibility_attr = dome_prim.GetAttribute("visibleInPrimaryRay")
+        if not visibility_attr:
+            visibility_attr = dome_prim.CreateAttribute(
+                "visibleInPrimaryRay",
+                Sdf.ValueTypeNames.Bool,
+            )
+        visibility_attr.Set(bool(show_background))
+
+    @staticmethod
     def _set_schema_attr(schema, create_method: str, attr_name: str, value, type_name):
         if hasattr(schema, create_method):
             getattr(schema, create_method)(value)
@@ -663,9 +678,11 @@ class RuntimeController:
             if lighting.review_key_light_enabled
             else "off"
         )
+        background_state = "show" if lighting.show_hdri_background else "hide"
         return (
             f"{prefix}: {hdri_path.name}; exposure={lighting.exposure:g}; "
-            f"intensity={lighting.intensity:g}; key={key_state}"
+            f"intensity={lighting.intensity:g}; "
+            f"hdri={background_state}; key={key_state}"
         )
 
     @staticmethod

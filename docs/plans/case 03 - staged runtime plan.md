@@ -49,20 +49,16 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Resolve the deferred HDRI-background visibility control before starting Stage 3.
-The operator request is to keep HDRI lighting and reflections active while
-hiding the HDRI image from the primary viewport/render background. The first
-attempted DomeLight `inputs:visibleInPrimaryRay` route did not affect the Kit
-RTX viewport background, so the next implementation pass should investigate the
-Kit/RTX environment or viewport background settings path before exposing the
-control again.
+Start Stage 3 only after validating the Stage 2 look-review controls in the
+running Kit app. The deferred HDRI-background visibility control has been
+implemented through Kit/RTX DomeLight `visibleInPrimaryRay` visibility.
 
 Stage 2 is complete: Blackwell Monitoring Suite v0.1 now provides a docked
 Config panel with asset load controls, review lighting controls, Kloofendal
 HDRI loading, exposure/intensity controls, optional review key light with
-intensity control, dome rotation controls, local lighting settings persistence,
-a configurable review grid, and camera save/apply/reset support for repeatable
-look review sessions.
+intensity control, HDRI background visibility control, dome rotation controls,
+local lighting settings persistence, a configurable review grid, and camera
+save/apply/reset support for repeatable look review sessions.
 
 Do not implement canonical Case 03 stage loading, camera bookmarks, scene
 groups, diagnostics, workload modes, recording tools, or telemetry until the
@@ -557,9 +553,11 @@ Implementation notes:
 - The review grid can be enabled or disabled, with configurable step and line
   width.
 - Camera position can be saved, restored, and reset for repeatable look review.
-- HDRI background visibility is intentionally deferred: the next pass must use a
-  verified Kit/RTX background or environment setting rather than a non-working
-  DomeLight primary-ray attribute.
+- HDRI background visibility can be toggled while preserving DomeLight-based
+  lighting, using Kit/RTX DomeLight `visibleInPrimaryRay` visibility.
+- Operator validation confirmed that the `Show HDRI` control switches the live
+  BMS viewport between visible HDRI background and hidden HDRI background while
+  keeping the asset lit.
 
 ### Stage 3 - Synthetic Telemetry Slice
 

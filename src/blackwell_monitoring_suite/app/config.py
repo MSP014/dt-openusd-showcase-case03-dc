@@ -11,6 +11,7 @@ LIGHTING_OVERRIDE_KEYS = (
     "default_hdri_path",
     "exposure",
     "intensity",
+    "show_hdri_background",
     "review_key_light_enabled",
     "review_key_light_intensity",
 )
@@ -42,6 +43,7 @@ class LightingConfig:
     hdri_path: str
     exposure: float
     intensity: float
+    show_hdri_background: bool
     review_key_light_enabled: bool
     review_key_light_intensity: float
     rotation: RotationConfig
@@ -127,6 +129,7 @@ class RuntimeConfig:
             ),
             exposure=float(lighting_data.get("exposure", 0.0)),
             intensity=float(lighting_data.get("intensity", 1.0)),
+            show_hdri_background=bool(lighting_data.get("show_hdri_background", True)),
             review_key_light_enabled=bool(
                 lighting_data.get("review_key_light_enabled", True)
             ),
@@ -202,6 +205,7 @@ def format_runtime_override(
         f"default_hdri_path = {_toml_string(lighting.hdri_path)}\n"
         f"exposure = {lighting.exposure:.6g}\n"
         f"intensity = {lighting.intensity:.6g}\n"
+        f"show_hdri_background = {_toml_bool(lighting.show_hdri_background)}\n"
         f"review_key_light_enabled = {_toml_bool(lighting.review_key_light_enabled)}\n"
         f"review_key_light_intensity = {lighting.review_key_light_intensity:.6g}\n"
         "\n"

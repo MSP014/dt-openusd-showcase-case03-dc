@@ -18,6 +18,7 @@ kind = "usd_stage"
 default_hdri_path = "hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr"
 exposure = 0.0
 intensity = 500.0
+show_hdri_background = true
 review_key_light_enabled = true
 review_key_light_intensity = 1200.0
 

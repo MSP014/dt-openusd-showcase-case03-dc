@@ -35,6 +35,7 @@ def test_v01_runtime_config_resolves_default_lighting():
     )
     assert config.lighting.exposure == 0.0
     assert config.lighting.intensity == 500.0
+    assert config.lighting.show_hdri_background is True
     assert config.lighting.review_key_light_enabled is True
     assert config.lighting.review_key_light_intensity == 1200.0
     assert config.lighting.rotation.x == 0.0
@@ -56,6 +57,7 @@ def test_local_lighting_override_wins_over_base_config(tmp_path):
                 'default_hdri_path = "hdri/local.exr"',
                 "exposure = 1.5",
                 "intensity = 42.0",
+                "show_hdri_background = false",
                 "review_key_light_enabled = false",
                 "review_key_light_intensity = 250.0",
                 "",
@@ -74,6 +76,7 @@ def test_local_lighting_override_wins_over_base_config(tmp_path):
     assert config.lighting.hdri_path == "hdri/local.exr"
     assert config.lighting.exposure == 1.5
     assert config.lighting.intensity == 42.0
+    assert config.lighting.show_hdri_background is False
     assert config.lighting.review_key_light_enabled is False
     assert config.lighting.review_key_light_intensity == 250.0
     assert config.lighting.rotation.x == 10.0
@@ -126,6 +129,7 @@ def test_runtime_controller_saves_and_clears_lighting_override(tmp_path):
             hdri_path="hdri/saved.exr",
             exposure=2.0,
             intensity=84.0,
+            show_hdri_background=False,
             review_key_light_enabled=False,
             review_key_light_intensity=125.0,
             rotation=RotationConfig(x=1.0, y=2.0, z=3.0),
@@ -135,6 +139,7 @@ def test_runtime_controller_saves_and_clears_lighting_override(tmp_path):
     assert local_path.exists()
     assert RuntimeConfig.load(config_path).lighting.hdri_path == "hdri/saved.exr"
     assert RuntimeConfig.load(config_path).lighting.intensity == 84.0
+    assert RuntimeConfig.load(config_path).lighting.show_hdri_background is False
 
     config = controller.clear_lighting_override()
 
@@ -152,6 +157,7 @@ def test_runtime_controller_saves_camera_override(tmp_path):
             hdri_path="hdri/saved.exr",
             exposure=2.0,
             intensity=84.0,
+            show_hdri_background=True,
             review_key_light_enabled=False,
             review_key_light_intensity=125.0,
             rotation=RotationConfig(x=1.0, y=2.0, z=3.0),
@@ -211,6 +217,7 @@ def _write_runtime_config(tmp_path: Path) -> Path:
                 'default_hdri_path = "hdri/base.exr"',
                 "exposure = 0.0",
                 "intensity = 10.0",
+                "show_hdri_background = true",
                 "review_key_light_enabled = true",
                 "review_key_light_intensity = 1200.0",
                 "",
