@@ -2,7 +2,81 @@
 
 ## 1. Unresolved Technical Debt
 
-No open technical debt items are tracked here at this moment.
+### [RUNTIME] Backfill Unit Tests for Existing BMS Runtime Modules
+
+- **Status:** Open
+- **Severity:** Medium (Test Coverage / Runtime Stability)
+- **Description:**
+  - Stage 1 and Stage 2 established the first working BMS runtime surface:
+    configured asset loading, review lighting, HDRI visibility, grid controls,
+    camera persistence, local override config, and docked OmniUI controls.
+  - Those modules were validated manually in Kit, but they do not yet have the
+    same style of focused unit-test coverage now planned for the Stage 3
+    telemetry provider.
+  - This creates regression risk as the sidebar, telemetry provider, runtime
+    state, and future scene behaviours start sharing the same app surface.
+- **Context:**
+  - Stage 3 should add tests for the new synthetic data provider immediately.
+  - Backfilling tests for older BMS runtime modules is useful, but doing all of
+    it inside Stage 3 would expand the slice beyond synthetic telemetry.
+- **Why Deferred:**
+  - The immediate Stage 3 delivery should stay focused on the telemetry provider
+    boundary and Telemetry tab.
+  - Existing BMS features need careful test seams because some behaviours depend
+    on Kit, USD stage state, local config files, or manual viewport interaction.
+- **Action Plan:**
+  - [ ] Identify testable pure-Python seams in `RuntimeConfig` and
+        `RuntimeController`.
+  - [ ] Add focused tests for local override merge/persistence behaviour.
+  - [ ] Add tests for lighting, grid, and camera config serialisation helpers.
+  - [ ] Add tests for missing asset/HDRI/config error handling where it can be
+        exercised without launching Kit.
+  - [ ] Keep Kit/viewport integration checks separate from fast unit tests.
+
+### [RUNTIME] Live Monitoring Feed Provider Integration
+
+- **Status:** Open
+- **Severity:** Medium (Architecture / Integration)
+- **Description:**
+  - Blackwell Monitoring Suite intentionally starts Stage 3 with a synthetic
+    telemetry provider. This proves that telemetry values update inside the Kit
+    runtime without depending on Houdini playback or a real data centre.
+  - The broader product concept still includes a future provider boundary where
+    a real monitoring feed can replace the synthetic generator. Possible
+    sources include HWiNFO-like local sensors, NVIDIA/NVML, Redfish, IPMI,
+    PMBus, smart PDUs, UPS or branch-circuit monitors, Grafana, MQTT, Kafka, or
+    another monitoring system.
+  - This is technical debt because the provider contract should exist before
+    Stage 3 hardcodes UI assumptions, but implementing real adapters now would
+    expand scope into hardware access, credentials, polling cadence, stale data,
+    source-specific naming, unit normalisation, topology mapping, and measured
+    versus estimated value semantics.
+- **Context:**
+  - The active Stage 3 scope remains the first-layer node telemetry subset
+    documented in `docs/knowledge_base/bms_telemetry_contract.md`.
+  - The future live-provider superset is documented now so the synthetic
+    provider, UI, and data model do not paint BMS into a toy-only corner.
+  - The current Case 03 node uses a consumer/workstation PSU, so PSU contribution
+    is represented as `psu_load_estimate_w` in Stage 3. Server-class PSU
+    measurements such as input/output power, status, temperature, or PSU fan RPM
+    are valid only when future hardware or external monitoring feeds actually
+    provide them.
+- **Why Deferred:**
+  - Stage 3 only needs changing synthetic values visible in BMS.
+  - Real provider adapters require access to actual monitoring systems and a
+    security/credential boundary that does not exist in the current local Kit
+    slice.
+  - Deferring implementation protects the roadmap while preserving a clear
+    architecture path for future live-mode work.
+- **Action Plan:**
+  - [x] Document the Stage 3 synthetic subset and future live-provider superset.
+  - [ ] Keep Stage 3 implementation behind a provider boundary.
+  - [ ] Add source, unit, timestamp, topology, and data-quality semantics to the
+        runtime telemetry model.
+  - [ ] Add live provider adapters only when a real source and validation path
+        are selected.
+  - [ ] Ensure live adapters degrade safely when sensors are missing, stale, or
+        estimated.
 
 ## 2. Resolved Technical Debt
 
