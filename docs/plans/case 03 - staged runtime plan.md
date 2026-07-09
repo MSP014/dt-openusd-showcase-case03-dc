@@ -11,14 +11,17 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and the first three runnable Blackwell Monitoring Suite
-slices: asset preview, look review, and synthetic runtime telemetry.
+external asset layout, and the first four runnable Blackwell Monitoring Suite
+slices: asset preview, look review, synthetic runtime telemetry, and
+telemetry-driven CPU fan motion.
 
 Current decisions already made:
 
 - The public application name is **Blackwell Monitoring Suite**.
-- The first build is **Blackwell Monitoring Suite v0.1**.
-- v0.1 starts with an asset preview slice, not the full canonical Case 03 stage.
+- The first build was **Blackwell Monitoring Suite v0.1**.
+- The current runtime build is **Blackwell Monitoring Suite v0.2.0**.
+- The app still starts with a component review slice, not the full canonical
+  Case 03 stage.
 - The first target asset is the Noctua NH-D9 TR5-SP6 CPU cooler.
 - The shared left sidebar now contains `Telemetry` and `Config` tabs without
   changing the viewport footprint.
@@ -29,6 +32,8 @@ Current decisions already made:
   intermittent Critical-mode throttling.
 - Packaged telemetry defaults remain read-only; operator tuning is persisted to
   the ignored `telemetry_provider.local.toml` override.
+- Stage 4 motion drives the Noctua CPU fan from telemetry through a
+  topology-validated USD rotation controller.
 - Heavy USD, texture, VDB, HDRI, and future runtime assets stay outside the
   source package and are hydrated through `assets/_external/`.
 - The application source root is `src/blackwell_monitoring_suite/`.
@@ -42,6 +47,8 @@ Jira tracking:
 - Completed implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
 - Completed implementation task: `DC-41` - Stage 2 Look Review Slice.
 - Completed implementation task: `DC-42` - Stage 3 Synthetic Telemetry Slice.
+- Completed implementation task: `DC-43` - Stage 4 Telemetry Driven Motion
+  Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
@@ -52,26 +59,21 @@ Monitoring Suite runtime code, however, runs inside Kit's Python environment
 when launched through `kit.exe`. Any Python dependency used by runtime code must
 therefore be available to Kit, not only to `case03-env`.
 
-No separate Conda environment is required for Blackwell Monitoring Suite v0.1.
+No separate Conda environment is required for Blackwell Monitoring Suite v0.2.0.
 If a later stage introduces external service processes, automation, or a web
 control surface outside Kit, the project should define that environment
 deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Proceed to Stage 4 through `DC-43` only when implementation work resumes.
-Stage 4 connects the existing telemetry snapshot to one visible scene
-behaviour: runtime rotation of the Noctua NH-D9 TR5-SP6 CPU cooler fan.
+Proceed to Stage 5 through `DC-44` when implementation work resumes. Stage 5
+loads the full Blackwell Rig server scene into BMS while keeping the controls
+minimal: load, focus/navigation, status, and the already proven lighting,
+telemetry, and CPU fan motion behaviours.
 
-Before authoring motion, verify the blade prim pivot and rotation axis at
-`/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`. The runtime behaviour
-should consume `cpu_fan_rpm` from the shared latest snapshot, remain independent
-of DCC timeline playback, survive asset reload, and stop cleanly with the
-extension lifecycle.
-
-Do not expand Stage 4 into GPU blowers, chassis fans, heatmaps, full server
-loading, cache playback, or automatic workload cycling. Those remain separate
-staged slices after the first telemetry-driven hardware motion is proven.
+Do not expand Stage 5 into cached simulation playback, automatic workload
+cycling, rack/data-hall navigation, or heatmap authoring. Those remain separate
+staged slices after the full server review surface is stable.
 
 ---
 
@@ -270,26 +272,28 @@ project should not introduce separate public product names for early and late
 stages, because that would create documentation drift without adding
 engineering value.
 
-## v0.1 Implementation Decisions
+## Runtime Implementation Decisions
 
-The first staged build is **Blackwell Monitoring Suite v0.1**.
+The first staged build was **Blackwell Monitoring Suite v0.1**. The current
+runtime build is **Blackwell Monitoring Suite v0.2.0**.
 
 Fixed names and identifiers:
 
 - Public app title: `Blackwell Monitoring Suite`
-- Version: `0.1`
+- Version: `0.2.0`
 - Kit extension id: `msp.bw.monitoring`
 - Python package root: `blackwell_monitoring_suite`
-- Runtime config: `configs/blackwell_monitoring_suite.v0.1.toml`
+- Runtime config: `configs/blackwell_monitoring_suite.v0.2.toml`
 - Application source root: `src/blackwell_monitoring_suite/`
 
 The runtime config uses TOML. This matches Kit's own `.kit` and
-`extension.toml` configuration style and allows comments. v0.1 runtime code
+`extension.toml` configuration style and allows comments. BMS runtime code
 must read it from Kit's Python environment when launched through `kit.exe`;
 `case03-env` remains the development/tooling environment, not the runtime
 Python environment for the Kit application.
 
-For v0.1, paths in runtime config are resolved from the application source root
+For the current runtime, paths in runtime config are resolved from the
+application source root
 unless a later launch contract explicitly overrides that root. Because the
 source root is `src/blackwell_monitoring_suite/`, the default hydrated asset
 root is expected to resolve to `../../assets/_external/` from that root.
@@ -456,22 +460,23 @@ diagnostics surface, not in the main operator flow.
 - The local viewer should have a small smoke check or launch check before any
   future package wrapper, container, streaming, or cloud execution work starts.
 
-### v0.1 Runtime Contract
+### Runtime Contract
 
-The v0.1 runtime contract is intentionally small. It only needs enough
-configuration to launch BMS, resolve the hydrated asset package, and load the
-first asset preview stage.
+The current runtime contract is still intentionally small. It only needs enough
+configuration to launch BMS, resolve the hydrated asset package, load the first
+asset preview stage, configure look-review controls, and connect the synthetic
+telemetry and first motion slice.
 
 The config file is:
 
 ```text
-configs/blackwell_monitoring_suite.v0.1.toml
+configs/blackwell_monitoring_suite.v0.2.toml
 ```
 
-Minimum v0.1 fields:
+Minimum runtime fields:
 
 - `app.name`: `Blackwell Monitoring Suite`
-- `app.version`: `0.1`
+- `app.version`: `0.2.0`
 - `paths.app_root`: `src/blackwell_monitoring_suite`
 - `paths.asset_root`: `../../assets/_external`
 - `assets.default_asset_id`: `noctua_nh_d9_tr5_sp6`
@@ -531,7 +536,7 @@ Implementation notes:
 
 - The app launches through `src/blackwell_monitoring_suite/start_bms.bat` or a
   direct Kit invocation with the BMS `.kit` file.
-- The runtime config is `configs/blackwell_monitoring_suite.v0.1.toml`.
+- The runtime config is `configs/blackwell_monitoring_suite.v0.2.toml`.
 - The extension id is `msp.bw.monitoring`.
 - The current default asset is `usd/cpu_fan/cpu_fan.usd` under the hydrated
   external asset package.

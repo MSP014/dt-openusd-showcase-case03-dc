@@ -13,20 +13,20 @@ from blackwell_monitoring_suite.app.config import (
 # isort: on
 
 
-def test_v01_runtime_config_resolves_default_asset():
-    config_path = Path("configs/blackwell_monitoring_suite.v0.1.toml")
+def test_v02_runtime_config_resolves_default_asset():
+    config_path = Path("configs/blackwell_monitoring_suite.v0.2.toml")
 
     config = RuntimeConfig.load(config_path, apply_local_overrides=False)
 
     assert config.app_name == "Blackwell Monitoring Suite"
-    assert config.app_version == "0.1"
+    assert config.app_version == "0.2.0"
     assert config.default_asset.asset_id == "noctua_nh_d9_tr5_sp6"
     assert config.default_asset_path.name == "cpu_fan.usd"
     assert config.default_asset_path.exists()
 
 
-def test_v01_runtime_config_resolves_default_lighting():
-    config_path = Path("configs/blackwell_monitoring_suite.v0.1.toml")
+def test_v02_runtime_config_resolves_default_lighting():
+    config_path = Path("configs/blackwell_monitoring_suite.v0.2.toml")
 
     config = RuntimeConfig.load(config_path, apply_local_overrides=False)
 
@@ -199,7 +199,7 @@ def _write_runtime_config(tmp_path: Path) -> Path:
             [
                 "[app]",
                 'name = "Blackwell Monitoring Suite"',
-                'version = "0.1"',
+                'version = "0.2.0"',
                 "",
                 "[paths]",
                 'app_root = "src/blackwell_monitoring_suite"',

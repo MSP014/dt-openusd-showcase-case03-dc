@@ -1,6 +1,6 @@
 [package]
 title = "Blackwell Monitoring Suite"
-version = "0.1.0"
+version = "0.2.0"
 description = "OpenUSD review and synthetic telemetry controls for Case 03."
 category = "Viewer"
 keywords = ["openusd", "kit", "viewer", "runtime"]

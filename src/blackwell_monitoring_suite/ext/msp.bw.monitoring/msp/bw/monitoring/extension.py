@@ -166,7 +166,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             config_path = (
                 source_root.parent.parent
                 / "configs"
-                / "blackwell_monitoring_suite.v0.1.toml"
+                / "blackwell_monitoring_suite.v0.2.toml"
             ).resolve()
 
         # isort: off

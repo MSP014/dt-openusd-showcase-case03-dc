@@ -16,12 +16,13 @@ development helpers, and the Blackwell Monitoring Suite runtime.
 
 ## Runtime Preview
 
-Blackwell Monitoring Suite 0.1.0 combines interactive Omniverse asset review
-with the Stage 3 synthetic telemetry provider and workload-state controls.
+Blackwell Monitoring Suite 0.2.0 combines interactive Omniverse asset review,
+the Stage 3 synthetic telemetry provider, workload-state controls, and Stage 4
+telemetry-driven CPU fan motion.
 
 | Nominal workload | Critical workload |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.1.0 - Nominal workload](../../docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.1.0 - Critical workload](../../docs/img/bms_0.1.0/bms_0.1.0_02.png) |
+| ![Blackwell Monitoring Suite 0.2.0 - Nominal workload](../../docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.2.0 - Critical workload](../../docs/img/bms_0.1.0/bms_0.1.0_02.png) |
 | *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
 
 ## Boundary
@@ -29,7 +30,7 @@ with the Stage 3 synthetic telemetry provider and workload-state controls.
 - `docs/` explains the architecture, contracts, and implementation decisions.
 - `assets/_external/` contains the heavy hydrated assets outside version
   control.
-- `configs/blackwell_monitoring_suite.v0.1.toml` holds the current runtime
+- `configs/blackwell_monitoring_suite.v0.2.toml` holds the current runtime
   asset and lighting config.
 - `src/blackwell_monitoring_suite/configs/telemetry_provider.toml` holds the
   packaged synthetic telemetry targets, ranges, jitter, and cadence.
