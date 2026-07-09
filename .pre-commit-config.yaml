@@ -59,6 +59,7 @@ repos:
       - id: pytest
         name: pytest
         entry: conda run -n case03-env python -m pytest
+        args: ["tests", "--basetemp", ".pytest_cache/precommit-basetemp-hook"]
         language: system
         pass_filenames: false
         always_run: true

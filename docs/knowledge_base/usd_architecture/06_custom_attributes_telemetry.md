@@ -73,6 +73,15 @@ Fans should be exported as static, independently addressable prims with pivots
 centred on their rotation axes. Blackwell Monitoring Suite can then drive
 rotation from telemetry while keeping the visual motion readable.
 
+The preferred export shape is a rotating blade or blower mesh under its own
+stable parent `Xform`, with that parent origin placed on the physical rotation
+axis. At runtime BMS validates the mesh topology first: high-valence hub poles
+define the rotation axis, and the authored parent `Xform` is used directly only
+when that axis passes close to the parent's local origin. If the authored origin
+is missing or off-axis, BMS falls back to a non-destructive Session Layer pivot
+stack around the topology-resolved axis. This keeps corrected Houdini exports
+cheap to animate while preserving compatibility with older component assets.
+
 True fan RPM is data, not necessarily the displayed angular speed. At 30 or 60
 FPS, physically accurate RPM can create strobing, stationary-looking blades, or
 backwards apparent motion. The runtime may clamp or remap RPM to a pleasing
