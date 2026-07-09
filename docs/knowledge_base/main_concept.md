@@ -135,7 +135,7 @@ The runtime is a standalone Omniverse Kit application:
 - app title: `Blackwell Monitoring Suite`;
 - first extension id: `msp.bw.monitoring`;
 - source root: `src/blackwell_monitoring_suite/`;
-- v0.1 config: `configs/blackwell_monitoring_suite.v0.1.toml`;
+- current BMS config: `configs/blackwell_monitoring_suite.v0.2.toml`;
 - first asset id: `noctua_nh_d9_tr5_sp6`;
 - first USD asset path under asset root: `usd/cpu_fan/cpu_fan.usd`.
 

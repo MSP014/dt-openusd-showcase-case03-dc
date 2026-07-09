@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 set "APP_DIR=%~dp0"
 for %%I in ("%APP_DIR%..\..") do set "REPO_ROOT=%%~fI"
-set "APP_KIT=%APP_DIR%apps\blackwell_monitoring_suite.v0.1.kit"
+set "APP_KIT=%APP_DIR%apps\blackwell_monitoring_suite.v0.2.kit"
 set "DRIVE_ROOT=%~d0\"
 set "CHECK_ONLY="
 

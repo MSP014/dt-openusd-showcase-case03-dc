@@ -33,14 +33,14 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
 > **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualisation layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
 
-## Blackwell Monitoring Suite 0.1.0 Runtime Preview
+## Blackwell Monitoring Suite 0.2.0 Runtime Preview
 
 *Omniverse runtime asset review with live synthetic node telemetry, workload
 states, thermal response, power balance, and cooling metrics.*
 
 | Nominal workload | Critical workload |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.1.0 - Nominal workload](docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.1.0 - Critical workload](docs/img/bms_0.1.0/bms_0.1.0_02.png) |
+| ![Blackwell Monitoring Suite 0.2.0 - Nominal workload](docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.2.0 - Critical workload](docs/img/bms_0.1.0/bms_0.1.0_02.png) |
 | *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
 
 ## Blackwell Rig Airflow Simulation Preview
@@ -208,7 +208,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ### 3. Running the App
 
-Blackwell Monitoring Suite v0.1 launches as a dedicated Omniverse Kit
+Blackwell Monitoring Suite v0.2.0 launches as a dedicated Omniverse Kit
 application config. The quickest local launch path is:
 
 ```powershell
@@ -228,13 +228,13 @@ Template release directory:
 ```powershell
 $kitRelease = "path\to\kit-app-template\_build\windows-x86_64\release"
 & "$kitRelease\kit\kit.exe" `
-  ".\src\blackwell_monitoring_suite\apps\blackwell_monitoring_suite.v0.1.kit" `
+  ".\src\blackwell_monitoring_suite\apps\blackwell_monitoring_suite.v0.2.kit" `
   --ext-folder "$kitRelease\exts" `
   --ext-folder "$kitRelease\extscache" `
   --ext-folder "$kitRelease\apps"
 ```
 
-The current runtime reads `configs/blackwell_monitoring_suite.v0.1.toml`,
+The current runtime reads `configs/blackwell_monitoring_suite.v0.2.toml`,
 resolves the hydrated asset package under `assets/_external/`, opens the
 configured Noctua NH-D9 TR5-SP6 CPU cooler asset in the RTX viewport, and
 applies the configured look-review lighting baseline.
@@ -245,13 +245,14 @@ intensity, and dome XYZ rotation are runtime controls applied through a
 transient `/BMS_Runtime/Lighting` session-layer setup. The HDRI background can
 be hidden from the primary viewport while preserving its lighting contribution.
 
-The current Stage 3 development build adds a synthetic node telemetry provider
-and a shared `Telemetry` / `Config` sidebar. Telemetry updates independently
-from the Kit timeline, exposes latest-snapshot thermal, power, cooling, and
-limit values, and supports manual workload targets plus display freeze/resume.
-The Config tab can tune provider cadence and per-mode metric targets through a
-separate local telemetry override.
-Hardware motion driven by those values remains Stage 4 scope.
+The current runtime includes the Stage 3 synthetic node telemetry provider and
+Stage 4 telemetry-driven CPU fan motion. Telemetry updates independently from
+the Kit timeline, exposes latest-snapshot thermal, power, cooling, and limit
+values, and supports manual workload targets plus display freeze/resume. The
+Config tab can tune provider cadence and per-mode metric targets through a
+separate local telemetry override. The CPU fan motion uses topology-validated
+axis discovery, an authored `Xform` fast path when the exported pivot is valid,
+and a Session Layer pivot-stack fallback for older exports.
 
 ---
 

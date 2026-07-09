@@ -1,6 +1,6 @@
 [app]
 name = "Blackwell Monitoring Suite"
-version = "0.1"
+version = "0.2.0"
 
 [paths]
 app_root = "src/blackwell_monitoring_suite"

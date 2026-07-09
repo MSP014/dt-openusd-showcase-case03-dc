@@ -24,10 +24,10 @@ that require it.
 
 ## 2. Current Runtime Root
 
-Blackwell Monitoring Suite v0.1 uses:
+Blackwell Monitoring Suite v0.2.0 uses:
 
 - application source root: `src/blackwell_monitoring_suite/`;
-- runtime config: `configs/blackwell_monitoring_suite.v0.1.toml`;
+- runtime config: `configs/blackwell_monitoring_suite.v0.2.toml`;
 - external asset root from that source root: `../../assets/_external/`;
 - first asset id: `noctua_nh_d9_tr5_sp6`;
 - first asset path under asset root: `usd/cpu_fan/cpu_fan.usd`.
