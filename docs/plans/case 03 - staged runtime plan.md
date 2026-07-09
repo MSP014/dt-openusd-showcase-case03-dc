@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-08
+**Last Updated**: 2026-07-09
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -880,17 +880,136 @@ Redfish, IPMI, or PMBus source.
 
 Jira: `DC-43`
 
-Connect telemetry to a visible hardware behaviour. The first practical target is
-fan rotation on the CPU cooler: when the app runs and telemetry updates, the fan
-motion updates from that data.
+Connect the synthetic telemetry snapshot to visible scene behaviour. The first
+motion target is the Noctua CPU cooler fan: the sidebar keeps reporting the
+realistic `cpu_fan_rpm`, while the viewport rotates the fan blades from the same
+live telemetry signal.
 
-The current CPU cooler USD exposes a named fan blade mesh at
-`/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`. Stage 4 should use that
-existing scene structure if pivot and rotation axis checks confirm it is
-suitable for runtime rotation.
+Scope:
 
-Done when the fan rotates from runtime telemetry and the behaviour survives app
-reload without requiring manual timeline animation.
+- create a small generic rotation-motion controller owned by
+  `msp.bw.monitoring`;
+- update it once per Kit frame from `app.next_update_async()`, not only at the
+  slower telemetry UI refresh interval;
+- use `SyntheticTelemetryProvider.latest_snapshot.metrics["cpu_fan_rpm"]` as
+  the input signal;
+- keep the UI Freeze action display-only: frozen telemetry rows must not pause
+  the provider or the fan motion.
+
+Runtime motion discovery:
+
+- do not rely on Houdini SOP nulls alone being preserved as usable USD runtime
+  controls. The preferred exported contract is a rotating mesh under a stable
+  parent `Xform` whose local origin lies on the physical rotation axis;
+- the first target mesh is
+  `/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`;
+- build edge adjacency from `faceVertexCounts` and `faceVertexIndices`;
+- use the mesh bounds only as a coarse search window. A seven-blade impeller is
+  not symmetric enough for the bounding-box centre to be a valid pivot;
+- find high-valence pole candidates near the hub. Most fan and blower meshes in
+  this project originate from 32- or 64-sided cylinders, so centre-pole
+  candidates should have at least 32 edge-connected neighbours;
+- score candidates by valence, distance from the coarse centre, and neighbour
+  distance distribution, then cluster the best candidates into the front/back
+  hub centres;
+- derive the rotation axis from the front/back hub-centre line and the pivot
+  from their midpoint or shared centre line;
+- prefer direct rotation on the authored parent `Xform` when the topology
+  result validates that the resolved axis passes close to the parent's local
+  origin. For a local `Z` axis, the resolved pivot must have near-zero `X` and
+  `Y`; the `Z` coordinate may differ because all points on that line share the
+  same rotation axis;
+- when the authored parent origin is missing or off-axis, fall back to a
+  Session Layer pivot stack shaped as
+  `translate(pivot) -> rotate(axis) -> translate(-pivot)`;
+- cache the resolved pivot and axis per prim path. Recompute only when the
+  stage, asset, or prim identity changes.
+
+For the current Noctua fan, the validated mesh-local result is a local Z-axis
+with the hub line near `(0.0, 0.0, z)` after the corrected export. Earlier
+exports produced the same physical axis with an offset mesh-local pivot; this
+remains the fallback case and test fixture. The runtime transform must be
+authored as a non-destructive Session Layer override on the existing rotating
+prim or its nearest suitable `Xform`, so the referenced USD files and root layer
+stay clean.
+
+Scalability and level of detail:
+
+- topology discovery is acceptable for a hero component or a hero server because
+  it runs on load or asset reload and then caches the pivot/axis per prim path;
+- a full server may animate all meaningful visible rotating parts: CPU fan,
+  front intake fans, rear exhaust fans, GPU blowers, and the PSU fan;
+- server-level fan and blower assets should follow the BMS motion contract
+  documented in `src/blackwell_monitoring_suite/README.md`: stable rotating
+  parent `Xform` first, topology-validated axis discovery, Session Layer pivot
+  stack only as fallback;
+- rack and data-hall views should not animate hidden server internals. At those
+  scales, motion should be gated by visibility, selected asset, camera distance,
+  and scene detail mode;
+- for a full server room, the fallback presentation can animate only
+  front-facing fans on nearby or highlighted servers, with distant racks staying
+  static or using aggregate visual cues.
+
+Timing:
+
+- measure frame deltas with monotonic time;
+- clamp a single frame delta to about `0.1` seconds to avoid a large jump after
+  focus loss, reload, or a temporary stall;
+- accumulate the angle modulo 360 degrees;
+- reset or reacquire stage and prim state on asset reload or stage close.
+
+Display mapping:
+
+The telemetry RPM remains physically plausible for the hardware config: Idle
+`650-900`, Nominal `1000-1380`, Surge `1500-1950`, Critical `2050-2300`. The
+viewport should not use those RPM values directly, because a seven-blade fan
+sampled by an interactive viewport can alias, appear frozen, or reverse. Stage
+4 should map telemetry RPM to a labelled presentation speed range that remains
+visually readable, responds to jitter and interpolation, and keeps the four
+workload modes distinct. This mapping is a display device, not a new telemetry
+value. The current first-pass presentation range is `40-360 RPM`: fast enough
+to read as an active fan in the viewport, but still below the first seven-blade
+stroboscopic stop point at 50 FPS (`~429 RPM`).
+
+Stage 4 deliberately does not lock the whole Kit render loop to 50 FPS. The
+simulation/cache cadence belongs to Stage 6: cached playback should map elapsed
+seconds to authored time codes, and deterministic capture can request a fixed
+capture rate when needed. The fan controller should be robust to variable
+interactive frame rate.
+
+Failure behaviour:
+
+- missing stage, missing prim, invalid mesh path, or incompatible xform stack
+  must not crash the telemetry loop;
+- warnings should be one-shot or rate-limited;
+- extension shutdown should stop the controller and remove or neutralise the
+  runtime session override when the stage is still available.
+
+Automated checks:
+
+- telemetry RPM to presentation speed mapping, including clamp boundaries;
+- angle increment, wraparound, and `dt` clamp;
+- controller reset or reacquire behaviour;
+- topology-based pivot and axis discovery, including the Noctua 7-blade mesh
+  fixture;
+- high-valence candidate filtering for 32- and 64-sided cylinder-derived hubs;
+- session-layer authoring helper does not target the root layer;
+- missing prim or stale stage is handled without repeated errors.
+
+Manual checks:
+
+- load the Noctua NH-D9 TR5-SP6 asset and confirm continuous blade rotation;
+- confirm the runtime-resolved pivot matches the known Noctua centre closely
+  enough to avoid visible orbiting or wobble;
+- switch Idle, Nominal, Surge, and Critical and confirm the visual speed changes
+  smoothly with telemetry interpolation;
+- click Freeze and confirm the UI rows freeze while fan motion continues;
+- reload the asset and confirm rotation resumes without a visible jump;
+- confirm the source USD and root layer are not dirtied by runtime motion.
+
+Done when the CPU fan rotates from live telemetry, survives reload and
+shutdown, keeps authored USD assets clean, and has focused tests for the
+controller logic and edge cases.
 
 ### Stage 5 - Server Review Slice
 
@@ -899,6 +1018,12 @@ Jira: `DC-44`
 Move from the single hardware asset to the full server or Blackwell Rig scene.
 Keep the controls minimal: load, focus/navigation, status, and any lighting
 control already proven in earlier slices.
+
+When the full server scene arrives, fan motion should reuse the Stage 4 BMS
+motion contract rather than invent per-part exceptions: CPU cooler fans, front
+intake fans, rear exhaust fans, GPU blowers, and the PSU fan should each expose
+a stable rotating parent `Xform` whose local origin lies on the rotation axis,
+with topology-validated pivot-stack fallback for older or imperfect exports.
 
 Done when the server scene loads reproducibly, remains stable in RTX viewport,
 and can be reviewed without returning to Houdini or editing USD manually.

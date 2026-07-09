@@ -61,6 +61,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._lighting_task = None
         self._camera_sync_task = None
         self._telemetry_task = None
+        self._motion_controller = None
         self._suspend_camera_sync_until = 0.0
         self._updating_camera_controls = False
         self._telemetry_provider = None
@@ -135,6 +136,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         if self._telemetry_task:
             self._telemetry_task.cancel()
             self._telemetry_task = None
+        if self._motion_controller:
+            self._motion_controller.reset()
+            self._motion_controller = None
         self._telemetry_provider = None
         self._telemetry_latch = None
         self._controller = None
@@ -167,6 +171,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
         # isort: off
         from blackwell_monitoring_suite.app.commands import RuntimeController
+        from blackwell_monitoring_suite.app.motion import RotationMotionController
         from blackwell_monitoring_suite.app.telemetry import SnapshotLatch
         from blackwell_monitoring_suite.app.telemetry import SyntheticTelemetryProvider
         from blackwell_monitoring_suite.app.telemetry import TelemetryConfig
@@ -181,6 +186,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         telemetry_config = TelemetryConfig.load(telemetry_config_path)
         self._telemetry_provider = SyntheticTelemetryProvider(telemetry_config)
         self._telemetry_latch = SnapshotLatch()
+        self._motion_controller = RotationMotionController()
         self._workload_modes = tuple(telemetry_config.modes)
         self._refresh_intervals = telemetry_config.allowed_refresh_intervals_s
 
@@ -831,8 +837,10 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
     async def _run_telemetry(self) -> None:
         try:
             import omni.kit.app
+            import omni.usd
 
             app = omni.kit.app.get_app()
+            usd_context = omni.usd.get_context()
             next_provider_tick = (
                 time.monotonic() + self._telemetry_provider.config.provider_tick_seconds
             )
@@ -852,6 +860,13 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                     self._telemetry_provider.tick()
                     next_provider_tick = (
                         now + self._telemetry_provider.config.provider_tick_seconds
+                    )
+
+                if self._motion_controller:
+                    self._motion_controller.update(
+                        usd_context.get_stage(),
+                        self._telemetry_provider.latest_snapshot,
+                        now,
                     )
 
                 if now >= self._next_telemetry_ui_update:

@@ -102,4 +102,18 @@ per-tick random flag. Episode probability is driven by CPU temperature, maximum
 GPU hotspot temperature, and PSU load, with a recovery interval between
 episodes.
 
-Telemetry-driven fan motion remains a separate Stage 4 capability.
+Stage 4 adds telemetry-driven CPU fan motion. The motion controller first
+resolves the fan axis from mesh topology, then prefers an authored rotation
+`Xform` when the resolved axis passes close to that prim's local origin. For
+example, a fan whose topology resolves to a local `Z` axis can use its authored
+parent `Xform` directly when the resolved pivot has near-zero `X` and `Y`
+offsets; the `Z` value may differ because any point on that axis is a valid
+rotation centre. If the exported hierarchy is missing or off-axis, the runtime
+falls back to a Session Layer pivot stack shaped as
+`translate(pivot) -> rotate(axis) -> translate(-pivot)`.
+
+Future server-level fan assets should repeat this pattern: each rotating blade
+or blower wheel should sit under its own stable parent `Xform`, with that
+parent origin on the physical rotation axis. The runtime still validates the
+axis from topology, so exported pivots are used as the fast path rather than as
+blind trust.
