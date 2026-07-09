@@ -20,6 +20,7 @@ repos:
       - id: isort
         name: isort
         entry: conda run -n case03-env python -m isort
+        args: ["--profile", "black"]
         language: system
         types: [python]
 

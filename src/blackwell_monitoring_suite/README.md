@@ -4,8 +4,8 @@ This directory anchors the Blackwell Monitoring Suite source tree for the Case
 03 tech pack.
 
 The application layer consumes the USD/VDB asset package and owns the
-interactive runtime experience: viewport presentation, status UI, future
-telemetry controls, operational state switching, and scene-level review tools.
+interactive runtime experience: viewport presentation, status UI, synthetic
+telemetry, operational state switching, and scene-level review tools.
 
 Use `start_bms.bat` from this directory to launch the current local Kit runtime
 when a built Omniverse Kit App Template release is available.
@@ -14,6 +14,16 @@ This layer is part of the Case 03 tech pack. The tech pack includes the
 documentation, USD contracts, asset packaging rules, validation tools,
 development helpers, and the Blackwell Monitoring Suite runtime.
 
+## Runtime Preview
+
+Blackwell Monitoring Suite 0.1.0 combines interactive Omniverse asset review
+with the Stage 3 synthetic telemetry provider and workload-state controls.
+
+| Nominal workload | Critical workload |
+| :---: | :---: |
+| ![Blackwell Monitoring Suite 0.1.0 - Nominal workload](../../docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.1.0 - Critical workload](../../docs/img/bms_0.1.0/bms_0.1.0_02.png) |
+| *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
+
 ## Boundary
 
 - `docs/` explains the architecture, contracts, and implementation decisions.
@@ -21,6 +31,8 @@ development helpers, and the Blackwell Monitoring Suite runtime.
   control.
 - `configs/blackwell_monitoring_suite.v0.1.toml` holds the current runtime
   asset and lighting config.
+- `src/blackwell_monitoring_suite/configs/telemetry_provider.toml` holds the
+  packaged synthetic telemetry targets, ranges, jitter, and cadence.
 - `tools/mcp/` provides a small NVIDIA Omniverse USD/Kit MCP helper for
   development-time API lookup.
 - External NVIDIA repositories such as `kit-usd-agents` remain outside this
@@ -45,3 +57,49 @@ The Stage 2 look-review baseline uses
 and applies it through a transient `/BMS_Runtime/Lighting` session-layer dome
 light. The Config panel can hide the HDRI background from the primary viewport
 while keeping the dome light active.
+
+The Stage 3 runtime adds a synthetic node telemetry provider and a shared
+`Telemetry` / `Config` sidebar. The provider runs independently from the Kit
+timeline and asset-loading lifecycle, publishes a latest-only snapshot, and
+supports `Idle`, `Nominal`, `Surge`, and `Critical` workload targets. The
+Telemetry tab samples that state at `1`, `5`, `10`, or `30` second intervals
+and can freeze the displayed snapshot without stopping the provider. Metric
+groups use collapsible, visually separated headers; per-GPU detail starts
+collapsed while node-level summaries remain visible. The update label includes
+the local ISO date and time, and temperature values use `°C`. Both tabs reserve
+a permanent scrollbar gutter so their content width does not shift.
+The Config tab uses the same collapsible treatment for Asset, Lighting, Grid,
+Camera, and Telemetry provider controls.
+The Config tab includes a compact telemetry-provider editor for global cadence
+defaults and per-mode numeric target, jitter, and safe-range tuning. Changes
+are saved to the separate ignored `telemetry_provider.local.toml` override.
+The editor represents a `4 modes x 20 numeric settings` matrix: the `Mode` and
+`Metric` selectors choose one matrix entry, whose target, jitter, minimum, and
+maximum values are then edited. `health_state` is not numeric, and
+`throttling_active` is derived rather than edited directly. The three GPUs
+share six configurable baselines for temperature, memory junction, hotspot,
+power, blower speed, and allocated memory.
+The provider applies per-card position bias and independent jitter; node-level
+GPU maxima and total power are derived automatically.
+Per-card memory use also has independent jitter, a hard 32 GB limit, derived
+utilisation, and a derived 96 GB node total.
+The Telemetry tab also includes a ConnectX-7 Network group with fixed link
+state/speed and workload-driven traffic, temperature, error-rate, and RDMA
+session values.
+Telemetry section titles identify the corresponding node hardware. Cooling
+includes independent RPM channels for three ARCTIC BioniX P120 front-intake
+fans and two ARCTIC P8 Max rear-exhaust fans.
+The Power section uses synthetic PDU outlet input as its source value and
+derives estimated PSU output, platform residual, conversion loss, PSU
+temperature, and PSU load. The temperature estimate uses explicit inlet
+temperature and thermal-resistance assumptions; it is not presented as a
+hardware sensor reading. The provider keeps PDU input above the CPU, GPU, and
+minimum platform demand so the displayed power balance remains consistent.
+Thermal headroom is derived from CPU temperature, inlet temperature, and the
+configured CPU temperature limit.
+Critical-mode throttling is generated as short stateful episodes rather than a
+per-tick random flag. Episode probability is driven by CPU temperature, maximum
+GPU hotspot temperature, and PSU load, with a recovery interval between
+episodes.
+
+Telemetry-driven fan motion remains a separate Stage 4 capability.

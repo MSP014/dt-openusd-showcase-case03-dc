@@ -1,0 +1,909 @@
+[provider]
+schema_version = "1.0"
+provider_id = "bms.synthetic.blackwell_node"
+provider_type = "synthetic"
+default_mode = "Nominal"
+tick_seconds = 1.0
+default_refresh_interval_s = 1
+allowed_refresh_intervals_s = [1, 5, 10, 30]
+interpolation_factor = 0.35
+psu_capacity_w = 1600.0
+psu_efficiency = 0.94
+platform_residual_min_w = 40.0
+node_inlet_temp_c = 24.0
+cpu_temp_limit_c = 95.0
+gpu_hotspot_temp_limit_c = 110.0
+throttling_cpu_trigger_c = 82.0
+throttling_gpu_hotspot_trigger_c = 100.0
+throttling_psu_load_trigger_percent = 65.0
+throttling_episode_min_s = 2.0
+throttling_episode_max_s = 5.0
+throttling_recovery_min_s = 6.0
+throttling_recovery_max_s = 12.0
+psu_inlet_temp_c = 24.0
+psu_thermal_resistance_c_per_w = 0.4
+psu_temp_limit_c = 90.0
+
+[modes.Idle]
+health_state = "OK"
+link_state = "Up"
+throttling_allowed = false
+
+[modes.Idle.workload_percent]
+target = 25.0
+jitter = 1.0
+min = 20.0
+max = 30.0
+
+[modes.Idle.cpu_temp_c]
+target = 43.0
+jitter = 0.5
+min = 35.0
+max = 55.0
+
+[modes.Idle.cpu_power_w]
+target = 75.0
+jitter = 3.0
+min = 55.0
+max = 100.0
+
+[modes.Idle.pdu_outlet_power_w]
+target = 315.0
+jitter = 6.0
+min = 290.0
+max = 340.0
+
+[modes.Idle.cpu_fan_rpm]
+target = 760.0
+jitter = 20.0
+min = 650.0
+max = 900.0
+
+[modes.Idle.cpu_fan_duty_percent]
+target = 28.0
+jitter = 1.0
+min = 22.0
+max = 35.0
+
+[modes.Idle.node_airflow_cfm]
+target = 92.0
+jitter = 2.0
+min = 80.0
+max = 110.0
+
+[modes.Nominal]
+health_state = "OK"
+link_state = "Up"
+throttling_allowed = false
+
+[modes.Nominal.workload_percent]
+target = 50.0
+jitter = 1.5
+min = 44.0
+max = 56.0
+
+[modes.Nominal.cpu_temp_c]
+target = 57.0
+jitter = 0.7
+min = 48.0
+max = 66.0
+
+[modes.Nominal.cpu_power_w]
+target = 165.0
+jitter = 5.0
+min = 135.0
+max = 205.0
+
+[modes.Nominal.pdu_outlet_power_w]
+target = 830.0
+jitter = 15.0
+min = 780.0
+max = 880.0
+
+[modes.Nominal.cpu_fan_rpm]
+target = 1180.0
+jitter = 30.0
+min = 1000.0
+max = 1380.0
+
+[modes.Nominal.cpu_fan_duty_percent]
+target = 48.0
+jitter = 1.5
+min = 40.0
+max = 58.0
+
+[modes.Nominal.node_airflow_cfm]
+target = 142.0
+jitter = 3.0
+min = 125.0
+max = 160.0
+
+[modes.Surge]
+health_state = "Warning"
+link_state = "Up"
+throttling_allowed = false
+
+[modes.Surge.workload_percent]
+target = 75.0
+jitter = 1.5
+min = 69.0
+max = 81.0
+
+[modes.Surge.cpu_temp_c]
+target = 72.0
+jitter = 0.8
+min = 64.0
+max = 80.0
+
+[modes.Surge.cpu_power_w]
+target = 255.0
+jitter = 6.0
+min = 220.0
+max = 295.0
+
+[modes.Surge.pdu_outlet_power_w]
+target = 1040.0
+jitter = 18.0
+min = 980.0
+max = 1100.0
+
+[modes.Surge.cpu_fan_rpm]
+target = 1720.0
+jitter = 35.0
+min = 1500.0
+max = 1950.0
+
+[modes.Surge.cpu_fan_duty_percent]
+target = 72.0
+jitter = 1.5
+min = 64.0
+max = 82.0
+
+[modes.Surge.node_airflow_cfm]
+target = 198.0
+jitter = 4.0
+min = 178.0
+max = 220.0
+
+[modes.Critical]
+health_state = "Critical"
+link_state = "Up"
+throttling_allowed = true
+
+[modes.Critical.workload_percent]
+target = 96.0
+jitter = 0.8
+min = 92.0
+max = 99.0
+
+[modes.Critical.cpu_temp_c]
+target = 86.0
+jitter = 0.6
+min = 82.0
+max = 92.0
+
+[modes.Critical.cpu_power_w]
+target = 315.0
+jitter = 5.0
+min = 290.0
+max = 340.0
+
+[modes.Critical.pdu_outlet_power_w]
+target = 1170.0
+jitter = 15.0
+min = 1120.0
+max = 1220.0
+
+[modes.Critical.cpu_fan_rpm]
+target = 2180.0
+jitter = 25.0
+min = 2050.0
+max = 2300.0
+
+[modes.Critical.cpu_fan_duty_percent]
+target = 96.0
+jitter = 0.8
+min = 92.0
+max = 100.0
+
+[modes.Critical.node_airflow_cfm]
+target = 238.0
+jitter = 3.0
+min = 225.0
+max = 250.0
+
+[modes.Idle.gpu_1_temp_c]
+target = 40.0
+jitter = 0.4
+min = 32.0
+max = 55.0
+
+[modes.Idle.gpu_1_memory_temp_c]
+target = 46.0
+jitter = 0.4
+min = 36.0
+max = 60.0
+
+[modes.Idle.gpu_1_hotspot_temp_c]
+target = 51.0
+jitter = 0.5
+min = 40.0
+max = 66.0
+
+[modes.Idle.gpu_1_power_w]
+target = 35.0
+jitter = 2.0
+min = 25.0
+max = 50.0
+
+[modes.Idle.gpu_2_temp_c]
+target = 40.0
+jitter = 0.4
+min = 32.0
+max = 55.0
+
+[modes.Idle.gpu_2_memory_temp_c]
+target = 46.0
+jitter = 0.4
+min = 36.0
+max = 60.0
+
+[modes.Idle.gpu_2_hotspot_temp_c]
+target = 51.0
+jitter = 0.5
+min = 40.0
+max = 66.0
+
+[modes.Idle.gpu_2_power_w]
+target = 35.0
+jitter = 2.0
+min = 25.0
+max = 50.0
+
+[modes.Idle.gpu_3_temp_c]
+target = 40.0
+jitter = 0.4
+min = 32.0
+max = 55.0
+
+[modes.Idle.gpu_3_memory_temp_c]
+target = 46.0
+jitter = 0.4
+min = 36.0
+max = 60.0
+
+[modes.Idle.gpu_3_hotspot_temp_c]
+target = 51.0
+jitter = 0.5
+min = 40.0
+max = 66.0
+
+[modes.Idle.gpu_3_power_w]
+target = 35.0
+jitter = 2.0
+min = 25.0
+max = 50.0
+
+[modes.Nominal.gpu_1_temp_c]
+target = 61.0
+jitter = 0.5
+min = 52.0
+max = 69.0
+
+[modes.Nominal.gpu_1_memory_temp_c]
+target = 68.0
+jitter = 0.5
+min = 58.0
+max = 77.0
+
+[modes.Nominal.gpu_1_hotspot_temp_c]
+target = 73.0
+jitter = 0.6
+min = 63.0
+max = 82.0
+
+[modes.Nominal.gpu_1_power_w]
+target = 155.0
+jitter = 4.0
+min = 130.0
+max = 180.0
+
+[modes.Nominal.gpu_2_temp_c]
+target = 61.0
+jitter = 0.5
+min = 52.0
+max = 69.0
+
+[modes.Nominal.gpu_2_memory_temp_c]
+target = 68.0
+jitter = 0.5
+min = 58.0
+max = 77.0
+
+[modes.Nominal.gpu_2_hotspot_temp_c]
+target = 73.0
+jitter = 0.6
+min = 63.0
+max = 82.0
+
+[modes.Nominal.gpu_2_power_w]
+target = 155.0
+jitter = 4.0
+min = 130.0
+max = 180.0
+
+[modes.Nominal.gpu_3_temp_c]
+target = 61.0
+jitter = 0.5
+min = 52.0
+max = 69.0
+
+[modes.Nominal.gpu_3_memory_temp_c]
+target = 68.0
+jitter = 0.5
+min = 58.0
+max = 77.0
+
+[modes.Nominal.gpu_3_hotspot_temp_c]
+target = 73.0
+jitter = 0.6
+min = 63.0
+max = 82.0
+
+[modes.Nominal.gpu_3_power_w]
+target = 155.0
+jitter = 4.0
+min = 130.0
+max = 180.0
+
+[modes.Surge.gpu_1_temp_c]
+target = 76.0
+jitter = 0.5
+min = 68.0
+max = 84.0
+
+[modes.Surge.gpu_1_memory_temp_c]
+target = 84.0
+jitter = 0.5
+min = 75.0
+max = 91.0
+
+[modes.Surge.gpu_1_hotspot_temp_c]
+target = 89.0
+jitter = 0.6
+min = 80.0
+max = 96.0
+
+[modes.Surge.gpu_1_power_w]
+target = 185.0
+jitter = 4.0
+min = 160.0
+max = 200.0
+
+[modes.Surge.gpu_2_temp_c]
+target = 76.0
+jitter = 0.5
+min = 68.0
+max = 84.0
+
+[modes.Surge.gpu_2_memory_temp_c]
+target = 84.0
+jitter = 0.5
+min = 75.0
+max = 91.0
+
+[modes.Surge.gpu_2_hotspot_temp_c]
+target = 89.0
+jitter = 0.6
+min = 80.0
+max = 96.0
+
+[modes.Surge.gpu_2_power_w]
+target = 185.0
+jitter = 4.0
+min = 160.0
+max = 200.0
+
+[modes.Surge.gpu_3_temp_c]
+target = 76.0
+jitter = 0.5
+min = 68.0
+max = 84.0
+
+[modes.Surge.gpu_3_memory_temp_c]
+target = 84.0
+jitter = 0.5
+min = 75.0
+max = 91.0
+
+[modes.Surge.gpu_3_hotspot_temp_c]
+target = 89.0
+jitter = 0.6
+min = 80.0
+max = 96.0
+
+[modes.Surge.gpu_3_power_w]
+target = 185.0
+jitter = 4.0
+min = 160.0
+max = 200.0
+
+[modes.Critical.gpu_1_temp_c]
+target = 88.0
+jitter = 0.4
+min = 84.0
+max = 93.0
+
+[modes.Critical.gpu_1_memory_temp_c]
+target = 96.0
+jitter = 0.4
+min = 91.0
+max = 101.0
+
+[modes.Critical.gpu_1_hotspot_temp_c]
+target = 103.0
+jitter = 0.5
+min = 98.0
+max = 108.0
+
+[modes.Critical.gpu_1_power_w]
+target = 198.0
+jitter = 2.0
+min = 190.0
+max = 200.0
+
+[modes.Critical.gpu_2_temp_c]
+target = 88.0
+jitter = 0.4
+min = 84.0
+max = 93.0
+
+[modes.Critical.gpu_2_memory_temp_c]
+target = 96.0
+jitter = 0.4
+min = 91.0
+max = 101.0
+
+[modes.Critical.gpu_2_hotspot_temp_c]
+target = 103.0
+jitter = 0.5
+min = 98.0
+max = 108.0
+
+[modes.Critical.gpu_2_power_w]
+target = 198.0
+jitter = 2.0
+min = 190.0
+max = 200.0
+
+[modes.Critical.gpu_3_temp_c]
+target = 88.0
+jitter = 0.4
+min = 84.0
+max = 93.0
+
+[modes.Critical.gpu_3_memory_temp_c]
+target = 96.0
+jitter = 0.4
+min = 91.0
+max = 101.0
+
+[modes.Critical.gpu_3_hotspot_temp_c]
+target = 103.0
+jitter = 0.5
+min = 98.0
+max = 108.0
+
+[modes.Critical.gpu_3_power_w]
+target = 198.0
+jitter = 2.0
+min = 190.0
+max = 200.0
+
+[modes.Idle.gpu_1_fan_rpm]
+target = 1100.0
+jitter = 30.0
+min = 750.0
+max = 1500.0
+
+[modes.Idle.gpu_2_fan_rpm]
+target = 1100.0
+jitter = 30.0
+min = 750.0
+max = 1500.0
+
+[modes.Idle.gpu_3_fan_rpm]
+target = 1100.0
+jitter = 30.0
+min = 750.0
+max = 1500.0
+
+[modes.Nominal.gpu_1_fan_rpm]
+target = 1900.0
+jitter = 40.0
+min = 1500.0
+max = 2300.0
+
+[modes.Nominal.gpu_2_fan_rpm]
+target = 1900.0
+jitter = 40.0
+min = 1500.0
+max = 2300.0
+
+[modes.Nominal.gpu_3_fan_rpm]
+target = 1900.0
+jitter = 40.0
+min = 1500.0
+max = 2300.0
+
+[modes.Surge.gpu_1_fan_rpm]
+target = 2800.0
+jitter = 50.0
+min = 2400.0
+max = 3200.0
+
+[modes.Surge.gpu_2_fan_rpm]
+target = 2800.0
+jitter = 50.0
+min = 2400.0
+max = 3200.0
+
+[modes.Surge.gpu_3_fan_rpm]
+target = 2800.0
+jitter = 50.0
+min = 2400.0
+max = 3200.0
+
+[modes.Critical.gpu_1_fan_rpm]
+target = 3700.0
+jitter = 60.0
+min = 3400.0
+max = 4200.0
+
+[modes.Critical.gpu_2_fan_rpm]
+target = 3700.0
+jitter = 60.0
+min = 3400.0
+max = 4200.0
+
+[modes.Critical.gpu_3_fan_rpm]
+target = 3700.0
+jitter = 60.0
+min = 3400.0
+max = 4200.0
+
+[modes.Idle.link_speed_gbps]
+target = 400.0
+jitter = 0.0
+min = 400.0
+max = 400.0
+
+[modes.Idle.network_rx_gbps]
+target = 5.0
+jitter = 1.0
+min = 1.0
+max = 12.0
+
+[modes.Idle.network_tx_gbps]
+target = 10.0
+jitter = 2.0
+min = 3.0
+max = 20.0
+
+[modes.Idle.nic_temp_c]
+target = 42.0
+jitter = 0.5
+min = 35.0
+max = 50.0
+
+[modes.Idle.packet_error_rate]
+target = 0.1
+jitter = 0.05
+min = 0.0
+max = 0.5
+
+[modes.Idle.rdma_active_sessions]
+target = 2.0
+jitter = 0.3
+min = 0.0
+max = 4.0
+
+[modes.Nominal.link_speed_gbps]
+target = 400.0
+jitter = 0.0
+min = 400.0
+max = 400.0
+
+[modes.Nominal.network_rx_gbps]
+target = 50.0
+jitter = 5.0
+min = 30.0
+max = 80.0
+
+[modes.Nominal.network_tx_gbps]
+target = 100.0
+jitter = 8.0
+min = 70.0
+max = 140.0
+
+[modes.Nominal.nic_temp_c]
+target = 55.0
+jitter = 0.7
+min = 45.0
+max = 65.0
+
+[modes.Nominal.packet_error_rate]
+target = 0.3
+jitter = 0.1
+min = 0.0
+max = 1.0
+
+[modes.Nominal.rdma_active_sessions]
+target = 12.0
+jitter = 1.0
+min = 8.0
+max = 18.0
+
+[modes.Surge.link_speed_gbps]
+target = 400.0
+jitter = 0.0
+min = 400.0
+max = 400.0
+
+[modes.Surge.network_rx_gbps]
+target = 100.0
+jitter = 8.0
+min = 70.0
+max = 140.0
+
+[modes.Surge.network_tx_gbps]
+target = 250.0
+jitter = 12.0
+min = 210.0
+max = 290.0
+
+[modes.Surge.nic_temp_c]
+target = 68.0
+jitter = 0.8
+min = 58.0
+max = 78.0
+
+[modes.Surge.packet_error_rate]
+target = 1.0
+jitter = 0.3
+min = 0.2
+max = 3.0
+
+[modes.Surge.rdma_active_sessions]
+target = 28.0
+jitter = 2.0
+min = 20.0
+max = 36.0
+
+[modes.Critical.link_speed_gbps]
+target = 400.0
+jitter = 0.0
+min = 400.0
+max = 400.0
+
+[modes.Critical.network_rx_gbps]
+target = 120.0
+jitter = 8.0
+min = 90.0
+max = 125.0
+
+[modes.Critical.network_tx_gbps]
+target = 360.0
+jitter = 10.0
+min = 330.0
+max = 385.0
+
+[modes.Critical.nic_temp_c]
+target = 82.0
+jitter = 0.8
+min = 75.0
+max = 95.0
+
+[modes.Critical.packet_error_rate]
+target = 4.0
+jitter = 1.0
+min = 1.0
+max = 10.0
+
+[modes.Critical.rdma_active_sessions]
+target = 40.0
+jitter = 2.0
+min = 32.0
+max = 48.0
+
+[modes.Idle.gpu_1_memory_used_gb]
+target = 1.0
+jitter = 0.2
+min = 0.5
+max = 2.0
+
+[modes.Idle.gpu_2_memory_used_gb]
+target = 1.0
+jitter = 0.2
+min = 0.5
+max = 2.0
+
+[modes.Idle.gpu_3_memory_used_gb]
+target = 1.0
+jitter = 0.2
+min = 0.5
+max = 2.0
+
+[modes.Nominal.gpu_1_memory_used_gb]
+target = 14.0
+jitter = 1.0
+min = 10.0
+max = 18.0
+
+[modes.Nominal.gpu_2_memory_used_gb]
+target = 14.0
+jitter = 1.0
+min = 10.0
+max = 18.0
+
+[modes.Nominal.gpu_3_memory_used_gb]
+target = 14.0
+jitter = 1.0
+min = 10.0
+max = 18.0
+
+[modes.Surge.gpu_1_memory_used_gb]
+target = 24.0
+jitter = 1.2
+min = 20.0
+max = 28.0
+
+[modes.Surge.gpu_2_memory_used_gb]
+target = 24.0
+jitter = 1.2
+min = 20.0
+max = 28.0
+
+[modes.Surge.gpu_3_memory_used_gb]
+target = 24.0
+jitter = 1.2
+min = 20.0
+max = 28.0
+
+[modes.Critical.gpu_1_memory_used_gb]
+target = 31.5
+jitter = 0.3
+min = 30.0
+max = 32.0
+
+[modes.Critical.gpu_2_memory_used_gb]
+target = 31.5
+jitter = 0.3
+min = 30.0
+max = 32.0
+
+[modes.Critical.gpu_3_memory_used_gb]
+target = 31.5
+jitter = 0.3
+min = 30.0
+max = 32.0
+
+[modes.Idle.front_fan_1_rpm]
+target = 600.0
+jitter = 30.0
+min = 200.0
+max = 800.0
+
+[modes.Idle.front_fan_2_rpm]
+target = 600.0
+jitter = 30.0
+min = 200.0
+max = 800.0
+
+[modes.Idle.front_fan_3_rpm]
+target = 600.0
+jitter = 30.0
+min = 200.0
+max = 800.0
+
+[modes.Nominal.front_fan_1_rpm]
+target = 1200.0
+jitter = 50.0
+min = 900.0
+max = 1500.0
+
+[modes.Nominal.front_fan_2_rpm]
+target = 1200.0
+jitter = 50.0
+min = 900.0
+max = 1500.0
+
+[modes.Nominal.front_fan_3_rpm]
+target = 1200.0
+jitter = 50.0
+min = 900.0
+max = 1500.0
+
+[modes.Surge.front_fan_1_rpm]
+target = 1750.0
+jitter = 60.0
+min = 1500.0
+max = 1950.0
+
+[modes.Surge.front_fan_2_rpm]
+target = 1750.0
+jitter = 60.0
+min = 1500.0
+max = 1950.0
+
+[modes.Surge.front_fan_3_rpm]
+target = 1750.0
+jitter = 60.0
+min = 1500.0
+max = 1950.0
+
+[modes.Critical.front_fan_1_rpm]
+target = 2050.0
+jitter = 25.0
+min = 1950.0
+max = 2100.0
+
+[modes.Critical.front_fan_2_rpm]
+target = 2050.0
+jitter = 25.0
+min = 1950.0
+max = 2100.0
+
+[modes.Critical.front_fan_3_rpm]
+target = 2050.0
+jitter = 25.0
+min = 1950.0
+max = 2100.0
+
+[modes.Idle.rear_fan_1_rpm]
+target = 1000.0
+jitter = 50.0
+min = 500.0
+max = 1500.0
+
+[modes.Idle.rear_fan_2_rpm]
+target = 1000.0
+jitter = 50.0
+min = 500.0
+max = 1500.0
+
+[modes.Nominal.rear_fan_1_rpm]
+target = 2200.0
+jitter = 80.0
+min = 1700.0
+max = 2700.0
+
+[modes.Nominal.rear_fan_2_rpm]
+target = 2200.0
+jitter = 80.0
+min = 1700.0
+max = 2700.0
+
+[modes.Surge.rear_fan_1_rpm]
+target = 3600.0
+jitter = 100.0
+min = 3000.0
+max = 4200.0
+
+[modes.Surge.rear_fan_2_rpm]
+target = 3600.0
+jitter = 100.0
+min = 3000.0
+max = 4200.0
+
+[modes.Critical.rear_fan_1_rpm]
+target = 4800.0
+jitter = 80.0
+min = 4400.0
+max = 5000.0
+
+[modes.Critical.rear_fan_2_rpm]
+target = 4800.0
+jitter = 80.0
+min = 4400.0
+max = 5000.0

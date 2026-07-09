@@ -43,13 +43,36 @@ Stage 3 implements only the first-layer node telemetry set.
 | Group | Metrics | Purpose |
 | :--- | :--- | :--- |
 | State | `timestamp`, `operational_state`, `workload_percent`, `health_state` | Shows whether the node is idle, nominal, surging, or critical, and anchors every value in runtime time. |
-| Thermals | `cpu_temp_c`, `gpu_temp_c_max`, `gpu_memory_temp_c_max`, `gpu_hotspot_temp_c_max`, `thermal_headroom_percent` | Provides the heat story for the CPU cooler, GPU array, memory junctions, hotspots, and remaining safety margin. |
-| Power | `cpu_power_w`, `gpu_power_w_total`, `psu_load_estimate_w`, `node_power_w_total` | Connects workload to heat generation and keeps the PSU load contribution visible without claiming unavailable PSU sensor fidelity. |
-| Cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent`, `node_airflow_cfm` | Connects the thermal state to fan response and the airflow values already defined in the rack airflow budget. |
-| Limits | `throttling_active` | Gives the operator a clear warning flag when the synthetic node reaches a thermal or power limit. |
+| Thermals | `cpu_temp_c`, per-GPU `gpu_temp_c`, `gpu_memory_temp_c`, `gpu_hotspot_temp_c`, node-level maxima, `thermal_headroom_percent` | Provides the heat story for the CPU cooler, each of the three GPUs, memory junctions, hotspots, and remaining safety margin. |
+| GPU memory | Per-GPU `gpu_memory_used_gb`, derived utilisation, and node-level total | Shows workload-driven allocation against 32 GB per card and 96 GB across the node. |
+| Power | `pdu_outlet_power_w`, derived PSU output, `cpu_power_w`, per-GPU `gpu_power_w`, derived GPU total, platform residual, PSU conversion loss, estimated PSU temperature, PSU load percent | Connects measured or synthetic PDU input to a complete node power and thermal balance without claiming unavailable consumer PSU sensors. |
+| Cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent`, per-GPU `gpu_fan_rpm`, three front `front_fan_rpm`, two rear `rear_fan_rpm`, `node_airflow_cfm` | Connects the Noctua cooler, GPU blowers, three ARCTIC BioniX P120 intake fans, and two ARCTIC P8 Max exhaust fans to thermal state and the airflow budget. |
+| Network | `link_state`, `link_speed_gbps`, `network_rx_gbps`, `network_tx_gbps`, `nic_temp_c`, `packet_error_rate`, `rdma_active_sessions` | Represents the ConnectX-7 link, asymmetric inference traffic, thermals, quality, and RDMA activity. |
+| Limits | `throttling_active` | Gives the operator an intermittent warning when Critical-mode CPU, GPU hotspot, and PSU load pressure produces a throttling episode. |
 
 The Stage 3 UI should not expose the wider live-provider contract unless the
 implementation deliberately grows beyond the synthetic node slice.
+The three RTX PRO 4500 cards are represented separately. GPU maximum and total
+metrics are derived from those component values rather than configured
+independently. GPU 1 is nearest the CPU and uses the warmest thermal baseline;
+GPU 2 is intermediate; GPU 3 uses the coolest baseline. Each card has
+independent bounded jitter. Operator configuration uses one shared GPU baseline
+per metric; card-specific variation is owned by provider rules. The provider
+also preserves the thermal ordering of GPU 1, GPU 2, and GPU 3 and keeps each
+card's hotspot at or above its memory and core temperatures.
+Per-GPU power profiles are capped at the workstation card's documented 200 W
+total board power, so derived node-level GPU power cannot exceed 600 W.
+Per-GPU memory use is capped at the documented 32 GB capacity, so independent
+jitter cannot push a card or the derived node total beyond 32 GB or 96 GB.
+Critical-mode throttling is stateful rather than independently random on every
+tick. CPU temperature, maximum GPU hotspot temperature, and PSU load determine
+episode probability; configured active and recovery durations prevent visual
+flicker. Other workload modes do not permit synthetic throttling episodes.
+The ConnectX-7 profile reports a fixed 400 Gbps negotiated link. Synthetic NIC
+temperature remains below the documented 105 C operating/warning boundary, and
+RX/TX targets respect the node's documented single-slot PCIe bandwidth trade-off.
+Front intake RPM is capped at the BioniX P120's documented 2100 RPM maximum;
+rear exhaust RPM is capped at the P8 Max's documented 5000 RPM maximum.
 
 ## Future Live Provider Superset
 
@@ -119,8 +142,12 @@ adapters. They are not all required for Stage 3.
 
 | Metric | Scope | Notes |
 | :--- | :--- | :--- |
-| `node_power_w_total` | node | Total node draw or synthetic node estimate. |
-| `psu_load_estimate_w` | node | Stage 3 estimate for the current consumer/workstation PSU boundary. |
+| `pdu_outlet_power_w` | rack/node | Smart PDU outlet input measurement or Stage 3 synthetic stand-in. |
+| `psu_output_power_estimate_w` | node | Derived DC output estimate using the documented efficiency assumption. |
+| `platform_residual_power_w` | node | Derived remainder after CPU and GPU power; includes motherboard, RAM, NIC, storage, and fans. |
+| `psu_conversion_loss_w` | node | Derived difference between PDU input and estimated PSU output. |
+| `psu_temp_estimate_c` | psu | Derived thermal-map input based on conversion loss, assumed inlet temperature, and assumed thermal resistance; not a hardware sensor reading. |
+| `psu_load_percent` | node | Estimated PSU output divided by rated PSU capacity. |
 | `psu_waste_heat_estimate_w` | node | Optional estimated PSU loss term for visual heat contribution. |
 | `psu_input_power_w` | psu/node | Only measured when a digital PSU, BMC, PMBus, PDU, or UPS source provides it. |
 | `psu_output_power_w` | psu/node | Server-class measured output when available; do not invent for consumer PSU hardware. |
@@ -183,9 +210,15 @@ BMC/IPMI/PMBus telemetry.
 
 For the current synthetic provider:
 
-- use `psu_load_estimate_w` for the PSU load contribution;
-- derive it from the synthetic node load model and known component
+- use `pdu_outlet_power_w` as the synthetic external input;
+- derive estimated PSU output, platform residual, conversion loss, PSU
+  temperature, and load percentage from that input and known CPU/GPU
   contributors;
+- keep synthetic PDU input high enough to cover CPU power, total GPU power, and
+  the configured minimum platform residual;
+- calculate `psu_temp_estimate_c` as inlet temperature plus conversion loss
+  multiplied by the configured thermal resistance, capped by the configured
+  temperature limit;
 - use `psu_waste_heat_estimate_w` only if the PSU heat contribution becomes a
   separate visible cue.
 
