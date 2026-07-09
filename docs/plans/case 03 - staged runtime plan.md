@@ -11,8 +11,8 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, planning documents in progress, and the first runnable
-Blackwell Monitoring Suite asset-preview slice.
+external asset layout, and the first three runnable Blackwell Monitoring Suite
+slices: asset preview, look review, and synthetic runtime telemetry.
 
 Current decisions already made:
 
@@ -20,6 +20,15 @@ Current decisions already made:
 - The first build is **Blackwell Monitoring Suite v0.1**.
 - v0.1 starts with an asset preview slice, not the full canonical Case 03 stage.
 - The first target asset is the Noctua NH-D9 TR5-SP6 CPU cooler.
+- The shared left sidebar now contains `Telemetry` and `Config` tabs without
+  changing the viewport footprint.
+- The Stage 3 provider produces config-driven latest-only snapshots at an
+  independent runtime cadence for `Idle`, `Nominal`, `Surge`, and `Critical`.
+- The Telemetry tab exposes workload mode, refresh cadence, freeze/resume,
+  hardware-grouped node metrics, derived power and thermal values, and
+  intermittent Critical-mode throttling.
+- Packaged telemetry defaults remain read-only; operator tuning is persisted to
+  the ignored `telemetry_provider.local.toml` override.
 - Heavy USD, texture, VDB, HDRI, and future runtime assets stay outside the
   source package and are hydrated through `assets/_external/`.
 - The application source root is `src/blackwell_monitoring_suite/`.
@@ -32,6 +41,7 @@ Jira tracking:
 - Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
 - Completed implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
 - Completed implementation task: `DC-41` - Stage 2 Look Review Slice.
+- Completed implementation task: `DC-42` - Stage 3 Synthetic Telemetry Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
@@ -49,25 +59,19 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Start Stage 3 only after validating the Stage 2 look-review controls in the
-running Kit app. The deferred HDRI-background visibility control has been
-implemented through Kit/RTX DomeLight `visibleInPrimaryRay` visibility.
+Proceed to Stage 4 through `DC-43` only when implementation work resumes.
+Stage 4 connects the existing telemetry snapshot to one visible scene
+behaviour: runtime rotation of the Noctua NH-D9 TR5-SP6 CPU cooler fan.
 
-Stage 2 is complete: Blackwell Monitoring Suite v0.1 now provides a docked
-Config panel with asset load controls, review lighting controls, Kloofendal
-HDRI loading, exposure/intensity controls, optional review key light with
-intensity control, HDRI background visibility control, dome rotation controls,
-local lighting settings persistence, a configurable review grid, and camera
-save/apply/reset support for repeatable look review sessions.
+Before authoring motion, verify the blade prim pivot and rotation axis at
+`/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`. The runtime behaviour
+should consume `cpu_fan_rpm` from the shared latest snapshot, remain independent
+of DCC timeline playback, survive asset reload, and stop cleanly with the
+extension lifecycle.
 
-Stage 3 UI discussion should start from the shared left-sidebar model: keep one
-docked BMS panel beside the viewport and switch between `Config` and
-`Telemetry` inside that panel, instead of adding separate dock panels that
-consume additional viewport space.
-
-Do not implement canonical Case 03 stage loading, camera bookmarks, scene
-groups, diagnostics, workload modes, recording tools, or telemetry until the
-roadmap reaches the stage that actually needs them.
+Do not expand Stage 4 into GPU blowers, chassis fans, heatmaps, full server
+loading, cache playback, or automatic workload cycling. Those remain separate
+staged slices after the first telemetry-driven hardware motion is proven.
 
 ---
 
@@ -207,7 +211,7 @@ from making future capabilities sound like v0.1 requirements.
 | Review lighting preset | Stage 2 | Implemented |
 | Configurable review grid | Stage 2 | Implemented |
 | Review camera persistence | Stage 2 | Implemented |
-| Synthetic telemetry values | Stage 3 | Future |
+| Synthetic telemetry values | Stage 3 | Implemented |
 | Fan motion driven by telemetry | Stage 4 | Future |
 | Full server / Blackwell Rig stage | Stage 5 | Future |
 | Cached simulation visual layer | Stage 6 | Future |
@@ -568,6 +572,8 @@ Implementation notes:
 
 Jira: `DC-42`
 
+Status: implemented locally.
+
 Add a minimal synthetic telemetry source that runs with the application. This is
 not DCC timeline playback; it is runtime data produced or received while the app
 is open.
@@ -617,8 +623,11 @@ Stage 3 runtime snapshot model:
   read the same snapshot rather than duplicating generator logic.
 - Each snapshot contains the current timestamp, selected operational state,
   refresh interval, and current metric values.
-- Each metric value should carry its unit and `quality = synthetic` so a future
-  live provider can replace the generator without forcing UI rewrites.
+- Each metric value carries its unit and an explicit quality marker. Provider
+  source values use `quality = synthetic`; aggregates, balances, utilisation,
+  thermal headroom, and other calculated values use `quality = derived`.
+  This distinction lets a future live provider replace synthetic sources
+  without presenting calculations as measured sensors or forcing UI rewrites.
 - Default refresh interval is 1 second. The Telemetry tab may expose a
   `1 / 5 / 10 / 30 s` refresh selector so the operator can reduce update
   frequency if needed.
@@ -652,15 +661,61 @@ Stage 3 provider lifecycle:
 - Provider shutdown should be idempotent so repeated shutdown or failed startup
   paths do not raise extra errors.
 
+Stage 3 Kit runtime guardrails:
+
+- Do not run the telemetry provider through unmanaged `threading.Thread`
+  workers, orphan timers, or callbacks that cannot be cancelled.
+- Prefer a Kit-compatible async/update-loop integration with explicit stored
+  task/subscription handles owned by the extension or runtime controller.
+- Cancel or unsubscribe those handles during extension shutdown and tolerate
+  repeated start/stop calls without raising follow-on errors.
+- Keep provider configuration path resolution behind a resolver/API boundary
+  instead of hardcoding paths relative to the current working directory or Kit
+  install layout.
+- Treat the provider's packaged base config as read-only; operator changes must
+  go to a local override file, not back into the packaged default file.
+
+Stage 3 implementation map:
+
+| Path | Purpose |
+| :--- | :--- |
+| `src/blackwell_monitoring_suite/app/telemetry/__init__.py` | Public package boundary for telemetry provider code. |
+| `src/blackwell_monitoring_suite/app/telemetry/model.py` | `TelemetrySnapshot`, metric value model, workload/health constants, and Stage 3 metric ids. |
+| `src/blackwell_monitoring_suite/app/telemetry/config.py` | Load and merge `telemetry_provider.toml` with `telemetry_provider.local.toml`. |
+| `src/blackwell_monitoring_suite/app/telemetry/provider.py` | Synthetic provider, fixed provider tick, interpolation, jitter, freeze-independent latest snapshot state. |
+| `src/blackwell_monitoring_suite/configs/telemetry_provider.toml` | Packaged read-only base targets, ranges, jitter, default mode, and allowed refresh intervals. |
+| `tests/test_telemetry_config.py` | Pure-Python tests for provider config loading, override merge, defaults, and invalid values. |
+| `tests/test_telemetry_provider.py` | Pure-Python tests for provider snapshots, cadence semantics, mode changes, freeze/resume display behaviour, deterministic seeded output, and range clamping. |
+
+Stage 3 extension integration:
+
+- `src/blackwell_monitoring_suite/ext/msp.bw.monitoring/msp/bw/monitoring/extension.py`
+  remains the Kit extension entry point for this slice.
+- Add provider startup/shutdown ownership to `on_startup` and `on_shutdown`,
+  storing task/subscription handles as explicit extension fields.
+- Convert the current monolithic left panel into a shared sidebar with an
+  internal `Telemetry` / `Config` tab switcher.
+- Move the current asset, lighting, grid, and camera controls into a
+  `_build_config_tab()` helper without changing their runtime behaviour.
+- Add `_build_telemetry_tab()` for read-only latest snapshot values, workload
+  mode selector, refresh interval selector, and `Freeze` / `Resume`.
+- Keep UI refresh separate from provider tick: the Telemetry tab samples the
+  latest snapshot at the selected UI refresh interval.
+- Keep `src/blackwell_monitoring_suite/app/commands.py` focused on Kit/USD
+  runtime commands; do not place synthetic telemetry generator logic there.
+- Keep the telemetry provider independent from asset loading. Loading an asset
+  may later subscribe scene behaviour to telemetry, but asset load must not own
+  provider lifetime.
+
 Stage 3 provider testing:
 
 - Add focused unit tests for the synthetic data provider module as part of
   Stage 3.
-- Tests should cover the happy path and 5-8 boundary cases, including invalid
-  workload mode, unsupported refresh interval, freeze/resume behaviour,
-  timestamp monotonicity after resume, metric unit/quality presence, expected
-  metric keys, value clamping inside safe ranges, and deterministic output when
-  a seeded generator is used.
+- Tests cover the happy path and boundary cases including invalid workload
+  mode, unsupported refresh interval, freeze/resume behaviour, timestamp
+  monotonicity after resume, metric unit/quality presence, expected metric keys,
+  value clamping, deterministic seeded output, GPU ordering and capacity,
+  derived metric consistency, node power balance, and intermittent throttling.
 - Keep these tests independent of Kit UI so the provider boundary remains
   portable and can later move behind a process or container boundary.
 
@@ -674,17 +729,29 @@ Stage 3 generator behaviour:
   new targets instead of jumping instantly.
 - The provider may add bounded jitter around the current mode target so the
   telemetry reads as live data without becoming noisy or distracting.
-- Provider cadence is driven by Kit runtime/app update time or another monotonic
-  runtime clock, not by Houdini or DCC timeline playback.
+- Provider cadence is driven by Kit runtime/app update time or another
+  monotonic runtime clock, not by Houdini or DCC timeline playback.
+- Provider state progression should run at its own fixed cadence, initially
+  around 1 Hz, so interpolation and jitter remain predictable.
+- The UI refresh selector controls how often the Telemetry tab samples the
+  latest provider snapshot; it must not slow the provider's internal state
+  progression.
 - The UI timestamp may use wall-clock time for live-monitoring readability, but
   generator progression must not depend on DCC playback state.
-- When `Freeze` is active, displayed telemetry remains fixed on the current
-  snapshot until `Resume` is clicked.
+- When `Freeze` is active, the provider should continue running and producing
+  latest snapshots, but the UI should keep displaying the frozen snapshot until
+  `Resume` is clicked.
+- `throttling_active` is generated as a stateful Critical-mode episode rather
+  than a static mode flag or per-tick random flicker. Episode probability is
+  driven by CPU temperature, maximum GPU hotspot temperature, and PSU load;
+  configured active and recovery durations keep the signal intermittent.
 
 Stage 3 telemetry provider config:
 
-- Metric targets and ranges are config-driven, not hardcoded into the
-  generator.
+- Generated metric baselines and safe ranges are config-driven. Aggregates and
+  physically linked values are calculated by provider rules so operator edits
+  cannot create contradictory GPU totals, thermal ordering, memory capacity,
+  or node power balance.
 - Add a separate telemetry provider config file owned by the telemetry/data
   provider module. Do not store telemetry targets in the existing BMS local
   operator override config used for lighting, grid, camera, and look-review
@@ -692,6 +759,11 @@ Stage 3 telemetry provider config:
 - The `Config` tab may expose telemetry provider settings, but persistence must
   go through the provider config path/API, not through the current BMS
   `.local.toml` override.
+- Use a read-only packaged base file plus a writable local override, for
+  example `telemetry_provider.toml` merged with
+  `telemetry_provider.local.toml`.
+- The local override should be ignored by git and should contain operator edits
+  such as tuned targets or jitter/range changes.
 - The provider config file layout should let the telemetry module move later
   into a separate process or container with its own config and without breaking
   the BMS data flow.
@@ -700,7 +772,9 @@ Stage 3 telemetry provider config:
 - The config should define per-mode targets for `Idle`, `Nominal`, `Surge`, and
   `Critical`, grouped by the Stage 3 telemetry groups.
 - Numeric metrics should support `target`, `jitter`, `min`, and `max`.
-- Boolean and string metrics should support direct per-mode values.
+- String state metrics support direct per-mode values. The Critical-mode
+  `throttling_allowed` boolean is a provider gate; the displayed
+  `throttling_active` value is calculated by the stateful throttling model.
 - Initial values may be rough but plausible; tuning after runtime inspection is
   expected.
 
@@ -731,13 +805,14 @@ Stage 3 telemetry UI acceptance:
   refresh interval selector, and `Freeze` / `Resume` control.
 - Show a timestamp at the top of the telemetry view as `Last update` while
   running and as `Frozen at` while the view is frozen.
-- Present metric values by the first-layer groups below: `State`, `Thermals`,
-  `Power`, `Cooling`, and `Limits`.
+- Present metric values by operator meaning and identified hardware: node,
+  CPU, each GPU, GPU array summary, power, CPU cooling, front intake, rear
+  exhaust, airflow, network, and limits.
 - Each visible metric row or compact card should show a human-readable label,
   current value, and unit.
-- Metric `quality` is part of the runtime snapshot contract, but because all
-  Stage 3 values are synthetic it does not need to be prominent in the first UI;
-  it may stay hidden or appear only in a later detail/diagnostics surface.
+- Metric `quality` is part of the runtime snapshot contract, but does not need
+  to be prominent in the first UI. Synthetic source and derived value quality
+  may remain hidden until a later detail or diagnostics surface.
 - Use health/state colour only for high-level status readability: neutral/OK for
   normal state, amber for warning or degraded state, and red for critical state.
 - Surface `throttling_active = true` as a clear warning indicator, row, or badge.
@@ -752,8 +827,9 @@ Stage 3 explicit non-goals:
   Stage 4.
 - No live monitoring source, external feed adapter, network transport, or
   containerised provider runtime.
-- No alert/rule engine beyond displaying simple `health_state` and
-  `throttling_active` status from the synthetic snapshot.
+- No general alert or rule engine. `health_state` remains a direct mode value;
+  the provider only owns the bounded CPU/GPU/PSU pressure model needed to
+  generate intermittent `throttling_active` episodes.
 
 Stage 3 manual validation:
 
@@ -766,26 +842,39 @@ Stage 3 manual validation:
 - Switching between `Telemetry` and `Config` does not resize, overlap, or damage
   the viewport/sidebar layout.
 
+Operator validation on 2026-07-09 confirmed all Stage 3 manual acceptance
+items, including mode transitions, independent runtime updates, freeze/resume,
+tab switching, config persistence, intermittent throttling, and clean BMS
+restart/shutdown behaviour.
+
 First-layer node telemetry groups:
 
 | Group | Metrics | Purpose |
 | :--- | :--- | :--- |
-| State | `timestamp`, `operational_state`, `workload_percent`, `health_state` | Shows whether the node is idle, nominal, surging, or critical, and anchors every value in runtime time. |
-| Thermals | `cpu_temp_c`, `gpu_temp_c_max`, `gpu_memory_temp_c_max`, `gpu_hotspot_temp_c_max`, `thermal_headroom_percent` | Provides the heat story for the CPU cooler, GPU array, memory junctions, hotspots, and remaining safety margin. |
-| Power | `cpu_power_w`, `gpu_power_w_total`, `psu_load_estimate_w`, `node_power_w_total` | Connects workload to heat generation and keeps the PSU load contribution visible without claiming unavailable PSU sensor fidelity. |
-| Cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent`, `node_airflow_cfm` | Connects the thermal state to fan response and the airflow values already defined in the rack airflow budget. |
-| Limits | `throttling_active` | Gives the operator a clear warning flag when the synthetic node reaches a thermal or power limit. |
+| Node | `timestamp`, `operational_state`, `workload_percent`, `health_state` | Anchors the snapshot in runtime time and shows the selected workload and node health. |
+| CPU | `cpu_temp_c`, derived `thermal_headroom_percent`, `cpu_power_w` | Connects CPU workload, package power, temperature, and remaining thermal margin. |
+| GPU 1 / 2 / 3 | Per-GPU temperature, memory temperature, hotspot, power, blower RPM, allocated memory, and derived memory utilisation | Represents all three RTX PRO 4500 cards separately with independent jitter and provider-owned positional thermal bias. |
+| GPU array | Maximum GPU, memory, and hotspot temperatures; total GPU power; total allocated GPU memory | Derives node-level GPU summaries from the three component values. |
+| Power | `pdu_outlet_power_w`, `psu_output_power_estimate_w`, `cpu_power_w`, `gpu_power_w_total`, `platform_residual_power_w`, `psu_conversion_loss_w`, `psu_temp_estimate_c`, `psu_load_percent` | Balances synthetic PDU input, estimated PSU output, measured-class component contributors, platform remainder, conversion loss, thermal estimate, and PSU capacity without claiming unavailable consumer PSU sensors. |
+| CPU cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent` | Connects CPU thermal state to the Noctua cooler response. |
+| Front intake | Three independent `front_fan_rpm` channels | Represents the three ARCTIC BioniX P120 front-intake fans. |
+| Rear exhaust | Two independent `rear_fan_rpm` channels | Represents the two ARCTIC P8 Max rear-exhaust fans. |
+| Airflow | `node_airflow_cfm` | Exposes the current node airflow estimate without inventing unsupported intake/exhaust measurements. |
+| Network | `link_state`, `link_speed_gbps`, RX/TX throughput, `nic_temp_c`, packet error rate, and active RDMA sessions | Represents the NVIDIA ConnectX-7 link and workload-driven network activity. |
+| Limits | `throttling_active` | Shows intermittent Critical-mode throttling episodes driven by CPU, GPU hotspot, and PSU load pressure. |
 
 Deferred rack/facility telemetry fields and the extended live-provider contract
-belong in `docs/knowledge_base/bms_telemetry_contract.md`. They should not
-appear in the Stage 3 UI unless the slice explicitly grows to server/rack
-scale.
+remain in `docs/knowledge_base/bms_telemetry_contract.md`. Stage 3 deliberately
+expanded the node slice to cover the installed GPUs, cooling fans, PSU/PDU
+balance, and ConnectX-7 NIC, but it does not expose rack or facility telemetry.
 
 The current Case 03 node uses a consumer/workstation PSU. Stage 3 therefore
-treats PSU contribution as `psu_load_estimate_w`, not as a direct PSU sensor
-reading. Server-class PSU fields are reserved for future live providers that
-can actually supply them through digital PSU, smart PDU, UPS, branch circuit,
-BMC, Redfish, IPMI, or PMBus data sources.
+uses synthetic `pdu_outlet_power_w` as the external input and derives PSU
+output, platform residual, conversion loss, load percentage, and estimated
+temperature. These estimates remain distinct from direct PSU sensor readings.
+Server-class PSU fields are reserved for future live providers that can supply
+them through a digital PSU, smart PDU, UPS, branch circuit monitor, BMC,
+Redfish, IPMI, or PMBus source.
 
 ### Stage 4 - Telemetry Driven Motion Slice
 

@@ -13,7 +13,11 @@ hydrated OpenUSD assets, synthetic telemetry, and staged Omniverse runtime
 capabilities.
 
 A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
-The current repository validates the first production stages of the lifecycle: *Geometry Foundation → Houdini Simulation Cache → USD/OpenVDB Packaging*. The planned runtime stages are documented as architecture contracts and WIP implementation notes: *Synthetic Telemetry → State Switching → Omniverse Visualisation*.
+The current repository validates the production path from *Geometry Foundation
+→ Houdini Simulation Cache → USD/OpenVDB Packaging* into a runnable Omniverse
+application with asset review, look-review controls, and config-driven synthetic
+telemetry. Later telemetry-driven motion, simulation playback, and scale
+navigation remain staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -28,6 +32,16 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
 > **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualisation layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
+
+## Blackwell Monitoring Suite 0.1.0 Runtime Preview
+
+*Omniverse runtime asset review with live synthetic node telemetry, workload
+states, thermal response, power balance, and cooling metrics.*
+
+| Nominal workload | Critical workload |
+| :---: | :---: |
+| ![Blackwell Monitoring Suite 0.1.0 - Nominal workload](docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.1.0 - Critical workload](docs/img/bms_0.1.0/bms_0.1.0_02.png) |
+| *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
 
 ## Blackwell Rig Airflow Simulation Preview
 
@@ -231,6 +245,14 @@ intensity, and dome XYZ rotation are runtime controls applied through a
 transient `/BMS_Runtime/Lighting` session-layer setup. The HDRI background can
 be hidden from the primary viewport while preserving its lighting contribution.
 
+The current Stage 3 development build adds a synthetic node telemetry provider
+and a shared `Telemetry` / `Config` sidebar. Telemetry updates independently
+from the Kit timeline, exposes latest-snapshot thermal, power, cooling, and
+limit values, and supports manual workload targets plus display freeze/resume.
+The Config tab can tune provider cadence and per-mode metric targets through a
+separate local telemetry override.
+Hardware motion driven by those values remains Stage 4 scope.
+
 ---
 
 ## 📂 Repository Structure
@@ -264,6 +286,7 @@ be hidden from the primary viewport while preserving its lighting contribution.
 
 ## 📜 Changelog
 
+* **Week of 6 July, 2026:** Delivered Blackwell Monitoring Suite 0.1 through its first three runtime slices, combining Omniverse asset and look review with config-driven synthetic telemetry, validated workload states, hardware-aware power and thermal modelling, focused provider tests, and public runtime evidence.
 * **Week of 29 June, 2026:** Advanced Case 03 from node-scale airflow proof toward rack-level production planning, added Omniverse MCP helper tooling, clarified the visualisation contract, and migrated the project baseline to Python 3.11.15.
 * **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a testable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport validation frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
 * **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a path-portable runtime packaging guardrail for future viewer delivery.

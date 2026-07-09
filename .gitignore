@@ -57,6 +57,7 @@ png/
 
 # --- Local Runtime Overrides ---
 configs/*.local.toml
+**/configs/*.local.toml
 
 # --- Python ---
 __pycache__/
