@@ -228,13 +228,13 @@ Template release directory:
 ```powershell
 $kitRelease = "path\to\kit-app-template\_build\windows-x86_64\release"
 & "$kitRelease\kit\kit.exe" `
-  ".\src\blackwell_monitoring_suite\apps\blackwell_monitoring_suite.v0.2.kit" `
+  ".\src\blackwell_monitoring_suite\apps\blackwell_monitoring_suite.kit" `
   --ext-folder "$kitRelease\exts" `
   --ext-folder "$kitRelease\extscache" `
   --ext-folder "$kitRelease\apps"
 ```
 
-The current runtime reads `configs/blackwell_monitoring_suite.v0.2.toml`,
+The current runtime reads `configs/blackwell_monitoring_suite.toml`,
 resolves the hydrated asset package under `assets/_external/`, opens the
 configured Noctua NH-D9 TR5-SP6 CPU cooler asset in the RTX viewport, and
 applies the configured look-review lighting baseline.

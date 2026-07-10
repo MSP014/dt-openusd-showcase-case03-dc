@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-09
+**Last Updated**: 2026-07-10
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -66,14 +66,61 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Proceed to Stage 5 through `DC-44` when implementation work resumes. Stage 5
-loads the full Blackwell Rig server scene into BMS while keeping the controls
-minimal: load, focus/navigation, status, and the already proven lighting,
-telemetry, and CPU fan motion behaviours.
+Stage 5 planning is active through `DC-44`. Implementation begins after the
+required server components reach `Composition ready`. BMS then opens the
+configured canonical full-server stage by default while retaining load/reload,
+focus/navigation, status, and the already proven lighting, telemetry, and fan
+motion behaviours.
+
+Until the readiness gate passes, topology correction and re-export remain
+Houdini-side work.
 
 Do not expand Stage 5 into cached simulation playback, automatic workload
 cycling, rack/data-hall navigation, or heatmap authoring. Those remain separate
 staged slices after the full server review surface is stable.
+
+---
+
+## Runtime Versioning
+
+Blackwell Monitoring Suite uses semantic versioning for public runtime
+milestones. A minor `0.x.0` release represents a coherent operator-visible
+capability, not an automatic increment for every delivery stage. Patch releases
+such as `0.3.1` are reserved for fixes to an already released milestone.
+
+The current runtime is `0.2.0`, released after Stage 4. Future release
+milestones are:
+
+| Completed through | Version | Runtime milestone |
+| :--- | :--- | :--- |
+| Stage 4 | `0.2.0` | Telemetry and CPU fan motion; current release. |
+| Stage 5 | `0.3.0` | Full Server Runtime. |
+| Stage 8 | `0.4.0` | Cached Simulation Review. |
+| Stage 10 | `0.5.0` | Server Visual Analytics. |
+| Stage 12 | `0.6.0` | Multi-Scale Runtime Foundation. |
+| Stage 14 | `0.7.0` | Multi-Scale Visual Analytics. |
+| Stage 16 | `0.8.0` | Operational Runtime. |
+| Stage 17 | `0.9.0` | Feature-complete runtime with RDMA flow visualisation. |
+| Stage 18 | `1.0.0` | Portfolio-ready release and stable demonstration workflow. |
+
+Versioning rules:
+
+- keep the last released version during intermediate stages within a release
+  track;
+- use an optional semantic pre-release such as `0.4.0-dev.1` only when an
+  intermediate build must be distributed or recorded explicitly;
+- increment the patch number for fixes to a released milestone, not for the
+  next roadmap stage;
+- update package, extension, Kit application, runtime config, tests, and public
+  documentation version metadata together when a milestone is released;
+- release `1.0.0` only after Stage 18 also passes the end-to-end launch and demo
+  smoke path, has current setup documentation, contains no critical known
+  defects, and reports consistent version metadata.
+
+Use stable runtime filenames such as
+`blackwell_monitoring_suite.kit` and `blackwell_monitoring_suite.toml`. Keep the
+semantic version in metadata instead of renaming runtime paths at every minor
+release. The current `0.2.0` runtime already follows this stable path contract.
 
 ---
 
@@ -203,7 +250,7 @@ provide:
 This table is the compact source of truth for scope. It prevents later sections
 from making future capabilities sound like v0.1 requirements.
 
-| Capability | First Stage | v0.1 Status |
+| Capability | First Stage | Current Status |
 | :--- | :--- | :--- |
 | Dedicated BMS app launch | Stage 1 | Implemented |
 | Runtime TOML config loading | Stage 1 | Implemented |
@@ -214,13 +261,25 @@ from making future capabilities sound like v0.1 requirements.
 | Configurable review grid | Stage 2 | Implemented |
 | Review camera persistence | Stage 2 | Implemented |
 | Synthetic telemetry values | Stage 3 | Implemented |
-| Fan motion driven by telemetry | Stage 4 | Future |
+| Fan motion driven by telemetry | Stage 4 | Implemented |
 | Full server / Blackwell Rig stage | Stage 5 | Future |
 | Cached simulation visual layer | Stage 6 | Future |
-| Manual workload states | Stage 7 | Future |
-| Server/rack/data hall navigation | Stage 8 | Future |
-| Camera bookmarks | Stage 8 | Future |
-| Scene group toggles | Stage 8 | Future |
+| Engineering X-Ray visual mode | Stage 7 | Future |
+| Workload-to-cache state binding | Stage 8 | Future |
+| Server velocity trail foundation | Stage 9 | Future |
+| Server heatmap foundation | Stage 10 | Future |
+| Server/rack/data hall navigation | Stage 11 | Future |
+| Camera bookmarks | Stage 11 | Future |
+| Scene group toggles | Stage 11 | Future |
+| Multi-scale telemetry model | Stage 12 | Future |
+| Multi-scale velocity trail expansion | Stage 13 | Future |
+| Multi-scale heatmap expansion | Stage 14 | Future |
+| Telemetry and scale-driven material states | Stage 15 | Future |
+| Sequential ignition orchestration | Stage 16 | Future |
+| Rack and data-hall RDMA flow visualisation | Stage 17 | Future |
+| Interaction and UI refinement | Stage 18 | Future |
+| Selection-aware context inspector | Stage 18 | Future, optional |
+| Viewport-embedded HUD overlay | Stage 18 | Future |
 | Diagnostics surface | TBD | Future |
 
 ---
@@ -283,7 +342,7 @@ Fixed names and identifiers:
 - Version: `0.2.0`
 - Kit extension id: `msp.bw.monitoring`
 - Python package root: `blackwell_monitoring_suite`
-- Runtime config: `configs/blackwell_monitoring_suite.v0.2.toml`
+- Runtime config: `configs/blackwell_monitoring_suite.toml`
 - Application source root: `src/blackwell_monitoring_suite/`
 
 The runtime config uses TOML. This matches Kit's own `.kit` and
@@ -470,7 +529,7 @@ telemetry and first motion slice.
 The config file is:
 
 ```text
-configs/blackwell_monitoring_suite.v0.2.toml
+configs/blackwell_monitoring_suite.toml
 ```
 
 Minimum runtime fields:
@@ -517,554 +576,456 @@ actual time spent; then the task should move through the available workflow to
 Done. The next stage task should only be moved to In Progress when active work
 on that stage begins.
 
-### Stage 1 - Blackwell Monitoring Suite v0.1 Asset Preview Slice
+### Completed Runtime Stages
 
-Jira: `DC-40`
+Detailed plans for completed runtime stages are preserved in
+[Case 03 - Completed Runtime Stage Plans](case%2003%20-%20completed%20runtime%20stage%20plans.md).
 
-Status: implemented locally.
-
-Build the smallest useful app surface: launch Blackwell Monitoring Suite v0.1,
-show the RTX viewport, load one configured USD asset from the hydrated asset
-package, and show basic load status. The first target asset is the Noctua NH-D9
-TR5-SP6 CPU cooler exported at `assets/_external/usd/cpu_fan/cpu_fan.usd`.
-
-Done when the selected asset is visible in the viewport, the load path/result is
-visible in status, and the slice does not require a hidden absolute workstation
-path.
-
-Implementation notes:
-
-- The app launches through `src/blackwell_monitoring_suite/start_bms.bat` or a
-  direct Kit invocation with the BMS `.kit` file.
-- The runtime config is `configs/blackwell_monitoring_suite.v0.2.toml`.
-- The extension id is `msp.bw.monitoring`.
-- The current default asset is `usd/cpu_fan/cpu_fan.usd` under the hydrated
-  external asset package.
-- Runtime review camera and light helpers are created in the session layer so
-  the hydrated asset is not modified.
-
-### Stage 2 - Look Review Slice
-
-Jira: `DC-41`
-
-Status: implemented locally.
-
-Add review lighting for the selected asset: a Config panel Lighting section,
-default Kloofendal HDRI from the hydrated asset package, minimum
-exposure/intensity controls, dome XYZ rotation, and clear lighting status.
-
-Done when the selected asset can be viewed under the chosen lighting preset, the
-operator can adjust exposure/intensity and dome rotation, and the operator can
-see whether the preset loaded successfully.
-
-Implementation notes:
-
-- The Config panel is docked to the left side of the BMS viewport.
-- Lighting settings can be applied and saved into the local ignored runtime
-  override config.
-- The review key light can be enabled or disabled and has its own intensity
-  control.
-- The review grid can be enabled or disabled, with configurable step and line
-  width.
-- Camera position can be saved, restored, and reset for repeatable look review.
-- HDRI background visibility can be toggled while preserving DomeLight-based
-  lighting, using Kit/RTX DomeLight `visibleInPrimaryRay` visibility.
-- Operator validation confirmed that the `Show HDRI` control switches the live
-  BMS viewport between visible HDRI background and hidden HDRI background while
-  keeping the asset lit.
-
-### Stage 3 - Synthetic Telemetry Slice
-
-Jira: `DC-42`
-
-Status: implemented locally.
-
-Add a minimal synthetic telemetry source that runs with the application. This is
-not DCC timeline playback; it is runtime data produced or received while the app
-is open.
-
-Done when changing telemetry values are visible in the app and are independent
-of pressing Play in Houdini or another DCC.
-
-Stage 3 telemetry scope:
-
-- Implement the first-layer node telemetry subset defined in
-  `docs/knowledge_base/bms_telemetry_contract.md`.
-- Keep the future live-provider superset documented there, but do not implement
-  real monitoring feed adapters in Stage 3.
-- Group Stage 3 telemetry visually by operator meaning, not by raw sensor
-  origin.
-
-Stage 3 UI shell decision:
-
-- Keep a single left-docked BMS sidebar so the viewport is only constrained by
-  one stable panel width.
-- Convert the current `Config` panel content into a `Config` tab inside that
-  sidebar.
-- Add a sibling `Telemetry` tab for synthetic Stage 3 runtime values.
-- Implement the tabs as an internal OmniUI switcher over content frames, not as
-  multiple independent docked windows, unless a later UX pass deliberately
-  chooses native Kit dock tabs.
-- The selected tab may change, but both tabs should occupy the same sidebar
-  footprint and must not cause extra viewport shrinkage.
-
-Left sidebar tab registry:
-
-| Order | Tab | Stage | Purpose |
+| Stage | Jira | Status | Detailed plan |
 | :--- | :--- | :--- | :--- |
-| 1 | `Telemetry` | Stage 3 | Primary runtime monitoring surface for synthetic telemetry values. |
-| 2 | `Config` | Stage 2 / Stage 3 | Operator controls for asset loading, lighting, grid, camera, and local runtime settings. |
+| Stage 1 - Asset Preview | `DC-40` | Implemented | [Stage 1 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-1---blackwell-monitoring-suite-v01-asset-preview-slice) |
+| Stage 2 - Look Review | `DC-41` | Implemented | [Stage 2 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-2---look-review-slice) |
+| Stage 3 - Synthetic Telemetry | `DC-42` | Implemented | [Stage 3 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-3---synthetic-telemetry-slice) |
+| Stage 4 - Telemetry Driven Motion | `DC-43` | Implemented | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
 
-Future BMS modules should add their sidebar tabs to this registry before
-implementation so the left-slot navigation remains deliberate as the app grows.
-
-Stage 3 runtime snapshot model:
-
-- Use a latest-only in-memory `TelemetrySnapshot` produced by the synthetic
-  provider.
-- Do not add a database, persistent telemetry store, or historical buffer in
-  Stage 3.
-- The telemetry UI reads the latest snapshot; future scene behaviours should
-  read the same snapshot rather than duplicating generator logic.
-- Each snapshot contains the current timestamp, selected operational state,
-  refresh interval, and current metric values.
-- Each metric value carries its unit and an explicit quality marker. Provider
-  source values use `quality = synthetic`; aggregates, balances, utilisation,
-  thermal headroom, and other calculated values use `quality = derived`.
-  This distinction lets a future live provider replace synthetic sources
-  without presenting calculations as measured sensors or forcing UI rewrites.
-- Default refresh interval is 1 second. The Telemetry tab may expose a
-  `1 / 5 / 10 / 30 s` refresh selector so the operator can reduce update
-  frequency if needed.
-- Timestamp display is part of the synthetic live-monitoring illusion, but the
-  Stage 3 implementation only needs the current snapshot, not stored time
-  series data.
-
-Stage 3 data provider boundary:
-
-- Implement the synthetic telemetry provider as a separate application module,
-  not as inline UI callback logic.
-- Stage 3 keeps the provider in the same Kit application process, but the module
-  should be shaped so it can later move behind a process or container boundary.
-- UI code should consume provider snapshots through a small provider/state API,
-  not by reaching into generator internals.
-- The provider should start producing data as soon as BMS starts, before the
-  operator manually loads or changes scene content.
-- Containerisation, network transport, credentials, service discovery, and live
-  provider adapters remain out of Stage 3 scope.
-
-Stage 3 provider lifecycle:
-
-- Start the synthetic telemetry provider during BMS extension startup, not only
-  after the operator loads the asset.
-- Keep the provider running while the application is open so the `Telemetry`
-  tab has data immediately and remains independent from asset reloads.
-- Asset loading may subscribe scene behaviour to the latest provider snapshot,
-  but it must not be the source of provider lifetime.
-- Stop provider update tasks cleanly during extension shutdown so Kit does not
-  leave orphaned async tasks, callbacks, or timers.
-- Provider shutdown should be idempotent so repeated shutdown or failed startup
-  paths do not raise extra errors.
-
-Stage 3 Kit runtime guardrails:
-
-- Do not run the telemetry provider through unmanaged `threading.Thread`
-  workers, orphan timers, or callbacks that cannot be cancelled.
-- Prefer a Kit-compatible async/update-loop integration with explicit stored
-  task/subscription handles owned by the extension or runtime controller.
-- Cancel or unsubscribe those handles during extension shutdown and tolerate
-  repeated start/stop calls without raising follow-on errors.
-- Keep provider configuration path resolution behind a resolver/API boundary
-  instead of hardcoding paths relative to the current working directory or Kit
-  install layout.
-- Treat the provider's packaged base config as read-only; operator changes must
-  go to a local override file, not back into the packaged default file.
-
-Stage 3 implementation map:
-
-| Path | Purpose |
-| :--- | :--- |
-| `src/blackwell_monitoring_suite/app/telemetry/__init__.py` | Public package boundary for telemetry provider code. |
-| `src/blackwell_monitoring_suite/app/telemetry/model.py` | `TelemetrySnapshot`, metric value model, workload/health constants, and Stage 3 metric ids. |
-| `src/blackwell_monitoring_suite/app/telemetry/config.py` | Load and merge `telemetry_provider.toml` with `telemetry_provider.local.toml`. |
-| `src/blackwell_monitoring_suite/app/telemetry/provider.py` | Synthetic provider, fixed provider tick, interpolation, jitter, freeze-independent latest snapshot state. |
-| `src/blackwell_monitoring_suite/configs/telemetry_provider.toml` | Packaged read-only base targets, ranges, jitter, default mode, and allowed refresh intervals. |
-| `tests/test_telemetry_config.py` | Pure-Python tests for provider config loading, override merge, defaults, and invalid values. |
-| `tests/test_telemetry_provider.py` | Pure-Python tests for provider snapshots, cadence semantics, mode changes, freeze/resume display behaviour, deterministic seeded output, and range clamping. |
-
-Stage 3 extension integration:
-
-- `src/blackwell_monitoring_suite/ext/msp.bw.monitoring/msp/bw/monitoring/extension.py`
-  remains the Kit extension entry point for this slice.
-- Add provider startup/shutdown ownership to `on_startup` and `on_shutdown`,
-  storing task/subscription handles as explicit extension fields.
-- Convert the current monolithic left panel into a shared sidebar with an
-  internal `Telemetry` / `Config` tab switcher.
-- Move the current asset, lighting, grid, and camera controls into a
-  `_build_config_tab()` helper without changing their runtime behaviour.
-- Add `_build_telemetry_tab()` for read-only latest snapshot values, workload
-  mode selector, refresh interval selector, and `Freeze` / `Resume`.
-- Keep UI refresh separate from provider tick: the Telemetry tab samples the
-  latest snapshot at the selected UI refresh interval.
-- Keep `src/blackwell_monitoring_suite/app/commands.py` focused on Kit/USD
-  runtime commands; do not place synthetic telemetry generator logic there.
-- Keep the telemetry provider independent from asset loading. Loading an asset
-  may later subscribe scene behaviour to telemetry, but asset load must not own
-  provider lifetime.
-
-Stage 3 provider testing:
-
-- Add focused unit tests for the synthetic data provider module as part of
-  Stage 3.
-- Tests cover the happy path and boundary cases including invalid workload
-  mode, unsupported refresh interval, freeze/resume behaviour, timestamp
-  monotonicity after resume, metric unit/quality presence, expected metric keys,
-  value clamping, deterministic seeded output, GPU ordering and capacity,
-  derived metric consistency, node power balance, and intermittent throttling.
-- Keep these tests independent of Kit UI so the provider boundary remains
-  portable and can later move behind a process or container boundary.
-
-Stage 3 generator behaviour:
-
-- Stage 3 workload mode switching is manual. The operator selects `Idle`,
-  `Nominal`, `Surge`, or `Critical`; automatic state cycling is out of scope
-  for this slice.
-- The selected mode defines target values for each synthetic metric.
-- When the selected mode changes, metric values should move smoothly towards the
-  new targets instead of jumping instantly.
-- The provider may add bounded jitter around the current mode target so the
-  telemetry reads as live data without becoming noisy or distracting.
-- Provider cadence is driven by Kit runtime/app update time or another
-  monotonic runtime clock, not by Houdini or DCC timeline playback.
-- Provider state progression should run at its own fixed cadence, initially
-  around 1 Hz, so interpolation and jitter remain predictable.
-- The UI refresh selector controls how often the Telemetry tab samples the
-  latest provider snapshot; it must not slow the provider's internal state
-  progression.
-- The UI timestamp may use wall-clock time for live-monitoring readability, but
-  generator progression must not depend on DCC playback state.
-- When `Freeze` is active, the provider should continue running and producing
-  latest snapshots, but the UI should keep displaying the frozen snapshot until
-  `Resume` is clicked.
-- `throttling_active` is generated as a stateful Critical-mode episode rather
-  than a static mode flag or per-tick random flicker. Episode probability is
-  driven by CPU temperature, maximum GPU hotspot temperature, and PSU load;
-  configured active and recovery durations keep the signal intermittent.
-
-Stage 3 telemetry provider config:
-
-- Generated metric baselines and safe ranges are config-driven. Aggregates and
-  physically linked values are calculated by provider rules so operator edits
-  cannot create contradictory GPU totals, thermal ordering, memory capacity,
-  or node power balance.
-- Add a separate telemetry provider config file owned by the telemetry/data
-  provider module. Do not store telemetry targets in the existing BMS local
-  operator override config used for lighting, grid, camera, and look-review
-  settings.
-- The `Config` tab may expose telemetry provider settings, but persistence must
-  go through the provider config path/API, not through the current BMS
-  `.local.toml` override.
-- Use a read-only packaged base file plus a writable local override, for
-  example `telemetry_provider.toml` merged with
-  `telemetry_provider.local.toml`.
-- The local override should be ignored by git and should contain operator edits
-  such as tuned targets or jitter/range changes.
-- The provider config file layout should let the telemetry module move later
-  into a separate process or container with its own config and without breaking
-  the BMS data flow.
-- The config should define global telemetry defaults such as default workload
-  mode, default refresh interval, and allowed refresh intervals.
-- The config should define per-mode targets for `Idle`, `Nominal`, `Surge`, and
-  `Critical`, grouped by the Stage 3 telemetry groups.
-- Numeric metrics should support `target`, `jitter`, `min`, and `max`.
-- String state metrics support direct per-mode values. The Critical-mode
-  `throttling_allowed` boolean is a provider gate; the displayed
-  `throttling_active` value is calculated by the stateful throttling model.
-- Initial values may be rough but plausible; tuning after runtime inspection is
-  expected.
-
-Temporary workload mode control:
-
-- Until the BMS shell has a dedicated global mode selector, the first control in
-  the `Telemetry` tab should select the global workload mode:
-  `Idle`, `Nominal`, `Surge`, or `Critical`.
-- This selector is a temporary UI placement decision. The selected mode is still
-  global BMS runtime state, not telemetry-tab-local state.
-- Stage 3 uses the selected mode to drive synthetic telemetry values.
-- Later stages may move the same mode selector into a more global app-level
-  control area when scene behaviour, fan motion, overlays, LEDs, or other BMS
-  modules need the same state.
-- The Telemetry tab should include a `Freeze` toggle. When active, the provider
-  keeps the current snapshot visible and pauses displayed updates so the
-  operator can capture a stable UI frame. The same control should switch its
-  label to `Resume` while frozen and resume normal updates when clicked again.
-
-Stage 3 telemetry UI acceptance:
-
-- The `Telemetry` tab is read-only for displayed telemetry values in Stage 3.
-- The first implementation shows current values from the latest
-  `TelemetrySnapshot` only.
-- Do not add charts, history, sparklines, min/max columns, averages, trend
-  buffers, or telemetry persistence in this slice.
-- The top of the tab should expose the temporary workload mode selector,
-  refresh interval selector, and `Freeze` / `Resume` control.
-- Show a timestamp at the top of the telemetry view as `Last update` while
-  running and as `Frozen at` while the view is frozen.
-- Present metric values by operator meaning and identified hardware: node,
-  CPU, each GPU, GPU array summary, power, CPU cooling, front intake, rear
-  exhaust, airflow, network, and limits.
-- Each visible metric row or compact card should show a human-readable label,
-  current value, and unit.
-- Metric `quality` is part of the runtime snapshot contract, but does not need
-  to be prominent in the first UI. Synthetic source and derived value quality
-  may remain hidden until a later detail or diagnostics surface.
-- Use health/state colour only for high-level status readability: neutral/OK for
-  normal state, amber for warning or degraded state, and red for critical state.
-- Surface `throttling_active = true` as a clear warning indicator, row, or badge.
-
-Stage 3 explicit non-goals:
-
-- No charts, sparklines, trend lines, historical tables, or min/max/average
-  sensor history.
-- No telemetry storage beyond the latest in-memory snapshot needed by the UI and
-  future scene consumers.
-- No telemetry-driven fan motion or animated hardware behaviour; that starts in
-  Stage 4.
-- No live monitoring source, external feed adapter, network transport, or
-  containerised provider runtime.
-- No general alert or rule engine. `health_state` remains a direct mode value;
-  the provider only owns the bounded CPU/GPU/PSU pressure model needed to
-  generate intermittent `throttling_active` episodes.
-
-Stage 3 manual validation:
-
-- Max can launch BMS and switch the left sidebar to the `Telemetry` tab.
-- Telemetry values are visible and update without pressing Play in Houdini, Kit
-  timeline, or any other DCC timeline.
-- Changing the workload mode changes the telemetry targets and values move
-  towards the new mode range.
-- `Freeze` stops visible telemetry updates and `Resume` continues them.
-- Switching between `Telemetry` and `Config` does not resize, overlap, or damage
-  the viewport/sidebar layout.
-
-Operator validation on 2026-07-09 confirmed all Stage 3 manual acceptance
-items, including mode transitions, independent runtime updates, freeze/resume,
-tab switching, config persistence, intermittent throttling, and clean BMS
-restart/shutdown behaviour.
-
-First-layer node telemetry groups:
-
-| Group | Metrics | Purpose |
-| :--- | :--- | :--- |
-| Node | `timestamp`, `operational_state`, `workload_percent`, `health_state` | Anchors the snapshot in runtime time and shows the selected workload and node health. |
-| CPU | `cpu_temp_c`, derived `thermal_headroom_percent`, `cpu_power_w` | Connects CPU workload, package power, temperature, and remaining thermal margin. |
-| GPU 1 / 2 / 3 | Per-GPU temperature, memory temperature, hotspot, power, blower RPM, allocated memory, and derived memory utilisation | Represents all three RTX PRO 4500 cards separately with independent jitter and provider-owned positional thermal bias. |
-| GPU array | Maximum GPU, memory, and hotspot temperatures; total GPU power; total allocated GPU memory | Derives node-level GPU summaries from the three component values. |
-| Power | `pdu_outlet_power_w`, `psu_output_power_estimate_w`, `cpu_power_w`, `gpu_power_w_total`, `platform_residual_power_w`, `psu_conversion_loss_w`, `psu_temp_estimate_c`, `psu_load_percent` | Balances synthetic PDU input, estimated PSU output, measured-class component contributors, platform remainder, conversion loss, thermal estimate, and PSU capacity without claiming unavailable consumer PSU sensors. |
-| CPU cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent` | Connects CPU thermal state to the Noctua cooler response. |
-| Front intake | Three independent `front_fan_rpm` channels | Represents the three ARCTIC BioniX P120 front-intake fans. |
-| Rear exhaust | Two independent `rear_fan_rpm` channels | Represents the two ARCTIC P8 Max rear-exhaust fans. |
-| Airflow | `node_airflow_cfm` | Exposes the current node airflow estimate without inventing unsupported intake/exhaust measurements. |
-| Network | `link_state`, `link_speed_gbps`, RX/TX throughput, `nic_temp_c`, packet error rate, and active RDMA sessions | Represents the NVIDIA ConnectX-7 link and workload-driven network activity. |
-| Limits | `throttling_active` | Shows intermittent Critical-mode throttling episodes driven by CPU, GPU hotspot, and PSU load pressure. |
-
-Deferred rack/facility telemetry fields and the extended live-provider contract
-remain in `docs/knowledge_base/bms_telemetry_contract.md`. Stage 3 deliberately
-expanded the node slice to cover the installed GPUs, cooling fans, PSU/PDU
-balance, and ConnectX-7 NIC, but it does not expose rack or facility telemetry.
-
-The current Case 03 node uses a consumer/workstation PSU. Stage 3 therefore
-uses synthetic `pdu_outlet_power_w` as the external input and derives PSU
-output, platform residual, conversion loss, load percentage, and estimated
-temperature. These estimates remain distinct from direct PSU sensor readings.
-Server-class PSU fields are reserved for future live providers that can supply
-them through a digital PSU, smart PDU, UPS, branch circuit monitor, BMC,
-Redfish, IPMI, or PMBus source.
-
-### Stage 4 - Telemetry Driven Motion Slice
-
-Jira: `DC-43`
-
-Connect the synthetic telemetry snapshot to visible scene behaviour. The first
-motion target is the Noctua CPU cooler fan: the sidebar keeps reporting the
-realistic `cpu_fan_rpm`, while the viewport rotates the fan blades from the same
-live telemetry signal.
-
-Scope:
-
-- create a small generic rotation-motion controller owned by
-  `msp.bw.monitoring`;
-- update it once per Kit frame from `app.next_update_async()`, not only at the
-  slower telemetry UI refresh interval;
-- use `SyntheticTelemetryProvider.latest_snapshot.metrics["cpu_fan_rpm"]` as
-  the input signal;
-- keep the UI Freeze action display-only: frozen telemetry rows must not pause
-  the provider or the fan motion.
-
-Runtime motion discovery:
-
-- do not rely on Houdini SOP nulls alone being preserved as usable USD runtime
-  controls. The preferred exported contract is a rotating mesh under a stable
-  parent `Xform` whose local origin lies on the physical rotation axis;
-- the first target mesh is
-  `/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`;
-- build edge adjacency from `faceVertexCounts` and `faceVertexIndices`;
-- use the mesh bounds only as a coarse search window. A seven-blade impeller is
-  not symmetric enough for the bounding-box centre to be a valid pivot;
-- find high-valence pole candidates near the hub. Most fan and blower meshes in
-  this project originate from 32- or 64-sided cylinders, so centre-pole
-  candidates should have at least 32 edge-connected neighbours;
-- score candidates by valence, distance from the coarse centre, and neighbour
-  distance distribution, then cluster the best candidates into the front/back
-  hub centres;
-- derive the rotation axis from the front/back hub-centre line and the pivot
-  from their midpoint or shared centre line;
-- prefer direct rotation on the authored parent `Xform` when the topology
-  result validates that the resolved axis passes close to the parent's local
-  origin. For a local `Z` axis, the resolved pivot must have near-zero `X` and
-  `Y`; the `Z` coordinate may differ because all points on that line share the
-  same rotation axis;
-- when the authored parent origin is missing or off-axis, fall back to a
-  Session Layer pivot stack shaped as
-  `translate(pivot) -> rotate(axis) -> translate(-pivot)`;
-- cache the resolved pivot and axis per prim path. Recompute only when the
-  stage, asset, or prim identity changes.
-
-For the current Noctua fan, the validated mesh-local result is a local Z-axis
-with the hub line near `(0.0, 0.0, z)` after the corrected export. Earlier
-exports produced the same physical axis with an offset mesh-local pivot; this
-remains the fallback case and test fixture. The runtime transform must be
-authored as a non-destructive Session Layer override on the existing rotating
-prim or its nearest suitable `Xform`, so the referenced USD files and root layer
-stay clean.
-
-Scalability and level of detail:
-
-- topology discovery is acceptable for a hero component or a hero server because
-  it runs on load or asset reload and then caches the pivot/axis per prim path;
-- a full server may animate all meaningful visible rotating parts: CPU fan,
-  front intake fans, rear exhaust fans, GPU blowers, and the PSU fan;
-- server-level fan and blower assets should follow the BMS motion contract
-  documented in `src/blackwell_monitoring_suite/README.md`: stable rotating
-  parent `Xform` first, topology-validated axis discovery, Session Layer pivot
-  stack only as fallback;
-- rack and data-hall views should not animate hidden server internals. At those
-  scales, motion should be gated by visibility, selected asset, camera distance,
-  and scene detail mode;
-- for a full server room, the fallback presentation can animate only
-  front-facing fans on nearby or highlighted servers, with distant racks staying
-  static or using aggregate visual cues.
-
-Timing:
-
-- measure frame deltas with monotonic time;
-- clamp a single frame delta to about `0.1` seconds to avoid a large jump after
-  focus loss, reload, or a temporary stall;
-- accumulate the angle modulo 360 degrees;
-- reset or reacquire stage and prim state on asset reload or stage close.
-
-Display mapping:
-
-The telemetry RPM remains physically plausible for the hardware config: Idle
-`650-900`, Nominal `1000-1380`, Surge `1500-1950`, Critical `2050-2300`. The
-viewport should not use those RPM values directly, because a seven-blade fan
-sampled by an interactive viewport can alias, appear frozen, or reverse. Stage
-4 should map telemetry RPM to a labelled presentation speed range that remains
-visually readable, responds to jitter and interpolation, and keeps the four
-workload modes distinct. This mapping is a display device, not a new telemetry
-value. The current first-pass presentation range is `40-360 RPM`: fast enough
-to read as an active fan in the viewport, but still below the first seven-blade
-stroboscopic stop point at 50 FPS (`~429 RPM`).
-
-Stage 4 deliberately does not lock the whole Kit render loop to 50 FPS. The
-simulation/cache cadence belongs to Stage 6: cached playback should map elapsed
-seconds to authored time codes, and deterministic capture can request a fixed
-capture rate when needed. The fan controller should be robust to variable
-interactive frame rate.
-
-Failure behaviour:
-
-- missing stage, missing prim, invalid mesh path, or incompatible xform stack
-  must not crash the telemetry loop;
-- warnings should be one-shot or rate-limited;
-- extension shutdown should stop the controller and remove or neutralise the
-  runtime session override when the stage is still available.
-
-Automated checks:
-
-- telemetry RPM to presentation speed mapping, including clamp boundaries;
-- angle increment, wraparound, and `dt` clamp;
-- controller reset or reacquire behaviour;
-- topology-based pivot and axis discovery, including the Noctua 7-blade mesh
-  fixture;
-- high-valence candidate filtering for 32- and 64-sided cylinder-derived hubs;
-- session-layer authoring helper does not target the root layer;
-- missing prim or stale stage is handled without repeated errors.
-
-Manual checks:
-
-- load the Noctua NH-D9 TR5-SP6 asset and confirm continuous blade rotation;
-- confirm the runtime-resolved pivot matches the known Noctua centre closely
-  enough to avoid visible orbiting or wobble;
-- switch Idle, Nominal, Surge, and Critical and confirm the visual speed changes
-  smoothly with telemetry interpolation;
-- click Freeze and confirm the UI rows freeze while fan motion continues;
-- reload the asset and confirm rotation resumes without a visible jump;
-- confirm the source USD and root layer are not dirtied by runtime motion.
-
-Done when the CPU fan rotates from live telemetry, survives reload and
-shutdown, keeps authored USD assets clean, and has focused tests for the
-controller logic and edge cases.
+When a runtime stage is completed, move its detailed plan from this document to
+the completed-stage archive, update this table with a direct link, and keep only
+the active and future stage details here. Cross-stage contracts that still
+govern future work remain in this plan.
 
 ### Stage 5 - Server Review Slice
 
 Jira: `DC-44`
 
+Release track: `0.3.0` (released on Stage 5 completion).
+
 Move from the single hardware asset to the full server or Blackwell Rig scene.
 Keep the controls minimal: load, focus/navigation, status, and any lighting
 control already proven in earlier slices.
 
-When the full server scene arrives, fan motion should reuse the Stage 4 BMS
-motion contract rather than invent per-part exceptions: CPU cooler fans, front
+Stage 5 has an asset-readiness gate. Each server component must progress through
+the same states in order:
+
+`Topology fixed` -> `USD exported` -> `Static preflight passed` ->
+`RTX passed` -> `Runtime contract passed` -> `Composition ready`.
+
+| Asset | Current state | Note |
+| :--- | :--- | :--- |
+| `cpu_fan` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `ws_wrx90e` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `rm44` | Awaiting topology fix | Re-export and validate after correction. |
+| `rtx_pro_4500` | Awaiting topology fix | Re-export and validate after correction. |
+| `connectx7` | Awaiting topology fix | Re-export and validate after correction. |
+| `psu` | Awaiting topology fix | Re-export and validate after correction. |
+| `ram` | Awaiting topology fix | Re-export and validate after correction. |
+| `bionix_p120` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `p8_max` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `cables` | Awaiting topology fix | Re-export and validate after correction. |
+
+No component is `Composition ready` until it passes the same static, RTX, and
+runtime-contract checks as every other component in the server assembly.
+
+Canonical server-stage contract:
+
+- Houdini/Solaris exports a static server composition with the root
+  `/blackwell_rig_gb203` `Xform` at the world origin and set as `defaultPrim`.
+- The stable path under the hydrated asset root is
+  `usd/blackwell_rig_gb203/blackwell_rig_gb203.usd`.
+- The stage preserves the Houdini-exported `metersPerUnit = 1.0` and
+  `upAxis = "Y"`; BMS does not convert or repair units or orientation.
+- Existing Houdini references compose the component entry points, and Stage 5
+  loads the complete server assembly eagerly. Payload-based selective loading
+  is outside Stage 5 and remains a later rack/data-hall decision.
+- Component and texture dependencies use relative paths only.
+- The static composition excludes VDB layers, workload-specific visual state,
+  and authored timeline animation.
+
+Static preflight contract:
+
+- Run the standard OpenUSD `usdchecker` against each corrected component export
+  and the canonical server stage before RTX review.
+- Keep any Case 03-specific preflight supplement deliberately small. It should
+  check unresolved component and texture dependencies, absolute paths,
+  `defaultPrim`, `metersPerUnit`, `upAxis`, discoverable `blades` fan meshes,
+  and accidental VDB or authored time-sample content.
+- Do not build a separate general-purpose validation framework for Stage 5.
+- A static preflight pass proves structural USD readiness only. It does not
+  prove that holes, complex polygons, normals, or materials render correctly in
+  Omniverse; the RTX visual pass remains the topology and rendering authority.
+
+When the full server scene arrives, fan motion should reuse the
+[Stage 4 BMS motion contract](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice)
+rather than invent per-part exceptions: CPU cooler fans, front
 intake fans, rear exhaust fans, GPU blowers, and the PSU fan should each expose
 a stable rotating parent `Xform` whose local origin lies on the rotation axis,
 with topology-validated pivot-stack fallback for older or imperfect exports.
+BMS should discover candidate fan meshes beneath stable component roots by the
+`blades` name or name substring, validate each candidate through the Stage 4
+topology contract, and require an explicit config override only when discovery
+is ambiguous.
 
-Done when the server scene loads reproducibly, remains stable in RTX viewport,
-and can be reviewed without returning to Houdini or editing USD manually.
+Done when the server scene loads reproducibly, remains stable in the RTX
+viewport, all supported fan motion matches telemetry speed, and the scene can
+be reviewed without manual USD edits.
 
 ### Stage 6 - Cached Simulation Playback Slice
 
 Jira: `DC-45`
 
+Release track: `0.4.0` (released on Stage 8 completion).
+
 Introduce cached simulation playback or a cached simulation visual layer only
 when the asset package contains a real cache or layer to drive.
 
-Done when the app can enable or play the cached simulation state and report its
-load/playback status without pretending to generate the simulation live.
+Required scope:
+- **Cached Playback:** Implement playback and visual mapping of baked Houdini airflow/thermal simulation caches (e.g., OpenVDB or matching visual layers).
 
-### Stage 7 - Manual Workload State Preview Slice
+Done when the app can enable or play the cached simulation state and report its
+load and playback status without pretending to generate the simulation live.
+
+### Stage 7 - Engineering X-Ray Visual Mode Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.4.0` (released on Stage 8 completion).
+
+Introduce a manually controlled, reversible runtime visual override that lets
+the operator inspect internal server components and simulation layers through
+otherwise occluding chassis geometry.
+
+Required scope:
+
+- expose an explicit Engineering X-Ray toggle and visible mode status;
+- apply runtime or Session Layer overrides without editing authored USD assets
+  or MDL sources;
+- restore the original presentation after the mode is disabled or the stage is
+  reloaded;
+- initially target the outer chassis and other documented occluding components,
+  including the SilverStone RM44 walls and covers;
+- defer the exact opacity, material-replacement, or visibility policy until the
+  Stage 7 implementation plan is finalised;
+- establish an override boundary that later LED, heatmap, and other material
+  states can compose with instead of silently replacing.
+
+Done when Engineering X-Ray can be enabled and disabled reproducibly, reveals
+the documented internal review targets, restores the normal presentation, and
+does not dirty authored assets.
+
+### Stage 8 - Workload-to-Cache State Binding Slice
 
 Jira: `DC-46`
 
-Add manual workload states such as `25%`, `50%`, `75%`, and `96%` only after the
-USD package, material overrides, cache states, or runtime data hooks exist.
-These controls are manual preview states unless a later stage connects live
-telemetry.
+Release track: `0.4.0` (released on Stage 8 completion).
 
-Done when each workload state changes documented runtime inputs or visual state.
-If those hooks do not exist yet, the workload controls remain out of the UI.
+Connect the existing global `Idle`, `Nominal`, `Surge`, and `Critical` workload
+modes to real Houdini-authored simulation caches or matching USD layers made
+available through Stage 6. Do not introduce a second set of equivalent `25%`,
+`50%`, `75%`, and `96%` controls.
 
-### Stage 8 - Scale Navigation Slice
+Required scope:
+
+- define which authored cache or layer, if any, corresponds to each supported
+  workload mode;
+- use the existing workload-state control as the only operator-facing state
+  selector;
+- select and play only cache states that genuinely exist in the hydrated asset
+  package;
+- report missing or unsupported state mappings instead of presenting a control
+  that changes only its label.
+
+The cache/layer contract, transition behaviour, playback semantics, and missing
+state fallback must be refined when the Stage 8 plan is reviewed and finalised
+immediately before implementation.
+
+Done when every supported workload mode selects a documented authored cache or
+layer, unsupported mappings are reported honestly, and no parallel
+workload-state model has been introduced.
+
+### Stage 9 - Server Velocity Trail Foundation Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.5.0` (released on Stage 10 completion).
+
+Prove the velocity-trail implementation against the full server before adding
+rack and data-hall scale. Use a real server-level vector velocity field from the
+Stage 6 simulation package and the cache selected through Stage 8.
+
+Required scope:
+
+- establish a reusable trail renderer and runtime controller rather than a
+  throwaway server-only prototype;
+- validate vector-field coordinates, units, time mapping, and playback
+  synchronisation;
+- develop and tune trail seeding, advection, lifetime, density, width, colour,
+  and presentation-speed behaviour at `Server` scale;
+- validate performance and clean reset across cache changes, reload, and
+  shutdown;
+- verify that trails remain readable with the Stage 7 Engineering X-Ray mode;
+- exclude rack and data-hall trail generation from this stage.
+
+Done when real server airflow velocity can be displayed as stable, readable
+trails through a reusable implementation that survives cache switching and
+stage reload.
+
+### Stage 10 - Server Heatmap Foundation Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.5.0` (released on Stage 10 completion).
+
+Prove the telemetry-driven heatmap implementation against the full server
+before adding rack and data-hall scale. Reuse the current server telemetry and
+the stable semantic component roots established by the server review stage.
+
+Required scope:
+
+- establish a reusable heatmap renderer, scalar mapping, and runtime controller
+  rather than a server-only implementation;
+- map documented server telemetry to stable component or region targets;
+- define scalar ranges, normalisation, colour mapping, quality handling, and a
+  clear missing-data state;
+- verify composition with the Stage 7 Engineering X-Ray mode and Stage 9
+  velocity trails;
+- preserve clean reset across metric changes, stage reload, and shutdown;
+- exclude rack and data-hall heatmap generation from this stage.
+
+Done when documented server telemetry can drive a stable, readable heatmap
+through a reusable implementation without inventing unavailable measurements.
+
+### Stage 11 - Scale Navigation Foundation Slice
 
 Jira: `DC-47`
 
+Release track: `0.6.0` (released on Stage 12 completion).
+
 Add deliberate navigation between supported scales: server, rack, and data
-center. The exact camera bookmarks and scene group controls are deferred until
+hall. The exact camera bookmarks and scene group controls are deferred until
 this stage because they depend on the final scene structure.
 
+Required scope:
+
+- implement deliberate camera navigation and bookmarks across `Server`, `Rack`,
+  and `Data Hall`;
+- define stable scene groups and presentation views for each implemented scale;
+- keep scale-navigation commands separate from later telemetry, material, and
+  scenario behaviour.
+
 Done when the operator can move between implemented scales through clear
-controls and each scale has a stable view suitable for screen recording.
+commands and each scale has a stable view suitable for repeated review and
+screen recording.
+
+### Stage 12 - Multi-Scale Telemetry Model Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.6.0` (released on Stage 12 completion).
+
+Extend the telemetry provider and runtime state model beyond a single server
+node so later scale-aware consumers can address servers, racks, and the data
+hall without inventing aggregate state inside UI or rendering code.
+
+Required scope:
+
+- preserve stable site, hall, rack, node, and component identity where the
+  synthetic source supports it;
+- generate documented server, rack, and data-hall snapshots or aggregates;
+- keep PUE at hall/facility scope and use rack-level CEF only where the
+  telemetry contract supports it;
+- retain explicit `synthetic`, `derived`, `estimated`, or unavailable quality
+  instead of presenting generated aggregates as measured data;
+- provide the active-scale state required by later material, orchestration, and
+  visualisation stages.
+
+The exact synthetic topology, aggregate metric set, update strategy, and
+performance limits must be refined before Stage 12 implementation begins.
+
+Done when runtime consumers can request documented telemetry for a known
+server, rack, or data-hall context and missing aggregate data remains explicit.
+
+### Stage 13 - Multi-Scale Velocity Trail Expansion Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.7.0` (released on Stage 14 completion).
+
+Extend the Stage 9 server trail foundation to `Rack` and `Data Hall` after the
+scale-navigation and multi-scale runtime context exist. Each supported scale
+must use a real implemented vector-field source rather than fabricated flow
+data.
+
+Required scope:
+
+- reuse the Stage 9 renderer and controller instead of implementing a parallel
+  trail system;
+- define real rack and data-hall vector-field sources and their coordinate
+  contracts;
+- add scale-specific seeding, lifetime, density, width, visibility, and level
+  of detail;
+- gate trail cost by active scale, camera distance, selection, and documented
+  performance budgets;
+- allow telemetry to select documented presentation state where useful, but do
+  not derive or fabricate velocity vectors from telemetry metrics.
+
+The detailed multi-scale cache contract, performance strategy, UI controls,
+and acceptance thresholds must be refined before Stage 13 implementation.
+
+Done when the proven server trail system expands to real rack and data-hall
+vector fields with stable scale transitions and bounded runtime cost.
+
+### Stage 14 - Multi-Scale Heatmap Expansion Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.7.0` (released on Stage 14 completion).
+
+Extend the Stage 10 server heatmap foundation to `Rack` and `Data Hall` after
+scale navigation and the multi-scale telemetry model exist. The expansion must
+reuse the server renderer, scalar mapping, and quality semantics rather than
+introducing a parallel heatmap system.
+
+Required scope:
+
+- map documented rack and data-hall aggregates to stable semantic targets;
+- define scale-specific ranges, normalisation, colour mapping, visibility, and
+  level of detail;
+- keep missing, estimated, derived, and synthetic data visibly honest;
+- gate update and rendering cost by active scale, camera distance, selection,
+  and documented performance budgets;
+- remain composable with Engineering X-Ray and both server and multi-scale
+  velocity trails;
+- avoid generating scalar values that the Stage 12 telemetry model does not
+  expose.
+
+The detailed aggregate mapping, visual composition, controls, and acceptance
+thresholds must be refined before Stage 14 implementation.
+
+Done when the Stage 10 heatmap system expands to documented rack and data-hall
+telemetry with stable scale transitions and bounded runtime cost.
+
+### Stage 15 - Telemetry and Scale-Driven Material States Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.8.0` (released on Stage 16 completion).
+
+Drive supported runtime material parameters from both telemetry state and the
+active `Server`, `Rack`, or `Data Hall` presentation scale. Use a runtime policy
+to resolve those inputs rather than authoring a separate material for every
+state-and-scale combination.
+
+Required scope:
+
+- implement telemetry-driven front-panel Power and Status LEDs;
+- implement ConnectX-7 Link and Activity LEDs;
+- implement motherboard RJ-45 Link and Activity LEDs;
+- derive network activity from the corresponding telemetry metrics;
+- at `Server` scale, allow the complete supported indicator set;
+- at `Rack` scale, retain only indicators that are visible and useful for the
+  active or selected rack context;
+- at `Data Hall` scale, disable per-port rear-face activity and retain only
+  inexpensive aggregate or front-facing status cues;
+- define precedence between these runtime material states and the Stage 7
+  Engineering X-Ray override and Stage 14 heatmap contract.
+
+The exact metric mapping, update cadence, blink behaviour, shader inputs,
+scale policy, and override precedence must be refined when the Stage 15 plan is
+reviewed and finalised immediately before implementation.
+
+Done when the front-panel, ConnectX-7, and RJ-45 indicators respond to their
+documented telemetry inputs, scale changes apply the documented material-detail
+policy, and no combinatorial set of state-specific materials is required.
+
+### Stage 16 - Sequential Ignition Orchestration Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.8.0` (released on Stage 16 completion).
+
+Add the repeatable "Viral Inference Surge" scenario at `Rack` and `Data Hall`
+scales. This is a multi-node orchestration layer, not a single-server visual
+mode.
+
+Required scope:
+
+- cascade server activation across the 16 racks with configurable ordering and
+  time offsets;
+- move addressed nodes from `Idle` towards `Critical` through the existing
+  runtime state model rather than creating a second workload vocabulary;
+- expose start, reset, cancel, progress, and completion state for repeatable
+  review and capture;
+- keep scenario timing deterministic enough for repeated footage;
+- drive only documented telemetry and runtime consumers available by this
+  stage.
+
+Done when the operator can trigger and reset a repeatable rack-to-data-hall
+ignition wave, and every affected node remains addressable through the shared
+multi-scale state model.
+
+### Stage 17 - Rack and Data Hall RDMA Flow Visualisation Slice
+
+Jira: no dedicated task exists yet.
+
+Release track: `0.9.0` (released on Stage 17 completion).
+
+Add an inter-node network-flow layer for `Rack` and `Data Hall` views only.
+Visualise workload-driven RDMA traffic through the yellow overhead cable trays
+between compute racks and the central Network Rack.
+
+The implementation must use documented network topology and telemetry inputs,
+remain legible over the heatmap and velocity-trail layers, and must not add a
+single-server data-flow effect. The detailed route contract, rendering
+approach, flow timing, performance strategy, controls, and acceptance criteria
+remain to be developed before Stage 17 implementation begins.
+
+### Stage 18 - Interaction and UI Refinement Slice
+
+Jira: no dedicated task exists yet. Create an ordinary task under `DC-38`
+before implementation or any future detailed planning, validation, or
+finalisation of this stage begins.
+
+Release track: `1.0.0` (released after Stage 18 and the `1.0.0` release gate).
+
+After the Stage 1-17 feature set is available, refine the operator workflow and
+consolidate the final BMS interface. Stage 11 owns the scale-navigation commands
+and stable server, rack, and data-hall views; Stage 18 owns their final UI
+placement, interaction design, and presentation polish.
+
+Required scope:
+
+- review and settle the information architecture of the fixed left sidebar,
+  starting from the existing `Telemetry` and `Config` tabs;
+- place a global, mutually exclusive `Server | Rack | Data Hall` scale control
+  outside the contextual sidebar, with the viewport toolbar as the current
+  preferred location;
+- keep the active scale visible and consolidate or remove duplicated controls;
+- review the remaining camera, scene, lighting, telemetry, status, visual-layer,
+  scenario, and runtime controls after their delivery stages are complete;
+- implement an interactive viewport HUD overlay using `omni.ui.scene` for
+  spatial information, hierarchical scale indication, and quick stress-test
+  commands routed through the existing runtime state services.
+
+Selection-aware inspection is optional stretch scope:
+
+- a single viewport selection may open an `Inspect` tab with context for the
+  nearest known GPU, component, server node, or rack;
+- selection resolution should map a picked leaf prim to a stable semantic root,
+  then combine static identity/specification data with available telemetry;
+- an explicit drill-down command should enter the selected rack or server, with
+  double-click treated as a candidate shortcut only after checking it against
+  the stock Kit viewport bindings;
+- rack and node summaries must use real implemented aggregate data and must not
+  invent telemetry that the current provider does not expose.
+
+Selection-aware inspection does not block Stage 18 completion unless it is
+explicitly promoted from optional scope when the Jira task is created.
+
+Done when the final left-sidebar structure and global scale control form a
+coherent operator workflow, the current scale is always clear, duplicated
+controls have been resolved, and the interface is stable for repeated review
+and screen recording.
+
+
 
 ---
 
@@ -1138,16 +1099,11 @@ showing inside the application.
 
 ### Product Questions
 
-- Should v0.1 open directly into the default CPU cooler asset, or start with a
-  project-specific load button?
-- When Stage 5 arrives, should BMS open directly into the canonical Case 03
-  stage or keep an explicit project load step?
 - Which first-run state is most useful for recruiter-facing screen recording?
 - Which visual/detail modes belong before the workload preview stage?
 
 ### Scene and Content Questions
 
-- What is the canonical Case 03 stage path for staged loading?
 - Which camera bookmarks define the first presentation path?
 - Which scene groups need first-class visibility toggles?
 - Which key hardware assets need explicit focus or selection affordances?

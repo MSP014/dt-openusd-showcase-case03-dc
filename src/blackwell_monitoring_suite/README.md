@@ -30,7 +30,7 @@ telemetry-driven CPU fan motion.
 - `docs/` explains the architecture, contracts, and implementation decisions.
 - `assets/_external/` contains the heavy hydrated assets outside version
   control.
-- `configs/blackwell_monitoring_suite.v0.2.toml` holds the current runtime
+- `configs/blackwell_monitoring_suite.toml` holds the current runtime
   asset and lighting config.
 - `src/blackwell_monitoring_suite/configs/telemetry_provider.toml` holds the
   packaged synthetic telemetry targets, ranges, jitter, and cadence.
