@@ -14,7 +14,7 @@ from blackwell_monitoring_suite.app.config import (
 
 
 def test_v02_runtime_config_resolves_default_asset():
-    config_path = Path("configs/blackwell_monitoring_suite.v0.2.toml")
+    config_path = Path("configs/blackwell_monitoring_suite.toml")
 
     config = RuntimeConfig.load(config_path, apply_local_overrides=False)
 
@@ -26,7 +26,7 @@ def test_v02_runtime_config_resolves_default_asset():
 
 
 def test_v02_runtime_config_resolves_default_lighting():
-    config_path = Path("configs/blackwell_monitoring_suite.v0.2.toml")
+    config_path = Path("configs/blackwell_monitoring_suite.toml")
 
     config = RuntimeConfig.load(config_path, apply_local_overrides=False)
 
