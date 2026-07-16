@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-10
+**Last Updated**: 2026-07-17
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -66,9 +66,10 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Stage 5 planning is active through `DC-44`. Implementation begins after the
-required server components reach `Composition ready`. BMS then opens the
-configured canonical full-server stage by default while retaining load/reload,
+Stage 5 remains active through `DC-44`. Its planning phase completed on
+2026-07-10; implementation has not started and begins only after the required
+server components reach `Composition ready`. BMS then opens the configured
+canonical full-server stage by default while retaining load/reload,
 focus/navigation, status, and the already proven lighting, telemetry, and fan
 motion behaviours.
 
@@ -100,8 +101,7 @@ milestones are:
 | Stage 12 | `0.6.0` | Multi-Scale Runtime Foundation. |
 | Stage 14 | `0.7.0` | Multi-Scale Visual Analytics. |
 | Stage 16 | `0.8.0` | Operational Runtime. |
-| Stage 17 | `0.9.0` | Feature-complete runtime with RDMA flow visualisation. |
-| Stage 18 | `1.0.0` | Portfolio-ready release and stable demonstration workflow. |
+| Stage 17 | `1.0.0` | Portfolio-ready release and stable demonstration workflow. |
 
 Versioning rules:
 
@@ -113,7 +113,7 @@ Versioning rules:
   next roadmap stage;
 - update package, extension, Kit application, runtime config, tests, and public
   documentation version metadata together when a milestone is released;
-- release `1.0.0` only after Stage 18 also passes the end-to-end launch and demo
+- release `1.0.0` only after Stage 17 also passes the end-to-end launch and demo
   smoke path, has current setup documentation, contains no critical known
   defects, and reports consistent version metadata.
 
@@ -276,10 +276,9 @@ from making future capabilities sound like v0.1 requirements.
 | Multi-scale heatmap expansion | Stage 14 | Future |
 | Telemetry and scale-driven material states | Stage 15 | Future |
 | Sequential ignition orchestration | Stage 16 | Future |
-| Rack and data-hall RDMA flow visualisation | Stage 17 | Future |
-| Interaction and UI refinement | Stage 18 | Future |
-| Selection-aware context inspector | Stage 18 | Future, optional |
-| Viewport-embedded HUD overlay | Stage 18 | Future |
+| Interaction and UI refinement | Stage 17 | Future |
+| Selection-aware context inspector | Stage 17 | Future, optional |
+| Viewport-embedded HUD overlay | Stage 17 | Future |
 | Diagnostics surface | TBD | Future |
 
 ---
@@ -613,14 +612,14 @@ the same states in order:
 | :--- | :--- | :--- |
 | `cpu_fan` | Topology fixed | Corrected; the remaining common checks still apply. |
 | `ws_wrx90e` | Topology fixed | Corrected; the remaining common checks still apply. |
-| `rm44` | Awaiting topology fix | Re-export and validate after correction. |
-| `rtx_pro_4500` | Awaiting topology fix | Re-export and validate after correction. |
-| `connectx7` | Awaiting topology fix | Re-export and validate after correction. |
-| `psu` | Awaiting topology fix | Re-export and validate after correction. |
-| `ram` | Awaiting topology fix | Re-export and validate after correction. |
+| `rm44` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `rtx_pro_4500` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `connectx7` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `psu` | Topology fixed | Corrected; the remaining common checks still apply. |
+| `ram` | Topology fixed | Corrected; the remaining common checks still apply. |
 | `bionix_p120` | Topology fixed | Corrected; the remaining common checks still apply. |
 | `p8_max` | Topology fixed | Corrected; the remaining common checks still apply. |
-| `cables` | Awaiting topology fix | Re-export and validate after correction. |
+| `cables` | Topology fixed | Corrected; the remaining common checks still apply. |
 
 No component is `Composition ready` until it passes the same static, RTX, and
 runtime-contract checks as every other component in the server assembly.
@@ -685,7 +684,7 @@ load and playback status without pretending to generate the simulation live.
 
 ### Stage 7 - Engineering X-Ray Visual Mode Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-48`
 
 Release track: `0.4.0` (released on Stage 8 completion).
 
@@ -743,7 +742,7 @@ workload-state model has been introduced.
 
 ### Stage 9 - Server Velocity Trail Foundation Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-49`
 
 Release track: `0.5.0` (released on Stage 10 completion).
 
@@ -770,7 +769,7 @@ stage reload.
 
 ### Stage 10 - Server Heatmap Foundation Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-50`
 
 Release track: `0.5.0` (released on Stage 10 completion).
 
@@ -817,7 +816,7 @@ screen recording.
 
 ### Stage 12 - Multi-Scale Telemetry Model Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-51`
 
 Release track: `0.6.0` (released on Stage 12 completion).
 
@@ -845,7 +844,7 @@ server, rack, or data-hall context and missing aggregate data remains explicit.
 
 ### Stage 13 - Multi-Scale Velocity Trail Expansion Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-52`
 
 Release track: `0.7.0` (released on Stage 14 completion).
 
@@ -875,7 +874,7 @@ vector fields with stable scale transitions and bounded runtime cost.
 
 ### Stage 14 - Multi-Scale Heatmap Expansion Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-53`
 
 Release track: `0.7.0` (released on Stage 14 completion).
 
@@ -905,7 +904,7 @@ telemetry with stable scale transitions and bounded runtime cost.
 
 ### Stage 15 - Telemetry and Scale-Driven Material States Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-54`
 
 Release track: `0.8.0` (released on Stage 16 completion).
 
@@ -938,7 +937,7 @@ policy, and no combinatorial set of state-specific materials is required.
 
 ### Stage 16 - Sequential Ignition Orchestration Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-55`
 
 Release track: `0.8.0` (released on Stage 16 completion).
 
@@ -962,33 +961,15 @@ Done when the operator can trigger and reset a repeatable rack-to-data-hall
 ignition wave, and every affected node remains addressable through the shared
 multi-scale state model.
 
-### Stage 17 - Rack and Data Hall RDMA Flow Visualisation Slice
+### Stage 17 - Interaction and UI Refinement Slice
 
-Jira: no dedicated task exists yet.
+Jira: `DC-57`
 
-Release track: `0.9.0` (released on Stage 17 completion).
+Release track: `1.0.0` (released after Stage 17 and the `1.0.0` release gate).
 
-Add an inter-node network-flow layer for `Rack` and `Data Hall` views only.
-Visualise workload-driven RDMA traffic through the yellow overhead cable trays
-between compute racks and the central Network Rack.
-
-The implementation must use documented network topology and telemetry inputs,
-remain legible over the heatmap and velocity-trail layers, and must not add a
-single-server data-flow effect. The detailed route contract, rendering
-approach, flow timing, performance strategy, controls, and acceptance criteria
-remain to be developed before Stage 17 implementation begins.
-
-### Stage 18 - Interaction and UI Refinement Slice
-
-Jira: no dedicated task exists yet. Create an ordinary task under `DC-38`
-before implementation or any future detailed planning, validation, or
-finalisation of this stage begins.
-
-Release track: `1.0.0` (released after Stage 18 and the `1.0.0` release gate).
-
-After the Stage 1-17 feature set is available, refine the operator workflow and
+After the Stage 1-16 feature set is available, refine the operator workflow and
 consolidate the final BMS interface. Stage 11 owns the scale-navigation commands
-and stable server, rack, and data-hall views; Stage 18 owns their final UI
+and stable server, rack, and data-hall views; Stage 17 owns their final UI
 placement, interaction design, and presentation polish.
 
 Required scope:
@@ -1017,7 +998,7 @@ Selection-aware inspection is optional stretch scope:
 - rack and node summaries must use real implemented aggregate data and must not
   invent telemetry that the current provider does not expose.
 
-Selection-aware inspection does not block Stage 18 completion unless it is
+Selection-aware inspection does not block Stage 17 completion unless it is
 explicitly promoted from optional scope when the Jira task is created.
 
 Done when the final left-sidebar structure and global scale control form a
