@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from blackwell_monitoring_suite.app.motion import (
+    MultiRotationMotionController,
     RotationMotionController,
     TopologyPivotResolver,
     VisualRpmMapper,
@@ -109,6 +110,48 @@ def test_rotation_controller_reacquires_binding_when_stage_changes():
     controller.update(stage_two, snapshot, 10.3)
 
     assert "mspMotionSpin" in stage_two.GetSessionLayer().ExportToString()
+
+
+def test_rotation_controller_uses_explicit_authored_target_and_axis():
+    stage = _make_stage_with_synthetic_fan(centre=(0.0, 0.0, 0.0))
+    target_path = RotationMotionController.DEFAULT_MESH_PATH.rsplit("/", 1)[0]
+    controller = RotationMotionController(
+        rotation_target_path=target_path,
+        rotation_axis="X",
+        pivot_mode="authored_origin",
+    )
+    snapshot = SimpleNamespace(metrics={"cpu_fan_rpm": SimpleNamespace(value=1475.0)})
+
+    controller.update(stage, snapshot, 10.0)
+    controller.update(stage, snapshot, 10.1)
+
+    session_text = stage.GetSessionLayer().ExportToString()
+    assert "xformOp:rotateX:mspMotionSpin" in session_text
+    assert "xformOp:rotateZ:mspMotionSpin" not in session_text
+    assert "xformOp:translate:mspMotionPivot" not in session_text
+
+
+def test_multi_rotation_controller_drives_configured_bindings():
+    stage = _make_stage_with_synthetic_fan(centre=(0.0, 0.0, 0.0))
+    target_path = RotationMotionController.DEFAULT_MESH_PATH.rsplit("/", 1)[0]
+    binding = SimpleNamespace(
+        mesh_path=RotationMotionController.DEFAULT_MESH_PATH,
+        rotation_target_path=target_path,
+        rotation_axis="Y",
+        pivot_mode="authored_origin",
+        metric_id="cpu_fan_rpm",
+        telemetry_min_rpm=650.0,
+        telemetry_max_rpm=2300.0,
+        visual_min_rpm=40.0,
+        visual_max_rpm=360.0,
+    )
+    controller = MultiRotationMotionController((binding,))
+    snapshot = SimpleNamespace(metrics={"cpu_fan_rpm": SimpleNamespace(value=1475.0)})
+
+    controller.update(stage, snapshot, 10.0)
+    controller.update(stage, snapshot, 10.1)
+
+    assert "xformOp:rotateY:mspMotionSpin" in stage.GetSessionLayer().ExportToString()
 
 
 def _make_stage_with_synthetic_fan(

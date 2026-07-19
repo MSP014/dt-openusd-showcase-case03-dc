@@ -171,7 +171,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
         # isort: off
         from blackwell_monitoring_suite.app.commands import RuntimeController
-        from blackwell_monitoring_suite.app.motion import RotationMotionController
+        from blackwell_monitoring_suite.app.motion import MultiRotationMotionController
         from blackwell_monitoring_suite.app.telemetry import SnapshotLatch
         from blackwell_monitoring_suite.app.telemetry import SyntheticTelemetryProvider
         from blackwell_monitoring_suite.app.telemetry import TelemetryConfig
@@ -186,7 +186,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         telemetry_config = TelemetryConfig.load(telemetry_config_path)
         self._telemetry_provider = SyntheticTelemetryProvider(telemetry_config)
         self._telemetry_latch = SnapshotLatch()
-        self._motion_controller = RotationMotionController()
+        self._motion_controller = MultiRotationMotionController(
+            self._controller.config.fan_motion_bindings
+        )
         self._workload_modes = tuple(telemetry_config.modes)
         self._refresh_intervals = telemetry_config.allowed_refresh_intervals_s
 
@@ -964,6 +966,14 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
     def _reload_config(self) -> None:
         config = self._controller.reload_config()
+        if self._motion_controller:
+            self._motion_controller.reset()
+        # Motion bindings are config-backed; rebuild them after a runtime config reload.
+        from blackwell_monitoring_suite.app.motion import MultiRotationMotionController
+
+        self._motion_controller = MultiRotationMotionController(
+            config.fan_motion_bindings
+        )
         if self._asset_label:
             asset_text = config.default_asset.label
             self._asset_label.text = _compact_text(asset_text)

@@ -7,12 +7,132 @@ app_root = "src/blackwell_monitoring_suite"
 asset_root = "../../assets/_external"
 
 [assets]
-default_asset_id = "noctua_nh_d9_tr5_sp6"
+default_asset_id = "blackwell_rig_gb203"
 
 [assets.entries.noctua_nh_d9_tr5_sp6]
 label = "Noctua NH-D9 TR5-SP6"
 path = "usd/cpu_fan/cpu_fan.usd"
 kind = "usd_stage"
+
+[assets.entries.blackwell_rig_gb203]
+label = "Blackwell Rig GB203"
+path = "usd/Blackwell_Rig_server_assembly.usd"
+kind = "usd_stage"
+
+[motion]
+enabled = true
+
+[chassis_presentation]
+# Authored only in BMS's session layer: the Houdini/USD master stays complete.
+# For the current Stage 5 fan-motion pass, hide the full cover subtrees.
+open_chassis = true
+cover_paths = [
+  "/blackwell_rig/chassis/geo/render/chassis/top",
+  "/blackwell_rig/chassis/geo/render/chassis/side",
+  "/blackwell_rig/chassis/geo/proxy/chassis/top",
+  "/blackwell_rig/chassis/geo/proxy/chassis/side",
+]
+
+[[motion.fan_bindings]]
+id = "cpu_cooler"
+label = "CPU cooler fan"
+mesh_path = "/blackwell_rig/cpu_cooler/geo/render/cpu_cooler/cpu_fan/blades/blades"
+rotation_target_path = "/blackwell_rig/cpu_cooler/geo/render/cpu_cooler/cpu_fan/blades"
+rotation_axis = "Z"
+pivot_mode = "authored_origin"
+metric_id = "cpu_fan_rpm"
+
+[[motion.fan_bindings]]
+id = "gpu_01_blower"
+label = "GPU 1 blower"
+mesh_path = "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/blower/blower_blades/blower_blades"
+rotation_target_path = "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/blower"
+rotation_axis = "X"
+pivot_mode = "authored_origin"
+metric_id = "gpu_1_fan_rpm"
+
+[[motion.fan_bindings]]
+id = "gpu_02_blower"
+label = "GPU 2 blower"
+mesh_path = "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/blower/blower_blades/blower_blades"
+rotation_target_path = "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/blower"
+rotation_axis = "X"
+pivot_mode = "authored_origin"
+metric_id = "gpu_2_fan_rpm"
+
+[[motion.fan_bindings]]
+id = "gpu_03_blower"
+label = "GPU 3 blower"
+mesh_path = "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/blower/blower_blades/blower_blades"
+rotation_target_path = "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/blower"
+rotation_axis = "X"
+pivot_mode = "authored_origin"
+metric_id = "gpu_3_fan_rpm"
+
+[[motion.fan_bindings]]
+id = "psu_fan"
+label = "PSU fan"
+mesh_path = "/blackwell_rig/power/psu/geo/render/psu/cooling/blades/blades"
+rotation_target_path = "/blackwell_rig/power/psu/geo/render/psu/cooling/blades"
+rotation_axis = "X"
+pivot_mode = "authored_origin"
+metric_id = "psu_load_percent"
+telemetry_min_rpm = 0.0
+telemetry_max_rpm = 100.0
+
+[[motion.fan_bindings]]
+id = "motherboard_nvme_fan"
+label = "Motherboard NVMe fan"
+mesh_path = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/nvme_b/nvme_fan/nvme_fan"
+rotation_target_path = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/nvme_b/nvme_fan"
+rotation_axis = "Y"
+pivot_mode = "authored_origin"
+metric_id = "cpu_fan_rpm"
+
+[[motion.fan_bindings]]
+id = "front_p120_01"
+label = "Front P120 fan 1"
+mesh_path = "/blackwell_rig/fans/p120_01/geo/render/bionix_p120/blades/blades"
+rotation_target_path = "/blackwell_rig/fans/p120_01/geo/render/bionix_p120/blades"
+rotation_axis = "Z"
+pivot_mode = "authored_origin"
+metric_id = "front_fan_1_rpm"
+
+[[motion.fan_bindings]]
+id = "front_p120_02"
+label = "Front P120 fan 2"
+mesh_path = "/blackwell_rig/fans/p120_02/geo/render/bionix_p120/blades/blades"
+rotation_target_path = "/blackwell_rig/fans/p120_02/geo/render/bionix_p120/blades"
+rotation_axis = "Z"
+pivot_mode = "authored_origin"
+metric_id = "front_fan_2_rpm"
+
+[[motion.fan_bindings]]
+id = "front_p120_03"
+label = "Front P120 fan 3"
+mesh_path = "/blackwell_rig/fans/p120_03/geo/render/bionix_p120/blades/blades"
+rotation_target_path = "/blackwell_rig/fans/p120_03/geo/render/bionix_p120/blades"
+rotation_axis = "Z"
+pivot_mode = "authored_origin"
+metric_id = "front_fan_3_rpm"
+
+[[motion.fan_bindings]]
+id = "rear_p8_01"
+label = "Rear P8 fan 1"
+mesh_path = "/blackwell_rig/fans/p8_01/geo/render/p8_max/p8_max_blades/p8_max_blades"
+rotation_target_path = "/blackwell_rig/fans/p8_01/geo/render/p8_max/p8_max_blades"
+rotation_axis = "Z"
+pivot_mode = "authored_origin"
+metric_id = "rear_fan_1_rpm"
+
+[[motion.fan_bindings]]
+id = "rear_p8_02"
+label = "Rear P8 fan 2"
+mesh_path = "/blackwell_rig/fans/p8_02/geo/render/p8_max/p8_max_blades/p8_max_blades"
+rotation_target_path = "/blackwell_rig/fans/p8_02/geo/render/p8_max/p8_max_blades"
+rotation_axis = "Z"
+pivot_mode = "authored_origin"
+metric_id = "rear_fan_2_rpm"
 
 [lighting]
 default_hdri_path = "hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr"

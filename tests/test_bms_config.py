@@ -5,6 +5,7 @@ from blackwell_monitoring_suite.app.commands import RuntimeController
 # isort: off
 from blackwell_monitoring_suite.app.config import (
     CameraConfig,
+    ChassisPresentationConfig,
     LightingConfig,
     RotationConfig,
     RuntimeConfig,
@@ -20,9 +21,42 @@ def test_v02_runtime_config_resolves_default_asset():
 
     assert config.app_name == "Blackwell Monitoring Suite"
     assert config.app_version == "0.2.0"
-    assert config.default_asset.asset_id == "noctua_nh_d9_tr5_sp6"
-    assert config.default_asset_path.name == "cpu_fan.usd"
+    assert config.default_asset.asset_id == "blackwell_rig_gb203"
+    assert config.default_asset_path.name == "Blackwell_Rig_server_assembly.usd"
     assert config.default_asset_path.exists()
+
+
+def test_v02_runtime_config_resolves_server_fan_motion_bindings():
+    config_path = Path("configs/blackwell_monitoring_suite.toml")
+
+    config = RuntimeConfig.load(config_path, apply_local_overrides=False)
+
+    assert len(config.fan_motion_bindings) == 11
+    bindings = {binding.binding_id: binding for binding in config.fan_motion_bindings}
+    assert bindings["cpu_cooler"].rotation_axis == "Z"
+    assert bindings["cpu_cooler"].pivot_mode == "authored_origin"
+    assert bindings["gpu_01_blower"].rotation_axis == "X"
+    assert bindings["gpu_01_blower"].metric_id == "gpu_1_fan_rpm"
+    assert bindings["psu_fan"].metric_id == "psu_load_percent"
+    assert bindings["psu_fan"].telemetry_max_rpm == 100.0
+    assert bindings["motherboard_nvme_fan"].rotation_axis == "Y"
+    assert bindings["rear_p8_02"].metric_id == "rear_fan_2_rpm"
+
+
+def test_v02_runtime_config_opens_server_chassis_in_runtime_only():
+    config = RuntimeConfig.load(
+        Path("configs/blackwell_monitoring_suite.toml"),
+        apply_local_overrides=False,
+    )
+
+    presentation = config.chassis_presentation
+    assert presentation.open_chassis is True
+    assert presentation.cover_paths == (
+        "/blackwell_rig/chassis/geo/render/chassis/top",
+        "/blackwell_rig/chassis/geo/render/chassis/side",
+        "/blackwell_rig/chassis/geo/proxy/chassis/top",
+        "/blackwell_rig/chassis/geo/proxy/chassis/side",
+    )
 
 
 def test_v02_runtime_config_resolves_default_lighting():
@@ -177,6 +211,49 @@ def test_runtime_controller_saves_camera_override(tmp_path):
     assert config.camera.rotation.x == -10.0
     assert config.camera.rotation.y == 45.0
     assert config.camera.rotation.z == 5.0
+
+
+def test_chassis_presentation_authors_reversible_visibility_in_session_layer():
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.CreateInMemory()
+    cover = UsdGeom.Xform.Define(stage, "/server/chassis/top").GetPrim()
+    presentation = ChassisPresentationConfig(
+        open_chassis=True,
+        cover_paths=("/server/chassis/top",),
+    )
+
+    previous_target = stage.GetEditTarget()
+    stage.SetEditTarget(stage.GetSessionLayer())
+    try:
+        RuntimeController._apply_chassis_presentation(
+            stage,
+            presentation,
+            True,
+            UsdGeom,
+        )
+    finally:
+        stage.SetEditTarget(previous_target)
+
+    assert (
+        UsdGeom.Imageable(cover).GetVisibilityAttr().Get() == UsdGeom.Tokens.invisible
+    )
+    assert "invisible" in stage.GetSessionLayer().ExportToString()
+    assert "invisible" not in stage.GetRootLayer().ExportToString()
+
+    stage.SetEditTarget(stage.GetSessionLayer())
+    try:
+        RuntimeController._apply_chassis_presentation(
+            stage,
+            presentation,
+            False,
+            UsdGeom,
+        )
+    finally:
+        stage.SetEditTarget(previous_target)
+    assert (
+        UsdGeom.Imageable(cover).GetVisibilityAttr().Get() == UsdGeom.Tokens.inherited
+    )
 
 
 def _write_runtime_config(tmp_path: Path) -> Path:
