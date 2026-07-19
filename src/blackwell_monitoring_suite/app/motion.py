@@ -201,6 +201,9 @@ class RotationMotionController:
         self,
         *,
         mesh_path: str = DEFAULT_MESH_PATH,
+        rotation_target_path: str | None = None,
+        rotation_axis: str | None = None,
+        pivot_mode: str = "auto",
         metric_id: str = "cpu_fan_rpm",
         resolver: TopologyPivotResolver | None = None,
         rpm_mapper: VisualRpmMapper | None = None,
@@ -208,6 +211,9 @@ class RotationMotionController:
         authored_origin_tolerance: float = 0.005,
     ) -> None:
         self.mesh_path = mesh_path
+        self.rotation_target_path = rotation_target_path
+        self.rotation_axis = rotation_axis.upper() if rotation_axis else None
+        self.pivot_mode = pivot_mode
         self.metric_id = metric_id
         self.resolver = resolver or TopologyPivotResolver()
         self.rpm_mapper = rpm_mapper or VisualRpmMapper()
@@ -267,40 +273,81 @@ class RotationMotionController:
         if not mesh_prim or not mesh_prim.IsValid():
             raise ValueError(f"Motion mesh not found: {self.mesh_path}")
 
+        target_prim = self._resolve_target_prim(stage, mesh_prim)
+        if self.pivot_mode == "authored_origin":
+            axis_name = self._configured_axis()
+            rotate_op = self._ensure_direct_rotation_op(
+                stage,
+                target_prim,
+                axis_name,
+            )
+            return _MotionBinding(
+                stage_id=id(stage),
+                target_path=str(target_prim.GetPath()),
+                mesh_path=self.mesh_path,
+                pivot=(0.0, 0.0, 0.0),
+                axis_name=axis_name,
+                rotate_op=rotate_op,
+                uses_authored_origin=True,
+            )
+
         mesh = UsdGeom.Mesh(mesh_prim)
         points = mesh.GetPointsAttr().Get()
         counts = mesh.GetFaceVertexCountsAttr().Get()
         indices = mesh.GetFaceVertexIndicesAttr().Get()
         resolution = self.resolver.resolve(points, counts, indices)
-        target_prim = mesh_prim.GetParent()
-        if not target_prim or not target_prim.IsValid():
-            target_prim = mesh_prim
-        uses_authored_origin = _pivot_axis_is_near_origin(
-            resolution.pivot,
-            resolution.axis_name,
-            self.authored_origin_tolerance,
-        )
+        axis_name = self.rotation_axis or resolution.axis_name
+        if self.pivot_mode == "topology_pivot":
+            uses_authored_origin = False
+        else:
+            uses_authored_origin = _pivot_axis_is_near_origin(
+                resolution.pivot,
+                axis_name,
+                self.authored_origin_tolerance,
+            )
+
         if uses_authored_origin:
             rotate_op = self._ensure_direct_rotation_op(
                 stage,
                 target_prim,
-                resolution.axis_name,
+                axis_name,
             )
         else:
             rotate_op = self._ensure_motion_ops(
                 stage,
                 target_prim,
                 resolution.pivot,
-                resolution.axis_name,
+                axis_name,
             )
         return _MotionBinding(
             stage_id=id(stage),
             target_path=str(target_prim.GetPath()),
             mesh_path=self.mesh_path,
             pivot=resolution.pivot,
-            axis_name=resolution.axis_name,
+            axis_name=axis_name,
             rotate_op=rotate_op,
             uses_authored_origin=uses_authored_origin,
+        )
+
+    def _resolve_target_prim(self, stage: object, mesh_prim: object) -> object:
+        if self.rotation_target_path:
+            target_prim = stage.GetPrimAtPath(self.rotation_target_path)
+            if not target_prim or not target_prim.IsValid():
+                raise ValueError(
+                    f"Motion target not found: {self.rotation_target_path}"
+                )
+            return target_prim
+        target_prim = mesh_prim.GetParent()
+        if not target_prim or not target_prim.IsValid():
+            return mesh_prim
+        return target_prim
+
+    def _configured_axis(self) -> str:
+        if self.rotation_axis in {"X", "Y", "Z"}:
+            return self.rotation_axis
+        raise ValueError(
+            f"Motion binding {self.mesh_path} requires rotation_axis for "
+            f"{self.pivot_mode} pivot mode."
         )
 
     def _ensure_direct_rotation_op(
@@ -384,6 +431,36 @@ class RotationMotionController:
             carb.log_warn(f"Blackwell motion: {message}")
         except Exception:  # noqa: BLE001
             return
+
+
+class MultiRotationMotionController:
+    """Drive every configured fan or blower rotation binding."""
+
+    def __init__(self, bindings: Sequence[object] = ()) -> None:
+        self.controllers = tuple(
+            RotationMotionController(
+                mesh_path=binding.mesh_path,
+                rotation_target_path=binding.rotation_target_path,
+                rotation_axis=binding.rotation_axis,
+                pivot_mode=binding.pivot_mode,
+                metric_id=binding.metric_id,
+                rpm_mapper=VisualRpmMapper(
+                    telemetry_min_rpm=binding.telemetry_min_rpm,
+                    telemetry_max_rpm=binding.telemetry_max_rpm,
+                    visual_min_rpm=binding.visual_min_rpm,
+                    visual_max_rpm=binding.visual_max_rpm,
+                ),
+            )
+            for binding in bindings
+        )
+
+    def reset(self) -> None:
+        for controller in self.controllers:
+            controller.reset()
+
+    def update(self, stage: object | None, snapshot: object | None, now: float) -> None:
+        for controller in self.controllers:
+            controller.update(stage, snapshot, now)
 
 
 def _find_op(ops: Iterable[object], name: str) -> object | None:

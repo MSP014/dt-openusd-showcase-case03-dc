@@ -12,8 +12,8 @@ application for presenting a high-density Blackwell inference data hall through
 hydrated OpenUSD assets, synthetic telemetry, and staged Omniverse runtime
 capabilities.
 
-A **Reproducible Tech Pack** demonstrating a High-Fidelity **L1 Digital Twin** of an AI Inference Farm.
-The current repository validates the production path from *Geometry Foundation
+A **Reproducible Tech Pack** demonstrating a portfolio-grade **L1 Digital Twin** visualisation prototype of an AI Inference Farm.
+The current repository exercises the production path from *Geometry Foundation
 → Houdini Simulation Cache → USD/OpenVDB Packaging* into a runnable Omniverse
 application with asset review, look-review controls, and config-driven synthetic
 telemetry. Later telemetry-driven motion, simulation playback, and scale
@@ -47,9 +47,9 @@ states, thermal response, power balance, and cooling metrics.*
 
 *Technical viewport preview of the 4U Blackwell Rig GB203 node used as the first airflow layout review pass.*
 
-The current simulation pass turns the hero server from a static hardware model into a testable airflow volume: chassis intake, rear exhaust, GPU bodies, CPU cooler, PSU mass, cable bundles, and internal obstructions are all evaluated inside the same simulation domain.
+The current simulation pass turns the hero server from a static hardware model into a reviewable airflow volume: chassis intake, rear exhaust, GPU bodies, CPU cooler, PSU mass, cable bundles, and internal obstructions are all represented inside the same simulation domain.
 
-These Houdini-solved airflow caches are a presentation-grade qualitative proxy, not a certified CFD validation study. They provide the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. The goal is to make intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
+These Houdini-solved airflow caches are physically inspired, presentation-grade qualitative proxies, not validated CFD results or a certified CFD validation study. They provide the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. The goal is to make intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
 
 The Blackwell Monitoring Suite runtime is intentionally cache/live agnostic: the same visualisation layer can consume precomputed VDB sequences for Demo Mode or externally generated live volumetric/vector-field data for a future Live Mode. In that sense, cached airflow plays the same role as synthetic telemetry: it proves the pipeline now without narrowing the final digital-twin architecture.
 
@@ -130,7 +130,7 @@ The streamline visualisation pass exposes the velocity-field behaviour more dire
 | **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
 | **The Silent Heat (Node)** | **Thermal Behaviour Visualisation:** Represents estimated waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
 | **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
-| **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / Fluid Dynamics** (Engineering) modes. |
+| **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / Flow Visualisation** (Engineering) modes. |
 
 ---
 
@@ -154,7 +154,7 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 
 * **Application**: **Blackwell Monitoring Suite**.
 * **Extension**: `msp.bw.monitoring`.
-* **Logic**: A robust State Machine that listens to the Python Data Provider, dynamically swapping pre-cached USD VariantSets (Pyro sims, vector streamlines, thermal heatmaps) based on the active operational state.
+* **Logic**: A robust State Machine that listens to the Python Data Provider, dynamically swapping pre-cached USD VariantSets or visual layers (simulation caches, vector streamlines, thermal heatmaps) based on the active operational state.
 * **UI**: Viewport-embedded HUD (`omni.ui.scene` overlay) for hierarchical LOD navigation (Hall → Rack → Node) and manual stress-test overrides.
 
 ---
@@ -287,10 +287,10 @@ and a Session Layer pivot-stack fallback for older exports.
 
 ## 📜 Changelog
 
-* **Week of 13 July, 2026:** Completed topology repairs across the Blackwell Rig component set for Omniverse review, clarified the qualitative airflow visualisation boundary, and defined a staged licensing and distribution plan for the public Asset Pack.
+* **Week of 13 July, 2026:** Completed topology repairs across the Blackwell Rig component set, delivered the Blackwell Monitoring Suite 0.3 full-server review candidate with static USD preflight and 11 config-backed fan bindings, clarified the qualitative airflow visualisation boundary, and defined a staged licensing and distribution plan for the public Asset Pack.
 * **Week of 6 July, 2026:** Delivered Blackwell Monitoring Suite 0.1 through its first three runtime slices, combining Omniverse asset and look review with config-driven synthetic telemetry, validated workload states, hardware-aware power and thermal modelling, focused provider tests, and public runtime evidence.
 * **Week of 29 June, 2026:** Advanced Case 03 from node-scale airflow proof toward rack-level production planning, added Omniverse MCP helper tooling, clarified the visualisation contract, and migrated the project baseline to Python 3.11.15.
-* **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a testable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport validation frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
+* **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a reviewable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport review frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
 * **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a path-portable runtime packaging guardrail for future viewer delivery.
 * **2026-01-22:** Initial repository bootstrap. Established Readme-driven structure: Tech Pack, ADR documentation, pre-commit hooks, and `case03-env` constraints.
 * **2026-02-01:** Finalized Case 03 core concept (AI Inference Refinery) and hardware specification (Blackwell Rig v1.0).

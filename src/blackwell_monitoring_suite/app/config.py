@@ -69,6 +69,31 @@ class GridConfig:
 
 
 @dataclass(frozen=True)
+class ChassisPresentationConfig:
+    """Runtime-only presentation state for the server enclosure."""
+
+    open_chassis: bool = False
+    cover_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FanMotionBindingConfig:
+    """Configured telemetry-driven rotation binding for one runtime fan."""
+
+    binding_id: str
+    label: str
+    mesh_path: str
+    rotation_target_path: str
+    rotation_axis: str
+    pivot_mode: str
+    metric_id: str
+    telemetry_min_rpm: float = 650.0
+    telemetry_max_rpm: float = 2300.0
+    visual_min_rpm: float = 40.0
+    visual_max_rpm: float = 360.0
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Resolved runtime configuration for the current BMS slice."""
 
@@ -83,6 +108,8 @@ class RuntimeConfig:
     lighting: LightingConfig
     camera: CameraConfig | None
     grid: GridConfig
+    chassis_presentation: ChassisPresentationConfig
+    fan_motion_bindings: tuple[FanMotionBindingConfig, ...]
 
     @classmethod
     def load(
@@ -144,6 +171,10 @@ class RuntimeConfig:
         )
         camera = _parse_camera_config(data.get("camera"))
         grid = _parse_grid_config(data.get("grid"))
+        chassis_presentation = _parse_chassis_presentation_config(
+            data.get("chassis_presentation")
+        )
+        fan_motion_bindings = _parse_fan_motion_bindings(data.get("motion"))
 
         return cls(
             app_name=data["app"]["name"],
@@ -157,6 +188,8 @@ class RuntimeConfig:
             lighting=lighting,
             camera=camera,
             grid=grid,
+            chassis_presentation=chassis_presentation,
+            fan_motion_bindings=fan_motion_bindings,
         )
 
     @property
@@ -325,6 +358,73 @@ def _parse_grid_config(data: Any) -> GridConfig:
         step=float(data.get("step", 0.25)),
         width=float(data.get("width", 0.00075)),
     )
+
+
+def _parse_chassis_presentation_config(data: Any) -> ChassisPresentationConfig:
+    if not isinstance(data, dict):
+        return ChassisPresentationConfig()
+
+    raw_paths = data.get("cover_paths", ())
+    if not isinstance(raw_paths, list):
+        raise ValueError("chassis_presentation.cover_paths must be an array.")
+
+    cover_paths = tuple(str(path).strip() for path in raw_paths if str(path).strip())
+    if any(not path.startswith("/") for path in cover_paths):
+        raise ValueError("chassis_presentation cover paths must be absolute USD paths.")
+
+    return ChassisPresentationConfig(
+        open_chassis=bool(data.get("open_chassis", False)),
+        cover_paths=cover_paths,
+    )
+
+
+def _parse_fan_motion_bindings(data: Any) -> tuple[FanMotionBindingConfig, ...]:
+    if not isinstance(data, dict) or data.get("enabled", True) is False:
+        return ()
+
+    raw_bindings = data.get("fan_bindings", ())
+    if not isinstance(raw_bindings, list):
+        return ()
+
+    bindings: list[FanMotionBindingConfig] = []
+    for index, entry in enumerate(raw_bindings, start=1):
+        if not isinstance(entry, dict):
+            continue
+        binding_id = str(entry.get("id", f"fan_{index}")).strip()
+        label = str(entry.get("label", binding_id)).strip()
+        mesh_path = str(entry.get("mesh_path", "")).strip()
+        rotation_target_path = str(entry.get("rotation_target_path", "")).strip()
+        rotation_axis = str(entry.get("rotation_axis", "")).upper().strip()
+        pivot_mode = str(entry.get("pivot_mode", "auto")).strip()
+        metric_id = str(entry.get("metric_id", "")).strip()
+        if not mesh_path or not rotation_target_path or not metric_id:
+            raise ValueError(f"Incomplete fan motion binding: {binding_id}")
+        if rotation_axis not in {"X", "Y", "Z"}:
+            raise ValueError(
+                f"Fan motion binding {binding_id} has unsupported axis: "
+                f"{rotation_axis}"
+            )
+        if pivot_mode not in {"auto", "authored_origin", "topology_pivot"}:
+            raise ValueError(
+                f"Fan motion binding {binding_id} has unsupported pivot mode: "
+                f"{pivot_mode}"
+            )
+        bindings.append(
+            FanMotionBindingConfig(
+                binding_id=binding_id,
+                label=label,
+                mesh_path=mesh_path,
+                rotation_target_path=rotation_target_path,
+                rotation_axis=rotation_axis,
+                pivot_mode=pivot_mode,
+                metric_id=metric_id,
+                telemetry_min_rpm=float(entry.get("telemetry_min_rpm", 650.0)),
+                telemetry_max_rpm=float(entry.get("telemetry_max_rpm", 2300.0)),
+                visual_min_rpm=float(entry.get("visual_min_rpm", 40.0)),
+                visual_max_rpm=float(entry.get("visual_max_rpm", 360.0)),
+            )
+        )
+    return tuple(bindings)
 
 
 def _parse_matrix(data: Any) -> tuple[float, ...] | None:

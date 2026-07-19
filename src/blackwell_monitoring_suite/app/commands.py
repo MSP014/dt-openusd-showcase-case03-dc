@@ -10,12 +10,14 @@ from typing import Callable
 # isort: off
 from blackwell_monitoring_suite.app.config import (
     CameraConfig,
+    ChassisPresentationConfig,
     GridConfig,
     LightingConfig,
     RotationConfig,
     RuntimeConfig,
     format_runtime_override,
 )
+from blackwell_monitoring_suite.app.usd_preflight import run_usd_preflight
 
 # isort: on
 
@@ -181,9 +183,24 @@ class RuntimeController:
 
         stage = usd_context.get_stage()
         root_identifier = ""
+        preflight_message = ""
         viewport_message = ""
         if stage:
             root_identifier = stage.GetRootLayer().identifier
+            set_status("Running USD preflight")
+            preflight_result = run_usd_preflight(stage, self.config)
+            preflight_message = f"; {preflight_result.format_summary()}"
+            if preflight_result.has_errors:
+                set_status(preflight_result.format_summary())
+                return LoadResult(
+                    success=False,
+                    message=(
+                        f"Loaded {self.config.default_asset.label}"
+                        f"{preflight_message}"
+                    ),
+                    stage_path=asset_path,
+                    root_identifier=root_identifier,
+                )
             try:
                 viewport_message = await self._prepare_viewport_review(stage, app)
             except Exception as exc:  # noqa: BLE001
@@ -191,7 +208,10 @@ class RuntimeController:
 
         return LoadResult(
             success=True,
-            message=f"Loaded {self.config.default_asset.label}{viewport_message}",
+            message=(
+                f"Loaded {self.config.default_asset.label}"
+                f"{preflight_message}{viewport_message}"
+            ),
             stage_path=asset_path,
             root_identifier=root_identifier,
         )
@@ -291,6 +311,40 @@ class RuntimeController:
             status_callback("Grid enabled." if grid.enabled else "Grid disabled.")
         return True
 
+    async def apply_chassis_presentation_in_kit(
+        self,
+        open_chassis: bool,
+        status_callback: StatusCallback | None = None,
+    ) -> bool:
+        """Apply the configured enclosure visibility in the session layer."""
+
+        import omni.kit.app
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            if status_callback:
+                status_callback("Chassis view skipped: no open stage.")
+            return False
+
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            self._apply_chassis_presentation(
+                stage,
+                self.config.chassis_presentation,
+                open_chassis,
+                UsdGeom,
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        await omni.kit.app.get_app().next_update_async()
+        if status_callback:
+            status_callback("Chassis opened." if open_chassis else "Chassis closed.")
+        return True
+
     def capture_review_camera_config(self) -> CameraConfig | None:
         """Return the current review camera transform, if the stage has one."""
 
@@ -324,6 +378,12 @@ class RuntimeController:
         try:
             runtime_root = UsdGeom.Xform.Define(stage, "/BMS_Runtime")
             runtime_root.GetPrim().SetActive(True)
+            self._apply_chassis_presentation(
+                stage,
+                self.config.chassis_presentation,
+                self.config.chassis_presentation.open_chassis,
+                UsdGeom,
+            )
             self._create_review_grid(
                 stage,
                 Usd,
@@ -370,6 +430,27 @@ class RuntimeController:
         if not framed:
             return "; viewport frame skipped"
         return f"; viewport framed; {lighting_result.message}"
+
+    @staticmethod
+    def _apply_chassis_presentation(
+        stage,
+        presentation: ChassisPresentationConfig,
+        open_chassis: bool,
+        UsdGeom,
+    ) -> None:
+        """Author reversible cover visibility opinions on the session layer."""
+
+        visibility = (
+            UsdGeom.Tokens.invisible if open_chassis else UsdGeom.Tokens.inherited
+        )
+        for path in presentation.cover_paths:
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                continue
+            imageable = UsdGeom.Imageable(prim)
+            if not imageable:
+                continue
+            imageable.CreateVisibilityAttr().Set(visibility)
 
     def _resolve_hdri_path(self, lighting: LightingConfig) -> Path:
         hdri_path = Path(lighting.hdri_path)
