@@ -16,6 +16,17 @@ LIGHTING_OVERRIDE_KEYS = (
     "review_key_light_intensity",
 )
 
+SIMULATION_CACHE_OVERRIDE_KEYS = (
+    "enabled",
+    "wrapper_path",
+    "root_prim_path",
+    "volume_prim_path",
+    "field_name",
+    "sampling_distance",
+    "resolution_scale",
+    "rendering_samples",
+)
+
 
 @dataclass(frozen=True)
 class AssetEntry:
@@ -94,6 +105,20 @@ class FanMotionBindingConfig:
 
 
 @dataclass(frozen=True)
+class SimulationCacheConfig:
+    """Configured OpenVDB cache playback contract."""
+
+    enabled: bool = False
+    wrapper_path: str = ""
+    root_prim_path: str = "/sim"
+    volume_prim_path: str = "/sim/server_airflow_load_50"
+    field_name: str = "density"
+    sampling_distance: float = 0.012
+    resolution_scale: int = 25
+    rendering_samples: int = 1
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Resolved runtime configuration for the current BMS slice."""
 
@@ -110,6 +135,7 @@ class RuntimeConfig:
     grid: GridConfig
     chassis_presentation: ChassisPresentationConfig
     fan_motion_bindings: tuple[FanMotionBindingConfig, ...]
+    simulation_cache: SimulationCacheConfig
 
     @classmethod
     def load(
@@ -175,6 +201,7 @@ class RuntimeConfig:
             data.get("chassis_presentation")
         )
         fan_motion_bindings = _parse_fan_motion_bindings(data.get("motion"))
+        simulation_cache = _parse_simulation_cache_config(data.get("simulation_cache"))
 
         return cls(
             app_name=data["app"]["name"],
@@ -190,6 +217,7 @@ class RuntimeConfig:
             grid=grid,
             chassis_presentation=chassis_presentation,
             fan_motion_bindings=fan_motion_bindings,
+            simulation_cache=simulation_cache,
         )
 
     @property
@@ -209,6 +237,12 @@ class RuntimeConfig:
         """Return the resolved path for the configured default HDRI."""
 
         return (self.asset_root / self.lighting.hdri_path).resolve()
+
+    @property
+    def simulation_cache_path(self) -> Path:
+        """Return the resolved path for the configured cache wrapper."""
+
+        return (self.asset_root / self.simulation_cache.wrapper_path).resolve()
 
     @property
     def local_config_path(self) -> Path:
@@ -323,6 +357,14 @@ def _merge_runtime_override(
                 grid[key] = local_grid[key]
         data["grid"] = grid
 
+    local_simulation_cache = local_data.get("simulation_cache")
+    if isinstance(local_simulation_cache, dict):
+        simulation_cache = dict(data.get("simulation_cache", {}))
+        for key in SIMULATION_CACHE_OVERRIDE_KEYS:
+            if key in local_simulation_cache:
+                simulation_cache[key] = local_simulation_cache[key]
+        data["simulation_cache"] = simulation_cache
+
 
 def _parse_camera_config(data: Any) -> CameraConfig | None:
     if not isinstance(data, dict):
@@ -425,6 +467,52 @@ def _parse_fan_motion_bindings(data: Any) -> tuple[FanMotionBindingConfig, ...]:
             )
         )
     return tuple(bindings)
+
+
+def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
+    if not isinstance(data, dict):
+        return SimulationCacheConfig()
+
+    enabled = bool(data.get("enabled", True))
+    wrapper_path = str(data.get("wrapper_path", "")).strip()
+    if enabled and not wrapper_path:
+        raise ValueError("simulation_cache.wrapper_path is required when enabled.")
+
+    root_prim_path = str(data.get("root_prim_path", "/sim")).strip()
+    volume_prim_path = str(
+        data.get("volume_prim_path", "/sim/server_airflow_load_50")
+    ).strip()
+    field_name = str(data.get("field_name", "density")).strip()
+    sampling_distance = float(data.get("sampling_distance", 0.012))
+    resolution_scale = int(data.get("resolution_scale", 25))
+    rendering_samples = int(data.get("rendering_samples", 1))
+    for field_name_value, value in (
+        ("root_prim_path", root_prim_path),
+        ("volume_prim_path", volume_prim_path),
+    ):
+        if not value.startswith("/"):
+            raise ValueError(
+                f"simulation_cache.{field_name_value} must be an absolute USD path."
+            )
+    if not field_name:
+        raise ValueError("simulation_cache.field_name must not be empty.")
+    if sampling_distance <= 0:
+        raise ValueError("simulation_cache.sampling_distance must be positive.")
+    if not 1 <= resolution_scale <= 100:
+        raise ValueError("simulation_cache.resolution_scale must be in 1..100.")
+    if not 1 <= rendering_samples <= 32:
+        raise ValueError("simulation_cache.rendering_samples must be in 1..32.")
+
+    return SimulationCacheConfig(
+        enabled=enabled,
+        wrapper_path=wrapper_path,
+        root_prim_path=root_prim_path,
+        volume_prim_path=volume_prim_path,
+        field_name=field_name,
+        sampling_distance=sampling_distance,
+        resolution_scale=resolution_scale,
+        rendering_samples=rendering_samples,
+    )
 
 
 def _parse_matrix(data: Any) -> tuple[float, ...] | None:

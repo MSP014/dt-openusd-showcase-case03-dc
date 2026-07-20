@@ -16,13 +16,13 @@ development helpers, and the Blackwell Monitoring Suite runtime.
 
 ## Runtime Preview
 
-Blackwell Monitoring Suite 0.2.0 combines interactive Omniverse asset review,
-the Stage 3 synthetic telemetry provider, workload-state controls, and Stage 4
-telemetry-driven CPU fan motion.
+Blackwell Monitoring Suite 0.4.0 combines interactive Omniverse full-server
+review, the Stage 3 synthetic telemetry provider, workload-state controls,
+Stage 5 config-backed server fan motion, and Stage 6 cached airflow playback.
 
 | Nominal workload | Critical workload |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.2.0 - Nominal workload](../../docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.2.0 - Critical workload](../../docs/img/bms_0.1.0/bms_0.1.0_02.png) |
+| ![Blackwell Monitoring Suite 0.4.0 - Nominal workload](../../docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.4.0 - Critical workload](../../docs/img/bms_0.1.0/bms_0.1.0_02.png) |
 | *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
 
 ## Boundary
@@ -70,7 +70,7 @@ collapsed while node-level summaries remain visible. The update label includes
 the local ISO date and time, and temperature values use `°C`. Both tabs reserve
 a permanent scrollbar gutter so their content width does not shift.
 The Config tab uses the same collapsible treatment for Asset, Lighting, Grid,
-Camera, and Telemetry provider controls.
+Camera, Airflow cache, and Telemetry provider controls.
 The Config tab includes a compact telemetry-provider editor for global cadence
 defaults and per-mode numeric target, jitter, and safe-range tuning. Changes
 are saved to the separate ignored `telemetry_provider.local.toml` override.

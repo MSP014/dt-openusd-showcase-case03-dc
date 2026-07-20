@@ -1,7 +1,7 @@
 # Case 03 - Completed Runtime Stage Plans
 
 **Status**: Reference
-**Last Updated**: 2026-07-10
+**Last Updated**: 2026-07-19
 
 This document preserves the detailed plans used to deliver completed runtime
 stages. The active roadmap and future scope remain in
@@ -512,3 +512,145 @@ Manual checks:
 Done when the CPU fan rotates from live telemetry, survives reload and
 shutdown, keeps authored USD assets clean, and has focused tests for the
 controller logic and edge cases.
+
+### Stage 5 - Server Review Slice
+
+Jira: `DC-44`
+
+Status: implemented and accepted.
+
+Release track: `0.3.0` (released on Stage 5 completion).
+
+Move from the single hardware asset to the full server or Blackwell Rig scene.
+Keep the controls minimal: load, focus/navigation, status, and any lighting
+control already proven in earlier slices.
+
+Stage 5 has an asset-readiness gate. Each server component must progress through
+the same states in order:
+
+`Topology fixed` -> `USD exported` -> `Static preflight passed` ->
+`RTX passed` -> `Runtime contract passed` -> `Composition ready`.
+
+| Asset | Final state | Note |
+| :--- | :--- | :--- |
+| `cpu_fan` | Composition ready | Topology repair, re-export, static checks, RTX review, and runtime fan binding complete. |
+| `ws_wrx90e` | Composition ready | Topology repair, hierarchy correction, pivot-normalised re-export, and NVMe fan binding complete. |
+| `rm44` | Composition ready | Topology repair, re-export, RTX review, and open-chassis presentation complete. |
+| `rtx_pro_4500` | Composition ready | Topology and pivot-normalised blower re-export complete; all three GPU blower bindings validated. |
+| `connectx7` | Composition ready | Topology, material compatibility, and re-export work complete. |
+| `psu` | Composition ready | Topology repair, pivot-normalised re-export, and PSU fan binding complete. |
+| `ram` | Composition ready | Topology repair and re-export complete. |
+| `bionix_p120` | Composition ready | Re-export and three front-intake fan bindings complete. |
+| `p8_max` | Composition ready | Re-export and two rear-exhaust fan bindings complete. |
+| `cables` | Composition ready | Topology, connector, material compatibility, and re-export work complete. |
+
+Canonical server-stage contract:
+
+- Houdini/Solaris exports a static server composition with the root
+  `/blackwell_rig` `Xform` at the world origin and set as `defaultPrim`.
+- The stable path under the hydrated asset root is
+  `usd/Blackwell_Rig_server_assembly.usd`.
+- The stage preserves the Houdini-exported `metersPerUnit = 1.0` and
+  `upAxis = "Y"`; BMS does not convert or repair units or orientation.
+- Existing Houdini references compose the component entry points, and Stage 5
+  loads the complete server assembly eagerly. Payload-based selective loading
+  is outside Stage 5 and remains a later rack/data-hall decision.
+- Component and texture dependencies use relative paths only.
+- The static composition excludes VDB layers, workload-specific visual state,
+  and authored timeline animation.
+
+Static preflight contract:
+
+- Run the standard OpenUSD `usdchecker` against each corrected component export
+  and the canonical server stage before RTX review.
+- Keep any Case 03-specific preflight supplement deliberately small. It should
+  check unresolved component and texture dependencies, absolute paths,
+  `defaultPrim`, `metersPerUnit`, `upAxis`, configured chassis cover paths,
+  configured fan targets, and accidental VDB or authored time-sample content.
+- Do not build a separate general-purpose validation framework for Stage 5.
+- A static preflight pass proves structural USD readiness only. It does not
+  prove that holes, complex polygons, normals, or materials render correctly in
+  Omniverse; the RTX visual pass remains the topology and rendering authority.
+
+The canonical assembly export passed the Stage 5-specific structural checks:
+the root and `defaultPrim` are `/blackwell_rig`, the root is at the world
+origin, all 22 component references and asset dependencies resolve, all authored
+dependency paths are relative, and no VDB or time-sampled content is present.
+After reloading Houdini references and re-exporting the assembly, `simproxy`
+content, thumbnail dependency findings, and prim-encapsulation findings are no
+longer present. Strict local OpenUSD compliance still reports MaterialX shader
+conformance findings from Houdini-authored MaterialX networks. These are
+accepted as a documented non-blocking Stage 5 exception because the target
+runtime is Omniverse/Kit, where the same materials load and render
+successfully. Material authoring cleanup remains deferred to later runtime
+material-state stages.
+
+The full assembly passed a clean-start RTX visual load in BMS on 2026-07-19:
+`Blackwell_Rig_server_assembly.usd` opened with `LOAD_ALL` in 0.96 seconds,
+framed correctly, and displayed the complete server without unresolved asset,
+texture, or material-load errors. Visual inspection from multiple exterior
+angles confirmed correct composition and rendering. The integrated Stage 5
+motion pass then confirmed all 11 configured fan and blower bindings rotate
+correctly without visible orbital offset. One known diagnostic is accepted as a
+non-blocking Stage 5 exception: RTX ignores the degenerate motherboard helper
+mesh named `connect_rj_45_cable_here`, which produces no visible defect. Helper
+mesh cleanup remains deferred.
+
+For the fan-motion review pass, BMS applies a reversible session-layer chassis
+presentation override: `open_chassis = true` hides the full `top` and `side`
+cover subtrees in both the `render` and `proxy` branches. This leaves the
+Houdini-authored server assembly complete and untouched; the same runtime
+mechanism restores `inherited` visibility when the enclosure is closed. The
+current debug configuration therefore hides the rack ears along with the side
+panels. Their final presentation policy remains open. A visible
+front-of-application controller for opening and closing these panels is
+deferred to Stage 17 UI refinement rather than being treated as an already
+shipped Stage 5 control. Camera-aware opacity fading and the material-override
+infrastructure it needs belong to Stage 7; Stage 5 remains a deliberately
+static review presentation while server fan motion is proved.
+
+Stage 5 fan motion reuses the
+[Stage 4 BMS motion contract](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice)
+rather than inventing per-part exceptions: CPU cooler fans, front intake fans,
+rear exhaust fans, GPU blowers, and the PSU fan each expose a stable rotating
+parent `Xform` whose local origin lies on the rotation axis, with
+topology-validated pivot-stack fallback for older or imperfect exports. Every
+supported fan binding explicitly declares `rotation_target_path`,
+`rotation_axis`, `pivot_mode`, and `metric_id` in configuration. Discovery may
+find and validate candidate fan prims beneath stable component roots by the
+`blades` name or name substring, but it must not infer the rotation axis. Stage
+5 uses `authored_origin` for corrected exports and keeps the Stage 4 topology
+resolver as a fallback for older or imperfect assets.
+
+Delivered Stage 5 fan bindings:
+
+- CPU cooler: rotate
+  `/blackwell_rig/cpu_cooler/geo/render/cpu_cooler/cpu_fan/blades` around axis
+  `Z`.
+- RTX PRO 4500 blowers: rotate each
+  `/blackwell_rig/compute/gpu_*/geo/render/RTX4500/blower` around axis `X` using
+  its authored local origin. Rotating the hidden `blower_base` with the blades,
+  ring, and shaft is an accepted simplification.
+- PSU fan: rotate
+  `/blackwell_rig/power/psu/geo/render/psu/cooling/blades` around axis `X`.
+- Motherboard NVMe fan: rotate
+  `/blackwell_rig/motherboard/geo/render/ws_wrx90e/nvme_b/nvme_fan` around axis
+  `Y`.
+- Front BioniX P120 fans: rotate each
+  `/blackwell_rig/fans/p120_*/geo/render/bionix_p120/blades` around axis `Z`.
+- Rear P8 Max fans: rotate each
+  `/blackwell_rig/fans/p8_*/geo/render/p8_max/p8_max_blades` around axis `Z`.
+
+The runtime-contract check confirms that each configured target exists and can
+complete a test rotation around its declared axis without visible orbital
+offset. Stage 5 accepts two telemetry simplifications: the PSU fan is driven by
+derived `psu_load_percent` and mapped to visual RPM, while the motherboard NVMe
+fan currently shares `cpu_fan_rpm` with the CPU cooler. Dedicated channels may
+replace those mappings in a later telemetry refinement pass.
+
+Done when the server scene loads reproducibly, remains stable in the RTX
+viewport, all supported fan motion matches telemetry speed, and the scene can
+be reviewed without manual USD edits.
+
+Stage 5 was accepted on 2026-07-19 and `DC-44` was moved to Done. The delivery
+commit is `d4331db` (`Deliver Stage 5 full-server BMS review`).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,10 @@ from blackwell_monitoring_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     format_runtime_override,
+)
+from blackwell_monitoring_suite.app.simulation_cache import (
+    SimulationCacheContract,
+    run_simulation_cache_preflight,
 )
 from blackwell_monitoring_suite.app.usd_preflight import run_usd_preflight
 
@@ -43,17 +48,29 @@ class LightingResult:
     hdri_path: Path
 
 
+@dataclass(frozen=True)
+class SimulationCacheResult:
+    """Result of attaching or controlling the airflow cache."""
+
+    success: bool
+    message: str
+
+
 class RuntimeController:
     """Coordinates config-backed runtime operations for the viewer."""
 
     def __init__(self, config_path: Path | str):
         self._config_path = Path(config_path)
         self.config = RuntimeConfig.load(self._config_path)
+        self._simulation_cache_contract: SimulationCacheContract | None = None
+        self._simulation_cache_time_code: int | None = None
 
     def reload_config(self) -> RuntimeConfig:
         """Reload and return the current runtime config."""
 
         self.config = RuntimeConfig.load(self._config_path)
+        self._simulation_cache_contract = None
+        self._simulation_cache_time_code = None
         return self.config
 
     def project_defaults(self) -> RuntimeConfig:
@@ -345,6 +362,231 @@ class RuntimeController:
             status_callback("Chassis opened." if open_chassis else "Chassis closed.")
         return True
 
+    async def attach_simulation_cache_in_kit(
+        self,
+        status_callback: StatusCallback | None = None,
+    ) -> SimulationCacheResult:
+        """Attach the configured cache through RTX / NVIDIA IndeX compositing."""
+
+        cache = self.config.simulation_cache
+        if not cache.enabled:
+            return SimulationCacheResult(
+                success=False,
+                message="Airflow cache is disabled in the runtime config.",
+            )
+
+        if status_callback:
+            status_callback("Checking airflow cache")
+        preflight = run_simulation_cache_preflight(
+            self.config.simulation_cache_path,
+            cache,
+        )
+        if not preflight.success or not preflight.contract:
+            return SimulationCacheResult(False, preflight.format_summary())
+
+        import omni.kit.app
+        import omni.timeline
+        import omni.usd
+
+        extension_manager = omni.kit.app.get_app().get_extension_manager()
+        if not extension_manager.is_extension_enabled("omni.rtx.index_composite"):
+            return SimulationCacheResult(
+                False,
+                (
+                    "Airflow cache is valid, but RTX / NVIDIA IndeX Compositing "
+                    "is unavailable in this Kit build. Playback remains disabled."
+                ),
+            )
+
+        import carb
+        import omni.kit.viewport.utility as viewport_utility
+        from pxr import Gf, Sdf, UsdGeom, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
+
+        # IndeX compositing is an RTX feature, not the standalone Scientific
+        # renderer. Set it before the Volume enters the composed stage.
+        self._enable_index_compositing(stage, cache, carb)
+        viewport = viewport_utility.get_active_viewport()
+        if viewport and hasattr(viewport, "set_hd_engine"):
+            viewport.set_hd_engine("rtx")
+
+        # Session-layer metrics give the cache its authored time domain without
+        # modifying the referenced rig USD on disk.
+        session_layer = stage.GetSessionLayer()
+        session_layer.timeCodesPerSecond = preflight.contract.time_codes_per_second
+        session_layer.framesPerSecond = preflight.contract.frames_per_second
+
+        timeline = omni.timeline.get_timeline_interface()
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            self._author_airflow_cache_session_layer(
+                stage,
+                cache,
+                preflight.contract,
+                Gf,
+                Sdf,
+                UsdGeom,
+                UsdShade,
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        self._simulation_cache_contract = preflight.contract
+        self._simulation_cache_time_code = int(preflight.contract.start_time_code)
+
+        timeline.pause()
+        timeline.set_current_time(
+            preflight.contract.start_time_code
+            / preflight.contract.time_codes_per_second
+        )
+        await omni.kit.app.get_app().next_update_async()
+        timeline.play(
+            preflight.contract.start_time_code,
+            preflight.contract.end_time_code,
+            True,
+        )
+        return SimulationCacheResult(
+            True,
+            "Airflow cache is playing through RTX / NVIDIA IndeX Compositing.",
+        )
+
+    def play_simulation_cache_in_kit(self) -> SimulationCacheResult:
+        """Play the attached cache over its authored frame range."""
+
+        if not self._simulation_cache_contract:
+            return SimulationCacheResult(
+                False, "Attach the airflow cache before playback."
+            )
+
+        import omni.timeline
+
+        contract = self._simulation_cache_contract
+        timeline = omni.timeline.get_timeline_interface()
+        timeline.play(
+            contract.start_time_code,
+            contract.end_time_code,
+            True,
+        )
+        return SimulationCacheResult(True, "Airflow cache playback started.")
+
+    def pause_simulation_cache_in_kit(self) -> SimulationCacheResult:
+        """Pause the attached cache at the current frame."""
+
+        if not self._simulation_cache_contract:
+            return SimulationCacheResult(
+                False, "Attach the airflow cache before playback."
+            )
+
+        import omni.timeline
+
+        omni.timeline.get_timeline_interface().pause()
+        return SimulationCacheResult(True, "Airflow cache paused.")
+
+    def reset_simulation_cache_in_kit(self) -> SimulationCacheResult:
+        """Return the attached cache to its first authored frame."""
+
+        if not self._simulation_cache_contract:
+            return SimulationCacheResult(
+                False, "Attach the airflow cache before playback."
+            )
+
+        import omni.timeline
+
+        contract = self._simulation_cache_contract
+        timeline = omni.timeline.get_timeline_interface()
+        timeline.pause()
+        timeline.set_current_time(
+            contract.start_time_code / contract.time_codes_per_second
+        )
+        return SimulationCacheResult(True, "Airflow cache reset to its first frame.")
+
+    def capture_gpu_profile_in_kit(self) -> SimulationCacheResult:
+        """Write the current Hydra GPU profiler sample to an ignored artifact."""
+
+        import carb
+        import omni.hydra.engine.stats as engine_stats
+        import omni.kit.viewport.utility as viewport_utility
+
+        viewport = viewport_utility.get_active_viewport()
+        if not viewport:
+            return SimulationCacheResult(
+                False, "GPU profile skipped: no active viewport."
+            )
+
+        output_dir = self.config.repo_root / "out" / "diagnostics"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        carb.settings.get_settings().set("/profiler/filePath", str(output_dir))
+
+        profiler = engine_stats.HydraEngineStats(
+            hydra_engine_name=viewport.hydra_engine,
+        )
+        profile_path = self._write_gpu_profile(
+            output_dir,
+            viewport.hydra_engine,
+            profiler.get_gpu_profiler_result(),
+        )
+        carb.log_info(f"BMS GPU profile saved: {profile_path}")
+
+        return SimulationCacheResult(
+            True,
+            f"GPU profile saved: {profile_path}",
+        )
+
+    @staticmethod
+    def _write_gpu_profile(
+        output_dir: Path,
+        hydra_engine: str,
+        gpu_profiler_result,
+    ) -> Path:
+        """Serialize profiler data because Kit's save helper is unreliable."""
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        profile_path = (
+            output_dir / f"airflow_gpu_profile_{int(time.time() * 1000)}.json"
+        )
+        payload = {
+            "hydra_engine": hydra_engine,
+            "gpu_profiler": gpu_profiler_result,
+        }
+        profile_path.write_text(
+            json.dumps(payload, indent=2, default=str),
+            encoding="utf-8",
+        )
+        return profile_path
+
+    def sync_simulation_cache_frame_in_kit(self) -> bool:
+        """Native USD volume playback follows the Kit timeline automatically."""
+
+        return False
+
+    def detach_simulation_cache_in_kit(self) -> SimulationCacheResult:
+        """Remove only the transient cache opinions from the session layer."""
+
+        import omni.timeline
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
+
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            stage.RemovePrim("/BMS_Runtime/Airflow")
+            stage.RemovePrim("/BMS_Runtime/Looks/AirflowIndex")
+        finally:
+            stage.SetEditTarget(previous_target)
+        omni.timeline.get_timeline_interface().pause()
+        self._simulation_cache_contract = None
+        self._simulation_cache_time_code = None
+        return SimulationCacheResult(
+            True, "Airflow cache detached from the session layer."
+        )
+
     def capture_review_camera_config(self) -> CameraConfig | None:
         """Return the current review camera transform, if the stage has one."""
 
@@ -430,6 +672,132 @@ class RuntimeController:
         if not framed:
             return "; viewport frame skipped"
         return f"; viewport framed; {lighting_result.message}"
+
+    @staticmethod
+    def _author_airflow_cache_session_layer(
+        stage,
+        cache,
+        contract,
+        Gf,
+        Sdf,
+        UsdGeom,
+        UsdShade,
+    ) -> None:
+        """Author native NVIDIA IndeX compositing opinions in the session layer."""
+
+        runtime_path = Sdf.Path("/BMS_Runtime/Airflow")
+        stage.RemovePrim(runtime_path)
+        stage.RemovePrim("/BMS_Runtime/Looks/AirflowIndex")
+
+        UsdGeom.Xform.Define(stage, "/BMS_Runtime")
+        cache_root = UsdGeom.Xform.Define(stage, runtime_path)
+        cache_root.GetPrim().GetReferences().AddReference(
+            contract.wrapper_path.as_posix(),
+            Sdf.Path(cache.root_prim_path),
+        )
+
+        volume_prim = next(
+            (
+                prim
+                for prim in cache_root.GetPrim().GetChildren()
+                if prim.GetTypeName() == "Volume"
+            ),
+            None,
+        )
+        if not volume_prim:
+            raise RuntimeError("The airflow wrapper did not compose a USD Volume.")
+
+        volume_prim.CreateAttribute(
+            "nvindex:composite",
+            Sdf.ValueTypeNames.Bool,
+            custom=True,
+        ).Set(True)
+        volume_prim.CreateAttribute(
+            "omni:rtx:skip",
+            Sdf.ValueTypeNames.Bool,
+            custom=True,
+        ).Set(True)
+        volume_prim.SetCustomDataByKey(
+            "nvindex.renderSettings",
+            {
+                "filterMode": "trilinear",
+                "samplingDistance": cache.sampling_distance,
+            },
+        )
+
+        material_path = Sdf.Path("/BMS_Runtime/Looks/AirflowIndex")
+        material = UsdShade.Material.Define(stage, material_path)
+        colormap = stage.DefinePrim(material_path.AppendChild("Colormap"), "Colormap")
+        colormap.CreateAttribute(
+            "colormapSource",
+            Sdf.ValueTypeNames.Token,
+            custom=True,
+        ).Set("rgbaPoints")
+        colormap.CreateAttribute(
+            "domain",
+            Sdf.ValueTypeNames.Float2,
+            custom=True,
+        ).Set(Gf.Vec2f(0.0, 12.5))
+        colormap.CreateAttribute(
+            "domainBoundaryMode",
+            Sdf.ValueTypeNames.Token,
+            custom=False,
+            variability=Sdf.VariabilityUniform,
+        ).Set("clampToTransparent")
+        colormap_output = colormap.CreateAttribute(
+            "outputs:colormap",
+            Sdf.ValueTypeNames.Token,
+            custom=True,
+        )
+        colormap.CreateAttribute(
+            "rgbaPoints",
+            Sdf.ValueTypeNames.Float4Array,
+            custom=True,
+        ).Set(
+            [
+                Gf.Vec4f(0.03, 0.12, 0.16, 0.0),
+                Gf.Vec4f(0.05, 0.48, 0.64, 0.025),
+                Gf.Vec4f(0.13, 0.82, 0.87, 0.16),
+                Gf.Vec4f(0.62, 0.98, 0.88, 0.34),
+            ]
+        )
+        colormap.CreateAttribute(
+            "xPoints",
+            Sdf.ValueTypeNames.FloatArray,
+            custom=True,
+        ).Set([0.0, 0.15, 1.5, 12.5])
+
+        shader = UsdShade.Shader.Define(
+            stage, material_path.AppendChild("VolumeShader")
+        )
+        shader_input = shader.CreateInput("colormap", Sdf.ValueTypeNames.Token)
+        shader_input.GetAttr().AddConnection(colormap_output.GetPath())
+        shader_output = shader.CreateOutput("volume", Sdf.ValueTypeNames.Token)
+        material_output = material.GetPrim().CreateAttribute(
+            "outputs:nvindex:volume",
+            Sdf.ValueTypeNames.Token,
+            custom=True,
+        )
+        material_output.AddConnection(shader_output.GetAttr().GetPath())
+        UsdShade.MaterialBindingAPI.Apply(volume_prim).Bind(material)
+
+    @staticmethod
+    def _enable_index_compositing(stage, cache, carb) -> None:
+        """Enable the global RTX compositing switch used by the NVIDIA fixture."""
+
+        settings = carb.settings.get_settings()
+        settings.set("/rtx/index/compositeEnabled", True)
+        settings.set("/rtx/index/compositeDepthMode", 3)
+        settings.set("/rtx/index/resolutionScale", cache.resolution_scale)
+        settings.set("/rtx/index/renderingSamples", cache.rendering_samples)
+
+        session_layer = stage.GetSessionLayer()
+        layer_data = dict(session_layer.customLayerData)
+        render_settings = dict(layer_data.get("renderSettings", {}))
+        render_settings["rtx:index:compositeEnabled"] = True
+        render_settings["rtx:index:compositeDepthMode"] = 3
+        layer_data["renderSettings"] = render_settings
+        session_layer.customLayerData = layer_data
 
     @staticmethod
     def _apply_chassis_presentation(

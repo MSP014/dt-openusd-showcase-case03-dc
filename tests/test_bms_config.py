@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from blackwell_monitoring_suite.app.commands import RuntimeController
@@ -20,10 +21,18 @@ def test_v02_runtime_config_resolves_default_asset():
     config = RuntimeConfig.load(config_path, apply_local_overrides=False)
 
     assert config.app_name == "Blackwell Monitoring Suite"
-    assert config.app_version == "0.2.0"
+    assert config.app_version == "0.4.0"
     assert config.default_asset.asset_id == "blackwell_rig_gb203"
     assert config.default_asset_path.name == "Blackwell_Rig_server_assembly.usd"
     assert config.default_asset_path.exists()
+    assert config.simulation_cache.enabled is True
+    assert config.simulation_cache_path.name == "server_airflow_load_50.usda"
+    assert config.simulation_cache.wrapper_path == (
+        "usd/server_airflow_v001/server_airflow_load_50.usda"
+    )
+    assert config.simulation_cache.sampling_distance == 0.012
+    assert config.simulation_cache.resolution_scale == 25
+    assert config.simulation_cache.rendering_samples == 1
 
 
 def test_v02_runtime_config_resolves_server_fan_motion_bindings():
@@ -153,6 +162,29 @@ def test_local_camera_override_wins_over_base_config(tmp_path):
     assert base_config.camera is None
 
 
+def test_local_simulation_cache_override_wins_over_base_config(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "\n".join(
+            [
+                "[simulation_cache]",
+                'wrapper_path = "usd/airflow/runtime_proxy.usda"',
+                "resolution_scale = 50",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.load(config_path)
+    base_config = RuntimeConfig.load(config_path, apply_local_overrides=False)
+
+    assert config.simulation_cache.enabled is True
+    assert config.simulation_cache.wrapper_path == "usd/airflow/runtime_proxy.usda"
+    assert config.simulation_cache.resolution_scale == 50
+    assert base_config.simulation_cache.enabled is False
+
+
 def test_runtime_controller_saves_and_clears_lighting_override(tmp_path):
     config_path = _write_runtime_config(tmp_path)
     controller = RuntimeController(config_path)
@@ -256,6 +288,19 @@ def test_chassis_presentation_authors_reversible_visibility_in_session_layer():
     )
 
 
+def test_gpu_profile_writer_creates_json(tmp_path):
+    profile_path = RuntimeController._write_gpu_profile(
+        tmp_path,
+        "rtx",
+        [[{"indent": 0, "duration": 406.5}]],
+    )
+
+    assert profile_path.exists()
+    payload = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert payload["hydra_engine"] == "rtx"
+    assert payload["gpu_profiler"][0][0]["duration"] == 406.5
+
+
 def _write_runtime_config(tmp_path: Path) -> Path:
     config_dir = tmp_path / "configs"
     app_root = tmp_path / "src" / "blackwell_monitoring_suite"
@@ -276,7 +321,7 @@ def _write_runtime_config(tmp_path: Path) -> Path:
             [
                 "[app]",
                 'name = "Blackwell Monitoring Suite"',
-                'version = "0.2.0"',
+                'version = "0.3.0"',
                 "",
                 "[paths]",
                 'app_root = "src/blackwell_monitoring_suite"',

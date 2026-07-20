@@ -16,6 +16,7 @@ _incoming/
 geo/
 
 out/
+airflow_gpu_profile_*.json
 
 # --- Source/Project Files (Adobe and other software specific) ---
 ae/

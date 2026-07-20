@@ -1,6 +1,6 @@
 [package]
 title = "Blackwell Monitoring Suite"
-version = "0.2.0"
+version = "0.4.0"
 description = "OpenUSD review and synthetic telemetry controls for Case 03."
 category = "Viewer"
 keywords = ["openusd", "kit", "viewer", "runtime"]
@@ -8,6 +8,8 @@ keywords = ["openusd", "kit", "viewer", "runtime"]
 [dependencies]
 "omni.kit.uiapp" = {}
 "omni.kit.viewport.window" = {}
+"omni.timeline" = {}
+"omni.hydra.engine.stats" = {}
 
 [[python.module]]
 name = "msp.bw.monitoring"
