@@ -1,6 +1,6 @@
 [app]
 name = "Blackwell Monitoring Suite"
-version = "0.2.0"
+version = "0.4.0"
 
 [paths]
 app_root = "src/blackwell_monitoring_suite"
@@ -146,3 +146,13 @@ review_key_light_intensity = 1200.0
 x = 0.0
 y = 0.0
 z = 0.0
+
+[simulation_cache]
+enabled = true
+wrapper_path = "usd/server_airflow_v001/server_airflow_load_50.usda"
+root_prim_path = "/sim"
+volume_prim_path = "/sim/server_airflow_load_50"
+field_name = "density"
+sampling_distance = 0.012
+resolution_scale = 25
+rendering_samples = 1

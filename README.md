@@ -33,14 +33,14 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
 > **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualisation layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
 
-## Blackwell Monitoring Suite 0.2.0 Runtime Preview
+## Blackwell Monitoring Suite 0.4.0 Runtime Preview
 
-*Omniverse runtime asset review with live synthetic node telemetry, workload
-states, thermal response, power balance, and cooling metrics.*
+*Omniverse full-server runtime review with live synthetic node telemetry,
+cooling metrics, and cached OpenVDB airflow playback.*
 
 | Nominal workload | Critical workload |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.2.0 - Nominal workload](docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.2.0 - Critical workload](docs/img/bms_0.1.0/bms_0.1.0_02.png) |
+| ![Blackwell Monitoring Suite 0.4.0 - Nominal workload](docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.4.0 - Critical workload](docs/img/bms_0.1.0/bms_0.1.0_02.png) |
 | *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
 
 ## Blackwell Rig Airflow Simulation Preview
@@ -208,7 +208,7 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ### 3. Running the App
 
-Blackwell Monitoring Suite v0.2.0 launches as a dedicated Omniverse Kit
+Blackwell Monitoring Suite v0.4.0 launches as a dedicated Omniverse Kit
 application config. The quickest local launch path is:
 
 ```powershell

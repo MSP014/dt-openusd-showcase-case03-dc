@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-19
+**Last Updated**: 2026-07-20
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -11,14 +11,14 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, the first four completed Blackwell Monitoring Suite
-slices, and an active Stage 5 full-server runtime implementation.
+external asset layout, and the first five completed Blackwell Monitoring Suite
+slices through the full-server runtime review milestone.
 
 Current decisions already made:
 
 - The public application name is **Blackwell Monitoring Suite**.
 - The first build was **Blackwell Monitoring Suite v0.1**.
-- The current runtime build is **Blackwell Monitoring Suite v0.2.0**.
+- The current runtime build is **Blackwell Monitoring Suite v0.3.0**.
 - BMS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
   default through the `blackwell_rig_gb203` runtime asset entry.
 - The shared left sidebar now contains `Telemetry` and `Config` tabs without
@@ -30,13 +30,13 @@ Current decisions already made:
   intermittent Critical-mode throttling.
 - Packaged telemetry defaults remain read-only; operator tuning is persisted to
   the ignored `telemetry_provider.local.toml` override.
-- Stage 4 delivered topology-validated CPU fan motion. Stage 5 now extends the
+- Stage 4 delivered topology-validated CPU fan motion. Stage 5 extends the
   same runtime contract through 11 explicit config-backed bindings for the CPU
   cooler, three GPU blowers, PSU, motherboard NVMe fan, three front P120 fans,
   and two rear P8 Max fans.
-- Stage 5 currently applies a reversible session-layer `open_chassis` review
-  override that hides the top and side cover subtrees while the fan-motion pass
-  is being validated. It does not alter the complete Houdini/USD assembly.
+- Stage 5 applies a reversible session-layer `open_chassis` review override
+  that hides the top and side cover subtrees for full-server review. It does
+  not alter the complete Houdini/USD assembly.
 - Heavy USD, texture, VDB, HDRI, and future runtime assets stay outside the
   source package and are hydrated through `assets/_external/`.
 - The application source root is `src/blackwell_monitoring_suite/`.
@@ -52,7 +52,9 @@ Jira tracking:
 - Completed implementation task: `DC-42` - Stage 3 Synthetic Telemetry Slice.
 - Completed implementation task: `DC-43` - Stage 4 Telemetry Driven Motion
   Slice.
-- Active implementation task: `DC-44` - Stage 5 Server Review Slice.
+- Completed implementation task: `DC-44` - Stage 5 Full Blackwell Rig server
+  review.
+- Next implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
@@ -63,29 +65,22 @@ Monitoring Suite runtime code, however, runs inside Kit's Python environment
 when launched through `kit.exe`. Any Python dependency used by runtime code must
 therefore be available to Kit, not only to `case03-env`.
 
-No separate Conda environment is required for Blackwell Monitoring Suite v0.2.0.
+No separate Conda environment is required for the current Blackwell Monitoring
+Suite runtime.
 If a later stage introduces external service processes, automation, or a web
 control surface outside Kit, the project should define that environment
 deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Stage 5 is active through `DC-44` and is now a delivery candidate. Its planning
-phase completed on 2026-07-10, topology repair and re-export are complete for
-the server components, and BMS now opens the configured full-server stage by
-default. The canonical assembly passes static structural checks, loads cleanly
-in a BMS RTX review, and has explicit runtime bindings for all 11 supported
-fans.
+Stage 6 is the next active runtime slice. It should introduce cached simulation
+playback or a cached simulation visual layer only when the hydrated asset
+package contains a real exported cache or matching visual layer to drive.
 
-The integrated fan-motion pass has been visually validated in BMS: every
-configured fan and blower rotates around its declared axis without visible
-orbital offset. The remaining Stage 5 work is delivery closeout for the `0.3.0`
-runtime milestone. The future camera-aware side-panel fade remains Stage 7
-scope; its UI modes remain Stage 17 scope.
-
-Do not expand Stage 5 into cached simulation playback, automatic workload
-cycling, rack/data-hall navigation, or heatmap authoring. Those remain separate
-staged slices after the full server review surface is stable.
+Do not expand Stage 6 into Engineering X-Ray, workload-to-cache state binding,
+velocity trails, heatmaps, automatic workload cycling, rack/data-hall
+navigation, or generated simulation. Those remain separate staged slices after
+the cached playback surface is stable.
 
 ---
 
@@ -96,13 +91,13 @@ milestones. A minor `0.x.0` release represents a coherent operator-visible
 capability, not an automatic increment for every delivery stage. Patch releases
 such as `0.3.1` are reserved for fixes to an already released milestone.
 
-The current runtime is `0.2.0`, released after Stage 4. Future release
+The current runtime is `0.3.0`, released after Stage 5. Future release
 milestones are:
 
 | Completed through | Version | Runtime milestone |
 | :--- | :--- | :--- |
-| Stage 4 | `0.2.0` | Telemetry and CPU fan motion; current release. |
-| Stage 5 | `0.3.0` | Full Server Runtime. |
+| Stage 4 | `0.2.0` | Telemetry and CPU fan motion. |
+| Stage 5 | `0.3.0` | Full Server Runtime; current release. |
 | Stage 8 | `0.4.0` | Cached Simulation Review. |
 | Stage 10 | `0.5.0` | Server Visual Analytics. |
 | Stage 12 | `0.6.0` | Multi-Scale Runtime Foundation. |
@@ -127,7 +122,7 @@ Versioning rules:
 Use stable runtime filenames such as
 `blackwell_monitoring_suite.kit` and `blackwell_monitoring_suite.toml`. Keep the
 semantic version in metadata instead of renaming runtime paths at every minor
-release. The current `0.2.0` runtime already follows this stable path contract.
+release. The current runtime already follows this stable path contract.
 
 ---
 
@@ -269,7 +264,7 @@ from making future capabilities sound like v0.1 requirements.
 | Review camera persistence | Stage 2 | Implemented |
 | Synthetic telemetry values | Stage 3 | Implemented |
 | Fan motion driven by telemetry | Stage 4 | Implemented |
-| Full server / Blackwell Rig stage | Stage 5 | Future |
+| Full server / Blackwell Rig stage | Stage 5 | Implemented |
 | Cached simulation visual layer | Stage 6 | Future |
 | Engineering X-Ray visual mode | Stage 7 | Future |
 | Workload-to-cache state binding | Stage 8 | Future |
@@ -340,12 +335,12 @@ engineering value.
 ## Runtime Implementation Decisions
 
 The first staged build was **Blackwell Monitoring Suite v0.1**. The current
-runtime build is **Blackwell Monitoring Suite v0.2.0**.
+runtime build is **Blackwell Monitoring Suite v0.3.0**.
 
 Fixed names and identifiers:
 
 - Public app title: `Blackwell Monitoring Suite`
-- Version: `0.2.0`
+- Version: `0.3.0`
 - Kit extension id: `msp.bw.monitoring`
 - Python package root: `blackwell_monitoring_suite`
 - Runtime config: `configs/blackwell_monitoring_suite.toml`
@@ -528,9 +523,9 @@ diagnostics surface, not in the main operator flow.
 ### Runtime Contract
 
 The current runtime contract is still intentionally small. It only needs enough
-configuration to launch BMS, resolve the hydrated asset package, load the first
-asset preview stage, configure look-review controls, and connect the synthetic
-telemetry and first motion slice.
+configuration to launch BMS, resolve the hydrated asset package, load the
+configured review stage, configure look-review controls, and connect the
+synthetic telemetry and config-backed motion bindings.
 
 The config file is:
 
@@ -541,13 +536,17 @@ configs/blackwell_monitoring_suite.toml
 Minimum runtime fields:
 
 - `app.name`: `Blackwell Monitoring Suite`
-- `app.version`: `0.2.0`
+- `app.version`: `0.3.0`
 - `paths.app_root`: `src/blackwell_monitoring_suite`
 - `paths.asset_root`: `../../assets/_external`
-- `assets.default_asset_id`: `noctua_nh_d9_tr5_sp6`
+- `assets.default_asset_id`: `blackwell_rig_gb203`
 - `assets.entries.noctua_nh_d9_tr5_sp6.label`: `Noctua NH-D9 TR5-SP6`
 - `assets.entries.noctua_nh_d9_tr5_sp6.path`: `usd/cpu_fan/cpu_fan.usd`
 - `assets.entries.noctua_nh_d9_tr5_sp6.kind`: `usd_stage`
+- `assets.entries.blackwell_rig_gb203.label`: `Blackwell Rig GB203`
+- `assets.entries.blackwell_rig_gb203.path`:
+  `usd/Blackwell_Rig_server_assembly.usd`
+- `assets.entries.blackwell_rig_gb203.kind`: `usd_stage`
 - `lighting.default_hdri_path`:
   `hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr`
 - `lighting.exposure`: default review exposure.
@@ -593,155 +592,12 @@ Detailed plans for completed runtime stages are preserved in
 | Stage 2 - Look Review | `DC-41` | Implemented | [Stage 2 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-2---look-review-slice) |
 | Stage 3 - Synthetic Telemetry | `DC-42` | Implemented | [Stage 3 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-3---synthetic-telemetry-slice) |
 | Stage 4 - Telemetry Driven Motion | `DC-43` | Implemented | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
+| Stage 5 - Server Review | `DC-44` | Implemented | [Stage 5 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-5---server-review-slice) |
 
 When a runtime stage is completed, move its detailed plan from this document to
 the completed-stage archive, update this table with a direct link, and keep only
 the active and future stage details here. Cross-stage contracts that still
 govern future work remain in this plan.
-
-### Stage 5 - Server Review Slice
-
-Jira: `DC-44`
-
-Release track: `0.3.0` (released on Stage 5 completion).
-
-Move from the single hardware asset to the full server or Blackwell Rig scene.
-Keep the controls minimal: load, focus/navigation, status, and any lighting
-control already proven in earlier slices.
-
-Stage 5 has an asset-readiness gate. Each server component must progress through
-the same states in order:
-
-`Topology fixed` -> `USD exported` -> `Static preflight passed` ->
-`RTX passed` -> `Runtime contract passed` -> `Composition ready`.
-
-| Asset | Current state | Note |
-| :--- | :--- | :--- |
-| `cpu_fan` | USD exported | Topology repair and re-export complete; the remaining common checks still apply. |
-| `ws_wrx90e` | USD exported | Topology repair, hierarchy correction, pivot-normalised re-export, and authored-origin inspection complete. |
-| `rm44` | USD exported | Topology repair and re-export complete; the remaining common checks still apply. |
-| `rtx_pro_4500` | USD exported | Topology and pivot-normalised blower re-export complete; the remaining common checks still apply. |
-| `connectx7` | USD exported | Topology, material compatibility, and re-export work complete; the remaining common checks still apply. |
-| `psu` | USD exported | Topology repair, pivot-normalised re-export, and authored-origin inspection complete. |
-| `ram` | USD exported | Topology repair and re-export complete; the remaining common checks still apply. |
-| `bionix_p120` | USD exported | Re-export and authored-origin fan inspection complete; integrated runtime binding remains. |
-| `p8_max` | USD exported | Re-export and authored-origin fan inspection complete; integrated runtime binding remains. |
-| `cables` | USD exported | Topology, connector, material compatibility, and re-export work complete; the remaining common checks still apply. |
-
-No component is `Composition ready` until it passes the same static, RTX, and
-runtime-contract checks as every other component in the server assembly.
-The topology-compatibility re-export pass is complete for all components. A
-pivot-normalised or authored-origin inspection is also complete for every fan
-asset. Per-fan configuration and integrated runtime-motion checks remain part
-of the Stage 5 implementation.
-
-Canonical server-stage contract:
-
-- Houdini/Solaris exports a static server composition with the root
-  `/blackwell_rig` `Xform` at the world origin and set as `defaultPrim`.
-- The stable path under the hydrated asset root is
-  `usd/Blackwell_Rig_server_assembly.usd`.
-- The stage preserves the Houdini-exported `metersPerUnit = 1.0` and
-  `upAxis = "Y"`; BMS does not convert or repair units or orientation.
-- Existing Houdini references compose the component entry points, and Stage 5
-  loads the complete server assembly eagerly. Payload-based selective loading
-  is outside Stage 5 and remains a later rack/data-hall decision.
-- Component and texture dependencies use relative paths only.
-- The static composition excludes VDB layers, workload-specific visual state,
-  and authored timeline animation.
-
-Static preflight contract:
-
-- Run the standard OpenUSD `usdchecker` against each corrected component export
-  and the canonical server stage before RTX review.
-- Keep any Case 03-specific preflight supplement deliberately small. It should
-  check unresolved component and texture dependencies, absolute paths,
-  `defaultPrim`, `metersPerUnit`, `upAxis`, discoverable `blades` fan meshes,
-  and accidental VDB or authored time-sample content.
-- Do not build a separate general-purpose validation framework for Stage 5.
-- A static preflight pass proves structural USD readiness only. It does not
-  prove that holes, complex polygons, normals, or materials render correctly in
-  Omniverse; the RTX visual pass remains the topology and rendering authority.
-
-The canonical assembly export currently passes the Stage 5-specific structural
-checks: the root and `defaultPrim` are `/blackwell_rig`, the root is at the
-world origin, all 22 component references and asset dependencies resolve, all
-authored dependency paths are relative, and no VDB or time-sampled content is
-present. After reloading Houdini references and re-exporting the assembly,
-`simproxy` content, thumbnail dependency findings, and prim-encapsulation
-findings are no longer present. Strict local OpenUSD compliance still reports
-MaterialX shader conformance findings from Houdini-authored MaterialX networks.
-These are accepted as a documented non-blocking Stage 5 exception because the
-target runtime is Omniverse/Kit, where the same materials load and render
-successfully. Material authoring cleanup remains deferred to later runtime
-material-state stages.
-
-The full assembly passed a clean-start RTX visual load in BMS on 2026-07-19:
-`Blackwell_Rig_server_assembly.usd` opened with `LOAD_ALL` in 0.96 seconds,
-framed correctly, and displayed the complete server without unresolved asset,
-texture, or material-load errors. Visual inspection from multiple exterior
-angles confirmed correct composition and rendering. The integrated Stage 5
-motion pass then confirmed all 11 configured fan and blower bindings rotate
-correctly without visible orbital offset. One known diagnostic is accepted as a
-non-blocking Stage 5 exception: RTX ignores the degenerate motherboard helper
-mesh named `connect_rj_45_cable_here`, which produces no visible defect. Helper
-mesh cleanup remains deferred.
-
-For the current fan-motion review pass, BMS also applies a reversible
-session-layer chassis presentation override: `open_chassis = true` hides the
-full `top` and `side` cover subtrees in both the `render` and `proxy` branches.
-This leaves the Houdini-authored server assembly complete and untouched; the
-same runtime mechanism restores `inherited` visibility when the enclosure is
-closed. The current debug configuration therefore hides the rack ears along
-with the side panels. Their final presentation policy remains open. A visible
-front-of-application controller for opening and closing these panels is
-deferred to Stage 17 UI refinement rather than being treated as an already
-shipped Stage 5 control. Camera-aware opacity fading and the material-override
-infrastructure it needs belong to Stage 7; Stage 5 remains a deliberately
-static review presentation while server fan motion is proved.
-
-When the full server scene arrives, fan motion should reuse the
-[Stage 4 BMS motion contract](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice)
-rather than invent per-part exceptions: CPU cooler fans, front
-intake fans, rear exhaust fans, GPU blowers, and the PSU fan should each expose
-a stable rotating parent `Xform` whose local origin lies on the rotation axis,
-with topology-validated pivot-stack fallback for older or imperfect exports.
-Every supported fan binding must explicitly declare `rotation_target_path`,
-`rotation_axis`, `pivot_mode`, and `metric_id` in configuration. Discovery may
-find and validate candidate fan prims beneath stable component roots by the
-`blades` name or name substring, but it must not infer the rotation axis. Use
-`authored_origin` for corrected exports and keep the Stage 4 topology resolver
-as a fallback for older or imperfect assets.
-
-Known Stage 5 fan bindings include:
-
-- CPU cooler: rotate
-  `/blackwell_rig/cpu_cooler/geo/render/cpu_cooler/cpu_fan/blades` around axis
-  `Z`.
-- RTX PRO 4500 blowers: rotate each
-  `/blackwell_rig/compute/gpu_*/geo/render/RTX4500/blower` around axis `X` using
-  its authored local origin. Rotating the hidden `blower_base` with the blades,
-  ring, and shaft is an accepted simplification.
-- PSU fan: rotate
-  `/blackwell_rig/power/psu/geo/render/psu/cooling/blades` around axis `X`.
-- Motherboard NVMe fan: rotate
-  `/blackwell_rig/motherboard/geo/render/ws_wrx90e/nvme_b/nvme_fan` around axis
-  `Y`.
-- Front BioniX P120 fans: rotate each
-  `/blackwell_rig/fans/p120_*/geo/render/bionix_p120/blades` around axis `Z`.
-- Rear P8 Max fans: rotate each
-  `/blackwell_rig/fans/p8_*/geo/render/p8_max/p8_max_blades` around axis `Z`.
-
-The runtime-contract check confirms that each configured target exists and can
-complete a test rotation around its declared axis without visible orbital
-offset. Stage 5 accepts two telemetry simplifications: the PSU fan is driven by
-derived `psu_load_percent` and mapped to visual RPM, while the motherboard NVMe
-fan currently shares `cpu_fan_rpm` with the CPU cooler. Dedicated channels may
-replace those mappings in a later telemetry refinement pass.
-
-Done when the server scene loads reproducibly, remains stable in the RTX
-viewport, all supported fan motion matches telemetry speed, and the scene can
-be reviewed without manual USD edits.
 
 ### Stage 6 - Cached Simulation Playback Slice
 
@@ -757,6 +613,212 @@ Required scope:
 
 Done when the app can enable or play the cached simulation state and report its
 load and playback status without pretending to generate the simulation live.
+
+#### Implementation Checkpoint - 2026-07-19 Pit Stop
+
+Status: active investigation; cache playback is not yet visually validated.
+
+Confirmed cache and USD repairs:
+
+- The asset package now contains one intended cache sequence only:
+  `assets/_external/vdb/server_airflow_sims/server_airflow_vdb_load_50`, with
+  800 VDB frames covering time codes `1001` through `1800`.
+- The Houdini USD wrapper at
+  `assets/_external/usd/server_airflow_v001/server_airflow_load_50.usda` was
+  re-exported with `defaultPrim = /sim`, a `1001-1800` range, and both
+  `timeCodesPerSecond` and `framesPerSecond` set to `50`.
+- The `density` `OpenVDBAsset` now declares `fieldDataType = "float"`, matching
+  the inspected VDB grid (`density`, scalar fog volume, float values).  This
+  removes the missing field-type metadata that makes runtime interpretation
+  ambiguous.
+- Per-frame `filePath` time samples resolve to all 800 local VDB files.
+  BMS preflight accepts the wrapper and verifies the range, field, type, and
+  file samples before attach.
+- A manually specified volume extent was used for the export instead of a full
+  frame-range extent scan.  The latter took about two minutes for a single
+  frame and is not an acceptable export-time path for this sequence.
+
+Known non-blocking wrapper cleanup:
+
+- Houdini still time-samples constant `fieldName = "density"` and
+  `fieldIndex = 0`.  This is redundant animation data, but it does not block
+  cache resolution or rendering.  Do not spend further time on it until a
+  visible native volume is established.
+
+Runtime work completed so far:
+
+- Added config-backed cache preflight and operator controls for attach, detach,
+  play, pause, and reset.  The runtime composes the wrapper through the session
+  layer, leaving the authored USD and VDB assets untouched.
+- Added the Kit dependency `omni.rtx.index_composite` and installed its release
+  extension with the official Kit repository tooling.  The extension loads at
+  BMS startup together with `omni.index.usd` and `omni.index.renderer`.
+- Replaced the unsupported MDL proxy attempt with the official native NVIDIA
+  IndeX composition shape: `nvindex:composite`, `omni:rtx:skip`, native IndeX
+  material output, colormap, and compositing settings are authored transiently
+  in the BMS session layer.
+- Focused Python tests pass locally (`16 passed`) for wrapper preflight and the
+  authored session-layer contract.  This is structural validation only, not
+  proof that a volume is visible in the GPU viewport.
+
+Rejected paths and observed failures:
+
+- Raw RTX volume rendering produced an opaque red, surface-like mass rather
+  than a readable airflow volume.
+- The MDL `OmniVolumeDensity` proxy is invalid for this VDB source.  Kit logged
+  `volume_density_texture` type `3D` versus VDB type `1D`, then crashed in the
+  native rendering path.  This proxy must not be restored.
+- The first native IndeX compositing attempt loads its dependencies but still
+  produces no visible airflow.  The live BMS viewport also changes its selected
+  renderer to `Scientific (IndeX)` rather than staying on the intended RTX
+  compositor path.  This is the current blocker, not a solved renderer setup.
+
+Resume point and diagnostic order:
+
+1. Capture and inspect the live BMS session layer immediately after Attach:
+   reference, composed `Volume`, `OpenVDBAsset`, material binding, IndeX
+   attributes, and current timeline time must be checked in the running Kit
+   process rather than inferred from unit tests.
+2. Identify which setting or extension action selects `Scientific (IndeX)` and
+   keep the viewport on RTX while NVIDIA IndeX compositing is enabled.  Do not
+   reintroduce `set_hd_engine("index")` or any MDL VDB proxy.
+3. Reproduce the official compositing fixture with one local airflow VDB frame
+   in the same Kit release.  Compare its session/stage opinions with the BMS
+   authored ones to isolate renderer configuration from wrapper playback.
+4. Once one frame is visible, validate native time-sampled `filePath` playback
+   over several distant frames before tuning opacity, colour, sampling distance,
+   or the BMS presentation.
+5. Treat any GPU crash, black proxy, or no-volume result as a renderer-contract
+   finding and preserve the relevant Kit log before changing Houdini exports.
+
+#### Implementation Checkpoint - 2026-07-20 Pit Stop
+
+Status: active investigation; native OpenVDB playback is visually established,
+but it is not yet fast enough for showreel capture.
+
+Verified runtime result:
+
+- The native RTX / NVIDIA IndeX compositing path can render the original Houdini
+  `density` OpenVDB sequence inside the BMS viewport while keeping the server
+  geometry visible and the camera interactive. This proves that the repaired
+  wrapper and the session-layer composition contract are viable.
+- The original cache is not a usable playback payload: its 800 source frames
+  average about 33 MiB each. Playback measured about `0.75-1.5 FPS`; pausing a
+  frame reached only about `19-20 FPS`. This is below the Stage 6 capture
+  target of 25 FPS at 1280x720.
+
+Rejected NanoVDB proxy experiment:
+
+- A 30-frame, 25-FPS test set was made from source frames `1001, 1003, ...,
+  1059` using Kit's `omni.volume` converter. It produced about 2.46 GiB of
+  `.nvdb` data and therefore was not a storage reduction.
+- The current USD `OpenVDBAsset` / RTX-IndeX importer contract requires
+  OpenVDB files. Attaching the `.nvdb` wrapper failed with
+  `OpenVDB importer (NanoVDB): failed to fetch OpenVDB data` and no volume was
+  rendered. Do not repeat this route through `OpenVDBAsset`.
+
+Next controlled test:
+
+1. Keep the original 800-frame `.vdb` cache untouched and restore the local
+   BMS override to its original wrapper before the next launch.
+2. Use Houdini `VDB Resample` with `mode = voxelsizeonly`, linear filtering,
+   and `voxel size = 0.00255` (2x the original `0.001275`) to create a separate
+   30-frame `.vdb` proxy from `1001, 1003, ..., 1059`, mapped to runtime frames
+   `1001-1030` at 25 FPS.
+3. A one-frame proof at this resolution produced a valid `.vdb` of 4.7 MiB,
+   versus roughly 33 MiB for the source frame. The next session must first
+   validate this 30-frame `.vdb` wrapper in BMS, then record playing and paused
+   FPS before deciding whether a stronger resample is necessary.
+4. Do not generate a full 400-frame proxy, modify the master cache, use NanoVDB
+   through `OpenVDBAsset`, or start another renderer branch until that single
+   A/B measurement is captured.
+
+#### Implementation Checkpoint - 2026-07-20 Long Pit Stop
+
+Status: active investigation. Stage 6 is **not delivered**. Cached airflow is
+visually playable in BMS, but its current animated volume path is not viable
+for showreel capture.
+
+Current measured state:
+
+- The current test cache is the separate Houdini 21 export under
+  `assets/_external/vdb/server_airflow_sims/server_airflow_vdb_test`, with 400
+  frames mapped to `1001-1400` at 25 FPS. Its wrapper is
+  `assets/_external/usd/server_airflows/sim_test.usda` and targets
+  `/sim/test/density`.
+- The test density grid is a scalar `float` OpenVDB grid. Frame `1001` is
+  approximately 4.73 MiB on disk, has a voxel size of `0.00255`, resolution
+  `184 x 72 x 213`, and about 11.73 MiB expanded memory.
+- Exporting from Houdini 21 removed the prior VDB-format-225 compatibility
+  warning. Renaming the sequence to `1001-1400` and correcting the wrapper's
+  `fieldDataType` also allowed time-sampled playback to advance. Neither
+  change materially improved animated performance.
+- The BMS GPU profile measured approximately `328.6 ms` for a frame while the
+  volume is playing, or about 3 FPS. With no active airflow cache, the same
+  review scene is about 24 FPS. The volume/RTX-IndeX composition path is
+  therefore the dominant cost; the source-frame disk size is not sufficient
+  evidence that ordinary VDB sequence playback will meet the capture target.
+- The current BMS IndeX quality settings are `resolutionScale = 25`,
+  `renderingSamples = 1`, `filterMode = trilinear`, and
+  `samplingDistance = 0.012`. The sampling distance is about 4.7 test-cache
+  voxels. The profiler records a total GPU duration only, so it does not yet
+  identify a more granular sub-cost inside the volume renderer.
+
+Findings that must not be re-investigated as primary fixes:
+
+- VDB format `225` was a compatibility defect, but VDB `224` did not remove
+  the 2-3 FPS playback limit.
+- The wrapper's frame numbering, time-sampled `filePath`, and
+  `fieldDataType = float` were necessary for playback correctness, but are not
+  the measured performance bottleneck.
+- Redundant animated `extent`, `fieldName`, and `fieldIndex` samples are USD
+  hygiene issues, not an explanation for the observed render cost. Do not
+  spend another Houdini pass on them before a renderer route proves viable.
+- The Kit `omni.volume` NanoVDB conversion remains rejected for the current
+  `OpenVDBAsset`/IndeX wrapper: it produced a larger `.nvdb` payload and the
+  importer failed to load it. Do not retry that route through `OpenVDBAsset`.
+
+Viable routes and hypotheses:
+
+1. **IndeX fast-path A/B.** NVIDIA documents `Nearest` as the faster volume
+   filter and identifies sampling distance as a direct quality/performance
+   control. One settings-only test can change the filter from `trilinear` to
+   `nearest` and increase sampling distance to at least `0.0255` (about ten
+   voxels), while retaining the existing 25 percent resolution scale and one
+   sample. A further resolution reduction to 12-15 percent is a possible
+   second setting, but only after recording the first result. This may reduce
+   ray-marching cost; it is not a promise of 25 FPS.
+2. **Native RTX Interactive Path Tracing volume route.** NVIDIA documents a
+   separate non-uniform VDB path that converts VDB data to GPU-friendly
+   NanoVDB internally. Its documented authoring contract is a cube mesh with
+   a native VDB material and `/rtx/pathtracing/ptvol/enabled`; fog-like
+   volumes can use one scattering bounce, one sample, and denoising. This is
+   an alternative authoring proof, not a request to recompute the Houdini
+   simulation. It must be implemented only after checking an official Kit API
+   example for the animated material path; the earlier generic MDL texture
+   experiment was incompatible and crashed.
+3. **IndeX cluster rendering** is documented for purpose-built multi-host
+   installations. It is not the next experiment and must not be assumed to
+   distribute the current workstation's GPUs automatically.
+
+Exact resume order:
+
+1. Before editing BMS or Houdini, obtain an official NVIDIA example or API
+   reference for an animated native RTX Interactive Path Tracing VDB material
+   on a cube mesh. Do not infer the material graph from the failed generic MDL
+   setup.
+2. Record the current BMS renderer and Index settings, then run one
+   settings-only IndeX fast-path A/B: `nearest`, `samplingDistance = 0.0255`,
+   25 percent resolution scale, and one sample. Capture playing FPS, a frame
+   profile, and a screenshot for readability. Do not regenerate or resample
+   VDB data for this test.
+3. If that result remains clearly below a usable showreel threshold, stop
+   tuning the current IndeX route. Implement a first-frame native RTX
+   Interactive Path Tracing proof using the existing test sequence, then make
+   a single short animated A/B before expanding the implementation.
+4. Do not perform further Houdini VDB resampling, wrapper exports, extent
+   cleanup, NanoVDB conversion, or cluster configuration until either route
+   has a measured positive result.
 
 ### Stage 7 - Engineering X-Ray Visual Mode Slice
 

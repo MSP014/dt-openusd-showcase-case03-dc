@@ -58,6 +58,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._lighting_status_label = None
         self._asset_label = None
         self._load_task = None
+        self._airflow_task = None
+        self._auxiliary_windows_task = None
+        self._airflow_status_label = None
         self._lighting_task = None
         self._camera_sync_task = None
         self._telemetry_task = None
@@ -118,6 +121,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._build_controller()
         self._build_window()
         asyncio.ensure_future(self._dock_left())
+        self._auxiliary_windows_task = asyncio.ensure_future(
+            self._hide_auxiliary_kit_windows()
+        )
         self._camera_sync_task = asyncio.ensure_future(self._sync_camera_panel())
         self._telemetry_task = asyncio.ensure_future(self._run_telemetry())
 
@@ -125,7 +131,12 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             self._schedule_load()
 
     def on_shutdown(self) -> None:
-        for task_name in ("_load_task", "_lighting_task"):
+        for task_name in (
+            "_load_task",
+            "_lighting_task",
+            "_airflow_task",
+            "_auxiliary_windows_task",
+        ):
             task = getattr(self, task_name, None)
             if task:
                 task.cancel()
@@ -271,6 +282,10 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                     lambda: self._build_asset_config_controls(default_asset),
                 )
                 self._build_config_section(
+                    "Airflow cache",
+                    self._build_airflow_cache_controls,
+                )
+                self._build_config_section(
                     "Lighting",
                     lambda: self._build_lighting_config_controls(config),
                     collapsed=True,
@@ -332,6 +347,56 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             width=ui.Percent(100),
         )
         self._status_label = ui.Label("Ready", height=34, elided_text=True)
+
+    def _build_airflow_cache_controls(self) -> None:
+        cache = self._controller.config.simulation_cache
+        wrapper_name = (
+            Path(cache.wrapper_path).name if cache.wrapper_path else "Not configured"
+        )
+        ui.Label(
+            _compact_text(wrapper_name),
+            height=18,
+            elided_text=True,
+            tooltip=wrapper_name,
+        )
+        with ui.HStack(height=26, spacing=6, content_clipping=True):
+            ui.Button(
+                "Attach",
+                clicked_fn=self._schedule_attach_airflow,
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Detach",
+                clicked_fn=self._schedule_detach_airflow,
+                width=ui.Fraction(1),
+            )
+        with ui.HStack(height=26, spacing=6, content_clipping=True):
+            ui.Button(
+                "Play",
+                clicked_fn=self._play_airflow,
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Pause",
+                clicked_fn=self._pause_airflow,
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Reset",
+                clicked_fn=self._reset_airflow,
+                width=ui.Fraction(1),
+            )
+        ui.Button(
+            "Capture GPU profile",
+            clicked_fn=self._capture_airflow_gpu_profile,
+            height=26,
+            width=ui.Percent(100),
+        )
+        self._airflow_status_label = ui.Label(
+            "Not attached",
+            height=34,
+            elided_text=True,
+        )
 
     def _build_lighting_config_controls(self, config) -> None:
         self._lighting_status_label = ui.Label(
@@ -871,6 +936,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                         now,
                     )
 
+                if self._controller:
+                    self._controller.sync_simulation_cache_frame_in_kit()
+
                 if now >= self._next_telemetry_ui_update:
                     latest = self._telemetry_provider.latest_snapshot
                     displayed = self._telemetry_latch.displayed(latest)
@@ -964,6 +1032,23 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         except Exception:  # noqa: BLE001
             return
 
+    async def _hide_auxiliary_kit_windows(self) -> None:
+        """Keep the focused BMS shell clear of IndeX dependency windows."""
+
+        try:
+            import omni.kit.app
+
+            app = omni.kit.app.get_app()
+            for _ in range(6):
+                await app.next_update_async()
+
+            for name in ("Property", "Content", "Render Settings"):
+                window = ui.Workspace.get_window(name)
+                if window:
+                    window.visible = False
+        except Exception:  # noqa: BLE001
+            return
+
     def _reload_config(self) -> None:
         config = self._controller.reload_config()
         if self._motion_controller:
@@ -986,6 +1071,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             lighting_text = f"HDRI: {config.default_hdri_path.name}"
             self._lighting_status_label.text = _compact_text(lighting_text)
             self._lighting_status_label.tooltip = lighting_text
+        self._set_airflow_status("Not attached")
         self._set_status("Configuration reloaded.")
 
     def _set_status(self, message: str) -> None:
@@ -997,6 +1083,11 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         if self._lighting_status_label:
             self._lighting_status_label.text = _compact_text(message)
             self._lighting_status_label.tooltip = message
+
+    def _set_airflow_status(self, message: str) -> None:
+        if self._airflow_status_label:
+            self._airflow_status_label.text = _compact_text(message)
+            self._airflow_status_label.tooltip = message
 
     @staticmethod
     def _asset_loaded_status(message: str) -> str:
@@ -1017,6 +1108,28 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
     def _schedule_apply_lighting(self) -> None:
         self._lighting_task = asyncio.ensure_future(self._apply_lighting())
+
+    def _schedule_attach_airflow(self) -> None:
+        self._airflow_task = asyncio.ensure_future(self._attach_airflow())
+
+    def _schedule_detach_airflow(self) -> None:
+        self._airflow_task = asyncio.ensure_future(self._detach_airflow())
+
+    def _play_airflow(self) -> None:
+        result = self._controller.play_simulation_cache_in_kit()
+        self._set_airflow_status(result.message)
+
+    def _pause_airflow(self) -> None:
+        result = self._controller.pause_simulation_cache_in_kit()
+        self._set_airflow_status(result.message)
+
+    def _reset_airflow(self) -> None:
+        result = self._controller.reset_simulation_cache_in_kit()
+        self._set_airflow_status(result.message)
+
+    def _capture_airflow_gpu_profile(self) -> None:
+        result = self._controller.capture_gpu_profile_in_kit()
+        self._set_airflow_status(result.message)
 
     def _schedule_apply_camera(self) -> None:
         self._lighting_task = asyncio.ensure_future(self._apply_camera())
@@ -1208,6 +1321,16 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         )
         if result.success:
             self._set_lighting_status(self._lighting_status_from_load(result.message))
+
+    async def _attach_airflow(self) -> None:
+        result = await self._controller.attach_simulation_cache_in_kit(
+            status_callback=self._set_airflow_status,
+        )
+        self._set_airflow_status(result.message)
+
+    async def _detach_airflow(self) -> None:
+        result = self._controller.detach_simulation_cache_in_kit()
+        self._set_airflow_status(result.message)
 
     async def _apply_lighting(self) -> None:
         lighting = self._build_lighting_config_from_controls()
