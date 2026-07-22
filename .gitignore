@@ -69,6 +69,7 @@ __pycache__/
 env/
 venv/
 .pytest_cache/
+.pytest_tmp/
 
 # --- Tools & System ---
 tool/tmp/

@@ -36,12 +36,20 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 ## Blackwell Monitoring Suite 0.4.0 Runtime Preview
 
 *Omniverse full-server runtime review with live synthetic node telemetry,
-cooling metrics, and cached OpenVDB airflow playback.*
+configurable presentation controls, front-panel indicators, QLED temperature
+display, and cached OpenVDB airflow playback.*
 
-| Nominal workload | Critical workload |
+| Telemetry overview | Runtime configuration |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.4.0 - Nominal workload](docs/img/bms_0.1.0/bms_0.1.0_01.png) | ![Blackwell Monitoring Suite 0.4.0 - Critical workload](docs/img/bms_0.1.0/bms_0.1.0_02.png) |
-| *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
+| ![Blackwell Monitoring Suite 0.4.0 - Telemetry overview](docs/img/bms_0.4.0/bms_0.4.0_01.png) | ![Blackwell Monitoring Suite 0.4.0 - Runtime configuration](docs/img/bms_0.4.0/bms_0.4.0_02.png) |
+| *Full-server telemetry hierarchy and synthetic workload state* | *Config-driven camera, lighting, grid, and telemetry provider controls* |
+
+| Server presentation controls | Closed chassis review |
+| :---: | :---: |
+| ![Blackwell Monitoring Suite 0.4.0 - Server presentation controls](docs/img/bms_0.4.0/bms_0.4.0_03.png) | ![Blackwell Monitoring Suite 0.4.0 - Closed chassis review](docs/img/bms_0.4.0/bms_0.4.0_04.png) |
+| *Runtime enclosure visibility and front-panel hinge controls* | *Closed server review with animated hinged front panel and active indicators* |
+
+→ [Watch the server assembly preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
 ## Blackwell Rig Airflow Simulation Preview
 
@@ -287,6 +295,7 @@ and a Session Layer pivot-stack fallback for older exports.
 
 ## 📜 Changelog
 
+* **Week of 20 July, 2026:** Advanced Blackwell Monitoring Suite v0.4.0 into an interactive full-server presentation layer with server enclosure visibility controls, hinged front-panel animation, QLED CPU-temperature display, front-panel activity indicators, focused UI-control tests, and refreshed runtime screenshots.
 * **Week of 13 July, 2026:** Completed topology repairs across the Blackwell Rig component set, delivered the Blackwell Monitoring Suite 0.3 full-server review candidate with static USD preflight and 11 config-backed fan bindings, clarified the qualitative airflow visualisation boundary, and defined a staged licensing and distribution plan for the public Asset Pack.
 * **Week of 6 July, 2026:** Delivered Blackwell Monitoring Suite 0.1 through its first three runtime slices, combining Omniverse asset and look review with config-driven synthetic telemetry, validated workload states, hardware-aware power and thermal modelling, focused provider tests, and public runtime evidence.
 * **Week of 29 June, 2026:** Advanced Case 03 from node-scale airflow proof toward rack-level production planning, added Omniverse MCP helper tooling, clarified the visualisation contract, and migrated the project baseline to Python 3.11.15.

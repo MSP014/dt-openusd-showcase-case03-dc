@@ -153,6 +153,60 @@ def _check_configured_prims(stage, config: RuntimeConfig, findings) -> None:
             path=path,
         )
 
+    for group in getattr(config.chassis_presentation, "visibility_groups", ()):
+        for path in group.paths:
+            _append_missing_prim_finding(
+                stage,
+                findings,
+                code="missing_chassis_visibility_group",
+                message=f"Configured chassis visibility prim is missing: {path}",
+                path=path,
+            )
+
+    face_panel = getattr(config.chassis_presentation, "face_panel", None)
+    if getattr(face_panel, "enabled", False):
+        _append_missing_prim_finding(
+            stage,
+            findings,
+            code="missing_chassis_face_panel",
+            message=(
+                "Configured chassis face panel prim is missing: "
+                f"{face_panel.target_path}"
+            ),
+            path=face_panel.target_path,
+        )
+
+    qled = getattr(config.chassis_presentation, "qled_display", None)
+    if getattr(qled, "enabled", False):
+        for digit_name, segment_paths in (qled.digits or {}).items():
+            for segment, path in segment_paths.items():
+                _append_missing_prim_finding(
+                    stage,
+                    findings,
+                    code="missing_chassis_qled_segment",
+                    message=(
+                        "Configured chassis QLED segment is missing: "
+                        f"{digit_name}.{segment}: {path}"
+                    ),
+                    path=path,
+                )
+
+    indicators = getattr(config.chassis_presentation, "front_panel_indicators", None)
+    if getattr(indicators, "enabled", False):
+        for name, path in (
+            ("power", indicators.power_path),
+            ("hdd", indicators.hdd_path),
+            ("lan_01", indicators.lan_01_path),
+            ("lan_02", indicators.lan_02_path),
+        ):
+            _append_missing_prim_finding(
+                stage,
+                findings,
+                code="missing_chassis_front_panel_indicator",
+                message=f"Configured front-panel indicator is missing: {name}: {path}",
+                path=path,
+            )
+
     for binding in config.fan_motion_bindings:
         _append_missing_prim_finding(
             stage,
@@ -296,6 +350,8 @@ def _resolve_asset_path(Sdf, layer, asset_path: str) -> str:
 def _infer_expected_root_path(config: RuntimeConfig) -> str | None:
     paths: list[str] = []
     paths.extend(config.chassis_presentation.cover_paths)
+    for group in getattr(config.chassis_presentation, "visibility_groups", ()):
+        paths.extend(group.paths)
     for binding in config.fan_motion_bindings:
         paths.append(binding.mesh_path)
         paths.append(binding.rotation_target_path)

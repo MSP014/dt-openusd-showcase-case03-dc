@@ -80,11 +80,75 @@ class GridConfig:
 
 
 @dataclass(frozen=True)
+class VisibilityGroupConfig:
+    """Runtime-only visibility group for presentation controls."""
+
+    group_id: str
+    label: str
+    default_visible: bool
+    paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FacePanelConfig:
+    """Runtime-only hinge animation for the chassis front panel."""
+
+    enabled: bool = False
+    label: str = "Front panel"
+    target_path: str = ""
+    rotation_axis: str = "X"
+    closed_angle_degrees: float = 0.0
+    open_angle_degrees: float = -90.0
+    animation_duration_seconds: float = 1.0
+    default_open: bool = False
+
+
+@dataclass(frozen=True)
+class QledDisplayConfig:
+    """Runtime-only two-digit QLED telemetry display."""
+
+    enabled: bool = False
+    metric_id: str = "cpu_temp_c"
+    warning_threshold_c: float = 100.0
+    minimum_value: int = 0
+    maximum_value: int = 99
+    normal_emission_color: tuple[float, float, float] = (0.9, 0.96, 1.0)
+    warning_emission_color: tuple[float, float, float] = (1.0, 0.32, 0.04)
+    off_color: tuple[float, float, float] = (0.015, 0.018, 0.022)
+    emission_intensity: float = 1.0
+    digits: dict[str, dict[str, str]] | None = None
+
+
+@dataclass(frozen=True)
+class FrontPanelIndicatorsConfig:
+    """Runtime-only front-panel power, storage, and LAN indicators."""
+
+    enabled: bool = False
+    power_path: str = ""
+    hdd_path: str = ""
+    lan_01_path: str = ""
+    lan_02_path: str = ""
+    power_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
+    hdd_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
+    lan_01_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
+    lan_02_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
+    off_color: tuple[float, float, float] = (0.62, 0.65, 0.68)
+    emission_intensity: float = 1.0
+    storage_metric_id: str = "storage_activity_percent"
+    lan_01_metric_id: str = "lan_1_activity_percent"
+    lan_02_metric_id: str = "lan_2_activity_percent"
+
+
+@dataclass(frozen=True)
 class ChassisPresentationConfig:
     """Runtime-only presentation state for the server enclosure."""
 
     open_chassis: bool = False
     cover_paths: tuple[str, ...] = ()
+    visibility_groups: tuple[VisibilityGroupConfig, ...] = ()
+    face_panel: FacePanelConfig = FacePanelConfig()
+    qled_display: QledDisplayConfig = QledDisplayConfig()
+    front_panel_indicators: FrontPanelIndicatorsConfig = FrontPanelIndicatorsConfig()
 
 
 @dataclass(frozen=True)
@@ -417,7 +481,226 @@ def _parse_chassis_presentation_config(data: Any) -> ChassisPresentationConfig:
     return ChassisPresentationConfig(
         open_chassis=bool(data.get("open_chassis", False)),
         cover_paths=cover_paths,
+        visibility_groups=_parse_visibility_groups(data.get("visibility_groups")),
+        face_panel=_parse_face_panel_config(data.get("face_panel")),
+        qled_display=_parse_qled_display_config(data.get("qled_display")),
+        front_panel_indicators=_parse_front_panel_indicators_config(
+            data.get("front_panel_indicators")
+        ),
     )
+
+
+def _parse_front_panel_indicators_config(data: Any) -> FrontPanelIndicatorsConfig:
+    if not isinstance(data, dict):
+        return FrontPanelIndicatorsConfig()
+
+    enabled = bool(data.get("enabled", True))
+    paths = {
+        field: str(data.get(field, "")).strip()
+        for field in ("power_path", "hdd_path", "lan_01_path", "lan_02_path")
+    }
+    if enabled:
+        for field, path in paths.items():
+            if not path or not path.startswith("/"):
+                raise ValueError(
+                    "chassis_presentation.front_panel_indicators paths must be "
+                    f"absolute USD paths: {field}"
+                )
+
+    return FrontPanelIndicatorsConfig(
+        enabled=enabled,
+        power_path=paths["power_path"],
+        hdd_path=paths["hdd_path"],
+        lan_01_path=paths["lan_01_path"],
+        lan_02_path=paths["lan_02_path"],
+        power_color=_parse_rgb(
+            data.get("power_color"),
+            (0.95, 0.98, 1.0),
+            "chassis_presentation.front_panel_indicators.power_color",
+        ),
+        hdd_color=_parse_rgb(
+            data.get("hdd_color"),
+            (0.95, 0.98, 1.0),
+            "chassis_presentation.front_panel_indicators.hdd_color",
+        ),
+        lan_01_color=_parse_rgb(
+            data.get("lan_01_color"),
+            (0.95, 0.98, 1.0),
+            "chassis_presentation.front_panel_indicators.lan_01_color",
+        ),
+        lan_02_color=_parse_rgb(
+            data.get("lan_02_color"),
+            (0.95, 0.98, 1.0),
+            "chassis_presentation.front_panel_indicators.lan_02_color",
+        ),
+        off_color=_parse_rgb(
+            data.get("off_color"),
+            (0.62, 0.65, 0.68),
+            "chassis_presentation.front_panel_indicators.off_color",
+        ),
+        emission_intensity=float(data.get("emission_intensity", 1.0)),
+        storage_metric_id=str(
+            data.get("storage_metric_id", "storage_activity_percent")
+        ).strip()
+        or "storage_activity_percent",
+        lan_01_metric_id=str(
+            data.get("lan_01_metric_id", "lan_1_activity_percent")
+        ).strip()
+        or "lan_1_activity_percent",
+        lan_02_metric_id=str(
+            data.get("lan_02_metric_id", "lan_2_activity_percent")
+        ).strip()
+        or "lan_2_activity_percent",
+    )
+
+
+def _parse_qled_display_config(data: Any) -> QledDisplayConfig:
+    if not isinstance(data, dict):
+        return QledDisplayConfig()
+
+    enabled = bool(data.get("enabled", True))
+    digits = _parse_qled_digits(data.get("digits"))
+    if enabled and not digits:
+        raise ValueError("chassis_presentation.qled_display.digits is required.")
+
+    minimum_value = int(data.get("minimum_value", 0))
+    maximum_value = int(data.get("maximum_value", 99))
+    if minimum_value < 0 or maximum_value > 99 or minimum_value > maximum_value:
+        raise ValueError(
+            "chassis_presentation.qled_display range must stay inside 0..99."
+        )
+
+    return QledDisplayConfig(
+        enabled=enabled,
+        metric_id=str(data.get("metric_id", "cpu_temp_c")).strip() or "cpu_temp_c",
+        warning_threshold_c=float(data.get("warning_threshold_c", 100.0)),
+        minimum_value=minimum_value,
+        maximum_value=maximum_value,
+        normal_emission_color=_parse_rgb(
+            data.get("normal_emission_color"),
+            (0.9, 0.96, 1.0),
+            "chassis_presentation.qled_display.normal_emission_color",
+        ),
+        warning_emission_color=_parse_rgb(
+            data.get("warning_emission_color"),
+            (1.0, 0.32, 0.04),
+            "chassis_presentation.qled_display.warning_emission_color",
+        ),
+        off_color=_parse_rgb(
+            data.get("off_color"),
+            (0.015, 0.018, 0.022),
+            "chassis_presentation.qled_display.off_color",
+        ),
+        emission_intensity=float(data.get("emission_intensity", 1.0)),
+        digits=digits,
+    )
+
+
+def _parse_qled_digits(data: Any) -> dict[str, dict[str, str]] | None:
+    if not isinstance(data, dict):
+        return None
+
+    parsed: dict[str, dict[str, str]] = {}
+    for digit_name in ("tens", "units"):
+        raw_digit = data.get(digit_name)
+        if not isinstance(raw_digit, dict):
+            raise ValueError(
+                f"chassis_presentation.qled_display.digits.{digit_name} is required."
+            )
+        parsed[digit_name] = {}
+        for segment in ("a", "b", "c", "d", "e", "f", "g"):
+            path = str(raw_digit.get(segment, "")).strip()
+            if not path or not path.startswith("/"):
+                raise ValueError(
+                    "QLED segment paths must be absolute USD paths: "
+                    f"{digit_name}.{segment}"
+                )
+            parsed[digit_name][segment] = path
+    return parsed
+
+
+def _parse_rgb(data: Any, default: tuple[float, float, float], field: str):
+    if data is None:
+        return default
+    if not isinstance(data, list) or len(data) != 3:
+        raise ValueError(f"{field} must be an RGB array.")
+    return tuple(float(value) for value in data)
+
+
+def _parse_face_panel_config(data: Any) -> FacePanelConfig:
+    if not isinstance(data, dict):
+        return FacePanelConfig()
+
+    enabled = bool(data.get("enabled", True))
+    target_path = str(data.get("target_path", "")).strip()
+    if enabled:
+        if not target_path:
+            raise ValueError("chassis_presentation.face_panel.target_path is required.")
+        if not target_path.startswith("/"):
+            raise ValueError(
+                "chassis_presentation.face_panel.target_path must be an absolute "
+                "USD path."
+            )
+
+    rotation_axis = str(data.get("rotation_axis", "X")).upper().strip()
+    if rotation_axis not in {"X", "Y", "Z"}:
+        raise ValueError(
+            "chassis_presentation.face_panel.rotation_axis must be X, Y, or Z."
+        )
+
+    duration = float(data.get("animation_duration_seconds", 1.0))
+    if duration < 0.0:
+        raise ValueError(
+            "chassis_presentation.face_panel.animation_duration_seconds must be "
+            "non-negative."
+        )
+
+    return FacePanelConfig(
+        enabled=enabled,
+        label=str(data.get("label", "Front panel")).strip() or "Front panel",
+        target_path=target_path,
+        rotation_axis=rotation_axis,
+        closed_angle_degrees=float(data.get("closed_angle_degrees", 0.0)),
+        open_angle_degrees=float(data.get("open_angle_degrees", -90.0)),
+        animation_duration_seconds=duration,
+        default_open=bool(data.get("default_open", False)),
+    )
+
+
+def _parse_visibility_groups(data: Any) -> tuple[VisibilityGroupConfig, ...]:
+    if not isinstance(data, dict):
+        return ()
+
+    groups: list[VisibilityGroupConfig] = []
+    for group_id, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        label = str(entry.get("label", group_id)).strip()
+        raw_paths = entry.get("paths", ())
+        if not isinstance(raw_paths, list):
+            raise ValueError(
+                f"chassis_presentation.visibility_groups.{group_id}.paths "
+                "must be an array."
+            )
+        paths = tuple(str(path).strip() for path in raw_paths if str(path).strip())
+        if not paths:
+            raise ValueError(
+                f"chassis_presentation visibility group {group_id} has no paths."
+            )
+        if any(not path.startswith("/") for path in paths):
+            raise ValueError(
+                f"chassis_presentation visibility group {group_id} paths "
+                "must be absolute USD paths."
+            )
+        groups.append(
+            VisibilityGroupConfig(
+                group_id=str(group_id).strip(),
+                label=label,
+                default_visible=bool(entry.get("default_visible", True)),
+                paths=paths,
+            )
+        )
+    return tuple(groups)
 
 
 def _parse_fan_motion_bindings(data: Any) -> tuple[FanMotionBindingConfig, ...]:

@@ -2,6 +2,39 @@
 
 ## 1. Unresolved Technical Debt
 
+### [RUNTIME] Backfill UI Control Contract Tests for Existing BMS Controls
+
+- **Status:** Open
+- **Severity:** Medium (Test Coverage / UI Regression Risk)
+- **Description:**
+  - New stateful BMS UI controls should be covered by focused behavioural tests
+    before manual Kit validation is treated as sufficient.
+  - The expected contract is one happy-path test plus representative edge cases
+    for controls that change application state, trigger runtime commands,
+    persist configuration, or author USD/session-layer opinions.
+  - The Stage 17 View tab server enclosure controls now follow this pattern,
+    but older controls were introduced before the rule existed.
+- **Context:**
+  - Fast unit tests should cover pure-Python seams such as UI model state
+    extraction, command payload construction, config merge behaviour, and USD
+    session-layer authoring helpers.
+  - Manual Kit checks should remain focused on visual polish, docking, viewport
+    framing, renderer behaviour, and interaction feel.
+- **Why Deferred:**
+  - Backfilling every existing OmniUI control during the current screenshot
+    polish slice would expand scope beyond the server-view controls.
+  - Some controls need small test seams before they can be covered without
+    launching Kit.
+- **Action Plan:**
+  - [ ] Inventory existing BMS interactive controls by side effect.
+  - [ ] Add behavioural contract tests for asset load controls.
+  - [ ] Add behavioural contract tests for lighting controls.
+  - [ ] Add behavioural contract tests for grid and camera controls.
+  - [ ] Add behavioural contract tests for airflow cache controls.
+  - [ ] Add behavioural contract tests for telemetry workload, refresh, and
+        freeze controls.
+  - [ ] Keep visual-only Kit checks separate from fast unit tests.
+
 ### [RUNTIME] Backfill Unit Tests for Existing BMS Runtime Modules
 
 - **Status:** Open

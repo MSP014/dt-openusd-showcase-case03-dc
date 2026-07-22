@@ -41,7 +41,7 @@ def test_packaged_telemetry_config_loads_all_modes_and_metrics():
     assert config.modes["Nominal"].strings["health_state"] == "OK"
     assert set(config.modes["Nominal"].numeric) == NUMERIC_METRICS
     assert "gpu_power_w_total" not in NUMERIC_METRICS
-    assert len(TUNING_METRICS) == 20
+    assert len(TUNING_METRICS) == 23
     for mode in config.modes.values():
         assert (
             len({mode.numeric[f"gpu_{index}_temp_c"].target for index in range(1, 4)})
@@ -53,6 +53,9 @@ def test_packaged_telemetry_config_loads_all_modes_and_metrics():
         )
         assert mode.numeric["link_speed_gbps"].target == 400.0
         assert mode.numeric["nic_temp_c"].maximum < 105.0
+        assert mode.numeric["storage_activity_percent"].maximum <= 100.0
+        assert mode.numeric["lan_1_activity_percent"].maximum <= 100.0
+        assert mode.numeric["lan_2_activity_percent"].maximum <= 100.0
         assert all(
             mode.numeric[f"gpu_{index}_memory_used_gb"].maximum <= 32.0
             for index in range(1, 4)

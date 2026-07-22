@@ -24,14 +24,106 @@ enabled = true
 
 [chassis_presentation]
 # Authored only in BMS's session layer: the Houdini/USD master stays complete.
-# For the current Stage 5 fan-motion pass, hide the full cover subtrees.
-open_chassis = true
-cover_paths = [
+# Keep the initial runtime view open for engineering review, but expose each
+# enclosure group separately so screenshots can switch between cutaway and
+# closed presentation without editing authored USD.
+open_chassis = false
+cover_paths = []
+
+[chassis_presentation.visibility_groups.top_cover]
+label = "Top cover"
+default_visible = false
+paths = [
   "/blackwell_rig/chassis/geo/render/chassis/top",
-  "/blackwell_rig/chassis/geo/render/chassis/side",
   "/blackwell_rig/chassis/geo/proxy/chassis/top",
-  "/blackwell_rig/chassis/geo/proxy/chassis/side",
 ]
+
+[chassis_presentation.visibility_groups.left_side_panel]
+label = "Left side"
+default_visible = false
+paths = [
+  "/blackwell_rig/chassis/geo/render/chassis/side/left_side_plate",
+  "/blackwell_rig/chassis/geo/proxy/chassis/side/left_side_plate",
+]
+
+[chassis_presentation.visibility_groups.left_mounting_ear]
+label = "Left ear"
+default_visible = false
+paths = [
+  "/blackwell_rig/chassis/geo/render/chassis/side/left_side_ear",
+  "/blackwell_rig/chassis/geo/proxy/chassis/side/left_side_ear",
+]
+
+[chassis_presentation.visibility_groups.right_side_panel]
+label = "Right side"
+default_visible = false
+paths = [
+  "/blackwell_rig/chassis/geo/render/chassis/side/right_side_plate",
+  "/blackwell_rig/chassis/geo/proxy/chassis/side/right_side_plate",
+]
+
+[chassis_presentation.visibility_groups.right_mounting_ear]
+label = "Right ear"
+default_visible = false
+paths = [
+  "/blackwell_rig/chassis/geo/render/chassis/side/right_side_ear",
+  "/blackwell_rig/chassis/geo/proxy/chassis/side/right_side_ear",
+]
+
+[chassis_presentation.face_panel]
+enabled = true
+label = "Front panel"
+target_path = "/blackwell_rig/chassis/geo/render/chassis/face_panel"
+rotation_axis = "X"
+closed_angle_degrees = 0.0
+open_angle_degrees = 90.0
+animation_duration_seconds = 1.0
+default_open = false
+
+[chassis_presentation.qled_display]
+enabled = true
+metric_id = "cpu_temp_c"
+warning_threshold_c = 100.0
+minimum_value = 0
+maximum_value = 99
+normal_emission_color = [0.9, 0.96, 1.0]
+warning_emission_color = [1.0, 0.32, 0.04]
+off_color = [0.015, 0.018, 0.022]
+emission_intensity = 1.0
+
+[chassis_presentation.qled_display.digits.tens]
+a = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_a/digit_tens_seg_a"
+b = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_b/digit_tens_seg_b"
+c = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_c/digit_tens_seg_c"
+d = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_d/digit_tens_seg_d"
+e = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_e/digit_tens_seg_e"
+f = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_f/digit_tens_seg_f"
+g = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_tens_seg_g/digit_tens_seg_g"
+
+[chassis_presentation.qled_display.digits.units]
+a = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_a/digit_units_seg_a"
+b = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_b/digit_units_seg_b"
+c = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_c/digit_units_seg_c"
+d = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_d/digit_units_seg_d"
+e = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_e/digit_units_seg_e"
+f = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_f/digit_units_seg_f"
+g = "/blackwell_rig/motherboard/geo/render/ws_wrx90e/pcb/digit_units_seg_g/digit_units_seg_g"
+
+[chassis_presentation.front_panel_indicators]
+enabled = true
+power_path = "/blackwell_rig/chassis/geo/render/chassis/power_panel/Power_BTN_Light/Power_BTN_Light"
+hdd_path = "/blackwell_rig/chassis/geo/render/chassis/power_panel/Light_HDD/Light_HDD"
+lan_01_path = "/blackwell_rig/chassis/geo/render/chassis/power_panel/Light_LAN01/Light_LAN01"
+lan_02_path = "/blackwell_rig/chassis/geo/render/chassis/power_panel/Light_LAN02/Light_LAN02"
+power_color = [0.95, 0.98, 1.0]
+hdd_color = [0.95, 0.98, 1.0]
+lan_01_color = [0.95, 0.98, 1.0]
+lan_02_color = [0.95, 0.98, 1.0]
+off_color = [0.62, 0.65, 0.68]
+emission_intensity = 1.0
+storage_metric_id = "storage_activity_percent"
+lan_01_metric_id = "lan_1_activity_percent"
+lan_02_metric_id = "lan_2_activity_percent"
 
 [[motion.fan_bindings]]
 id = "cpu_cooler"
