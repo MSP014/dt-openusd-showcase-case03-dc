@@ -12,12 +12,19 @@ from typing import Callable
 from blackwell_monitoring_suite.app.config import (
     CameraConfig,
     ChassisPresentationConfig,
+    FacePanelConfig,
+    FrontPanelIndicatorsConfig,
     GridConfig,
     LightingConfig,
+    QledDisplayConfig,
     RotationConfig,
     RuntimeConfig,
     format_runtime_override,
 )
+from blackwell_monitoring_suite.app.front_panel_indicators import (
+    front_panel_indicator_state,
+)
+from blackwell_monitoring_suite.app.qled import SEGMENTS, qled_state_from_temperature
 from blackwell_monitoring_suite.app.simulation_cache import (
     SimulationCacheContract,
     run_simulation_cache_preflight,
@@ -56,14 +63,42 @@ class SimulationCacheResult:
     message: str
 
 
+@dataclass(frozen=True)
+class FacePanelApplyResult:
+    """Result of preparing or applying the runtime front-panel hinge."""
+
+    success: bool
+    message: str
+    start_angle: float = 0.0
+    target_angle: float = 0.0
+    rotate_op: object | None = None
+
+
 class RuntimeController:
     """Coordinates config-backed runtime operations for the viewer."""
+
+    FACE_PANEL_ROTATE_OP_SUFFIX = "mspViewHinge"
+    QLED_MATERIAL_PATHS = {
+        "normal": "/BMS_Runtime/Looks/QLEDOnNormal",
+        "warning": "/BMS_Runtime/Looks/QLEDOnWarning",
+        "off": "/BMS_Runtime/Looks/QLEDOff",
+    }
+    FRONT_PANEL_MATERIAL_PATHS = {
+        "power": "/BMS_Runtime/Looks/FrontPanelPowerOn",
+        "hdd": "/BMS_Runtime/Looks/FrontPanelHDDOn",
+        "lan_01": "/BMS_Runtime/Looks/FrontPanelLAN01On",
+        "lan_02": "/BMS_Runtime/Looks/FrontPanelLAN02On",
+        "off": "/BMS_Runtime/Looks/FrontPanelIndicatorOff",
+    }
 
     def __init__(self, config_path: Path | str):
         self._config_path = Path(config_path)
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
+        self._front_panel_indicator_state_key: (
+            tuple[int, bool, bool, bool, bool] | None
+        ) = None
 
     def reload_config(self) -> RuntimeConfig:
         """Reload and return the current runtime config."""
@@ -71,6 +106,7 @@ class RuntimeController:
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
+        self._front_panel_indicator_state_key = None
         return self.config
 
     def project_defaults(self) -> RuntimeConfig:
@@ -361,6 +397,237 @@ class RuntimeController:
         if status_callback:
             status_callback("Chassis opened." if open_chassis else "Chassis closed.")
         return True
+
+    async def apply_chassis_visibility_in_kit(
+        self,
+        group_id: str,
+        visible: bool,
+        status_callback: StatusCallback | None = None,
+    ) -> bool:
+        """Apply one configured enclosure visibility group in the session layer."""
+
+        import omni.kit.app
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            if status_callback:
+                status_callback("View skipped: no open stage.")
+            return False
+
+        group = next(
+            (
+                group
+                for group in self.config.chassis_presentation.visibility_groups
+                if group.group_id == group_id
+            ),
+            None,
+        )
+        if not group:
+            if status_callback:
+                status_callback(f"View skipped: unknown group {group_id}.")
+            return False
+
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            matched_count = self._apply_chassis_visibility_paths(
+                stage,
+                group.paths,
+                visible,
+                UsdGeom,
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        await omni.kit.app.get_app().next_update_async()
+        if status_callback:
+            if matched_count:
+                state = "shown" if visible else "hidden"
+                status_callback(f"{group.label} {state}.")
+            else:
+                status_callback(f"View skipped: {group.label} prims were not found.")
+        return matched_count > 0
+
+    async def apply_chassis_visibility_state_in_kit(
+        self,
+        visibility_by_group: dict[str, bool],
+        status_callback: StatusCallback | None = None,
+    ) -> bool:
+        """Apply all configured enclosure visibility controls in one operation."""
+
+        import omni.kit.app
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            if status_callback:
+                status_callback("View skipped: no open stage.")
+            return False
+
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            matched_count = 0
+            for group in self.config.chassis_presentation.visibility_groups:
+                visible = visibility_by_group.get(
+                    group.group_id,
+                    group.default_visible,
+                )
+                matched_count += self._apply_chassis_visibility_paths(
+                    stage,
+                    group.paths,
+                    visible,
+                    UsdGeom,
+                )
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        await omni.kit.app.get_app().next_update_async()
+        if status_callback:
+            if matched_count:
+                status_callback(f"View applied ({matched_count} prims).")
+            else:
+                status_callback("View skipped: no configured prims matched the stage.")
+        return matched_count > 0
+
+    async def apply_face_panel_state_in_kit(
+        self,
+        open_panel: bool,
+        status_callback: StatusCallback | None = None,
+    ) -> bool:
+        """Animate the configured front panel hinge in the session layer."""
+
+        face_panel = self.config.chassis_presentation.face_panel
+        if not face_panel.enabled:
+            if status_callback:
+                status_callback("Front panel skipped: no hinge configured.")
+            return False
+
+        import omni.kit.app
+        import omni.usd
+        from pxr import Usd, UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            if status_callback:
+                status_callback("Front panel skipped: no open stage.")
+            return False
+
+        result = self._prepare_face_panel_hinge(
+            stage,
+            face_panel,
+            open_panel,
+            Usd,
+            UsdGeom,
+        )
+        if not result.success or result.rotate_op is None:
+            if status_callback:
+                status_callback(result.message)
+            return False
+
+        if status_callback:
+            status_callback(
+                "Opening front panel." if open_panel else "Closing front panel."
+            )
+
+        app = omni.kit.app.get_app()
+        duration = max(0.0, float(face_panel.animation_duration_seconds))
+        if duration <= 0.0 or abs(result.target_angle - result.start_angle) < 1e-6:
+            self._set_face_panel_hinge_angle(
+                stage, result.rotate_op, result.target_angle, Usd
+            )
+            await app.next_update_async()
+        else:
+            started_at = time.monotonic()
+            while True:
+                elapsed = time.monotonic() - started_at
+                progress = min(1.0, elapsed / duration)
+                eased = progress * progress * (3.0 - (2.0 * progress))
+                angle = result.start_angle + (
+                    (result.target_angle - result.start_angle) * eased
+                )
+                self._set_face_panel_hinge_angle(stage, result.rotate_op, angle, Usd)
+                await app.next_update_async()
+                if progress >= 1.0:
+                    break
+            self._set_face_panel_hinge_angle(
+                stage, result.rotate_op, result.target_angle, Usd
+            )
+
+        if status_callback:
+            status_callback(
+                "Front panel opened." if open_panel else "Front panel closed."
+            )
+        return True
+
+    def apply_qled_display_snapshot_in_kit(self, snapshot) -> bool:
+        """Update the QLED display from the displayed telemetry snapshot."""
+
+        qled = self.config.chassis_presentation.qled_display
+        if not qled.enabled:
+            return False
+        metric = getattr(snapshot, "metrics", {}).get(qled.metric_id)
+        if metric is None:
+            return False
+
+        import omni.usd
+        from pxr import Gf, Sdf, Usd, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return False
+
+        return self._apply_qled_display_temperature(
+            stage,
+            qled,
+            float(metric.value),
+            Gf,
+            Sdf,
+            Usd,
+            UsdShade,
+        )
+
+    def apply_front_panel_indicators_snapshot_in_kit(
+        self,
+        snapshot,
+        now_seconds: float,
+    ) -> bool:
+        """Update front-panel LEDs from displayed telemetry metrics."""
+
+        indicators = self.config.chassis_presentation.front_panel_indicators
+        if not indicators.enabled:
+            return False
+
+        import omni.usd
+        from pxr import Gf, Sdf, Usd, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return False
+
+        state = front_panel_indicator_state(
+            snapshot.metrics,
+            now_seconds,
+            storage_metric_id=indicators.storage_metric_id,
+            lan_01_metric_id=indicators.lan_01_metric_id,
+            lan_02_metric_id=indicators.lan_02_metric_id,
+        )
+        state_key = (id(stage), state.power, state.hdd, state.lan_01, state.lan_02)
+        if state_key == self._front_panel_indicator_state_key:
+            return True
+        self._front_panel_indicator_state_key = state_key
+        return self._apply_front_panel_indicator_state(
+            stage,
+            indicators,
+            state,
+            Gf,
+            Sdf,
+            Usd,
+            UsdShade,
+        )
 
     async def attach_simulation_cache_in_kit(
         self,
@@ -808,17 +1075,382 @@ class RuntimeController:
     ) -> None:
         """Author reversible cover visibility opinions on the session layer."""
 
+        if presentation.visibility_groups:
+            for group in presentation.visibility_groups:
+                RuntimeController._apply_chassis_visibility_paths(
+                    stage,
+                    group.paths,
+                    group.default_visible,
+                    UsdGeom,
+                )
+            return
+
         visibility = (
             UsdGeom.Tokens.invisible if open_chassis else UsdGeom.Tokens.inherited
         )
-        for path in presentation.cover_paths:
+        RuntimeController._apply_chassis_visibility_paths(
+            stage,
+            presentation.cover_paths,
+            visibility == UsdGeom.Tokens.inherited,
+            UsdGeom,
+        )
+
+    @staticmethod
+    def _apply_chassis_visibility_paths(stage, paths, visible: bool, UsdGeom) -> int:
+        visibility = UsdGeom.Tokens.inherited if visible else UsdGeom.Tokens.invisible
+        matched_count = 0
+        for path in paths:
             prim = stage.GetPrimAtPath(path)
             if not prim or not prim.IsValid():
                 continue
+            matched_count += 1
+            if visible:
+                RuntimeController._make_chassis_visibility_ancestors_visible(
+                    stage,
+                    prim.GetPath(),
+                    UsdGeom,
+                )
             imageable = UsdGeom.Imageable(prim)
             if not imageable:
                 continue
             imageable.CreateVisibilityAttr().Set(visibility)
+        return matched_count
+
+    @staticmethod
+    def _make_chassis_visibility_ancestors_visible(stage, prim_path, UsdGeom) -> None:
+        parent_path = prim_path.GetParentPath()
+        while str(parent_path) != "/":
+            parent_prim = stage.GetPrimAtPath(parent_path)
+            if parent_prim and parent_prim.IsValid():
+                imageable = UsdGeom.Imageable(parent_prim)
+                if imageable:
+                    imageable.CreateVisibilityAttr().Set(UsdGeom.Tokens.inherited)
+            parent_path = parent_path.GetParentPath()
+
+    @classmethod
+    def _prepare_face_panel_hinge(
+        cls,
+        stage,
+        face_panel: FacePanelConfig,
+        open_panel: bool,
+        Usd,
+        UsdGeom,
+    ) -> FacePanelApplyResult:
+        if not face_panel.enabled:
+            return FacePanelApplyResult(False, "Front panel skipped: disabled.")
+
+        target_prim = stage.GetPrimAtPath(face_panel.target_path)
+        if not target_prim or not target_prim.IsValid():
+            return FacePanelApplyResult(
+                False,
+                f"Front panel skipped: target prim not found: {face_panel.target_path}",
+            )
+
+        target_angle = (
+            face_panel.open_angle_degrees
+            if open_panel
+            else face_panel.closed_angle_degrees
+        )
+        rotate_op = cls._ensure_face_panel_hinge_op(
+            stage,
+            target_prim,
+            face_panel.rotation_axis,
+            Usd,
+            UsdGeom,
+        )
+        current_value = rotate_op.Get()
+        start_angle = (
+            float(current_value)
+            if current_value is not None
+            else float(face_panel.closed_angle_degrees)
+        )
+        return FacePanelApplyResult(
+            True,
+            "Front panel hinge ready.",
+            start_angle=start_angle,
+            target_angle=float(target_angle),
+            rotate_op=rotate_op,
+        )
+
+    @classmethod
+    def _ensure_face_panel_hinge_op(
+        cls,
+        stage,
+        target_prim,
+        rotation_axis: str,
+        Usd,
+        UsdGeom,
+    ):
+        edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
+        with Usd.EditContext(stage, edit_target):
+            xformable = UsdGeom.Xformable(target_prim)
+            ops = list(xformable.GetOrderedXformOps())
+            axis_name = rotation_axis.upper()
+            rotate_name = f"xformOp:rotate{axis_name}:{cls.FACE_PANEL_ROTATE_OP_SUFFIX}"
+            rotate_op = cls._find_xform_op(ops, rotate_name)
+            if rotate_op is None:
+                rotate_op = cls._add_axis_rotate_op(
+                    xformable,
+                    axis_name,
+                    cls.FACE_PANEL_ROTATE_OP_SUFFIX,
+                    UsdGeom,
+                )
+                ops.append(rotate_op)
+            xformable.SetXformOpOrder(cls._dedupe_xform_ops(ops))
+            return rotate_op
+
+    @staticmethod
+    def _set_face_panel_hinge_angle(stage, rotate_op, angle: float, Usd) -> None:
+        edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
+        with Usd.EditContext(stage, edit_target):
+            rotate_op.Set(float(angle))
+
+    @staticmethod
+    def _find_xform_op(ops, name: str):
+        for op in ops:
+            if op.GetOpName() == name:
+                return op
+        return None
+
+    @staticmethod
+    def _add_axis_rotate_op(xformable, axis_name: str, suffix: str, UsdGeom):
+        if axis_name == "X":
+            return xformable.AddRotateXOp(opSuffix=suffix)
+        if axis_name == "Y":
+            return xformable.AddRotateYOp(opSuffix=suffix)
+        if axis_name == "Z":
+            return xformable.AddRotateZOp(opSuffix=suffix)
+        raise ValueError(f"Unsupported front panel rotation axis: {axis_name}")
+
+    @staticmethod
+    def _dedupe_xform_ops(ops):
+        seen: set[str] = set()
+        deduped = []
+        for op in ops:
+            name = op.GetOpName()
+            if name in seen:
+                continue
+            seen.add(name)
+            deduped.append(op)
+        return deduped
+
+    @classmethod
+    def _apply_qled_display_temperature(
+        cls,
+        stage,
+        qled: QledDisplayConfig,
+        temperature_c: float,
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    ) -> bool:
+        display_state = qled_state_from_temperature(
+            temperature_c,
+            warning_threshold_c=qled.warning_threshold_c,
+            minimum_value=qled.minimum_value,
+            maximum_value=qled.maximum_value,
+        )
+        materials = cls._ensure_qled_materials(stage, qled, Gf, Sdf, Usd, UsdShade)
+        matched_count = 0
+        edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
+        with Usd.EditContext(stage, edit_target):
+            for digit_name, segment_paths in (qled.digits or {}).items():
+                active_segments = display_state.active_segments.get(
+                    digit_name,
+                    frozenset(),
+                )
+                for segment in SEGMENTS:
+                    path = segment_paths.get(segment, "")
+                    prim = stage.GetPrimAtPath(path)
+                    if not prim or not prim.IsValid():
+                        continue
+                    material = (
+                        materials[display_state.mode]
+                        if segment in active_segments
+                        else materials["off"]
+                    )
+                    UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+                    matched_count += 1
+        return matched_count > 0
+
+    @classmethod
+    def _ensure_qled_materials(cls, stage, qled, Gf, Sdf, Usd, UsdShade):
+        edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
+        with Usd.EditContext(stage, edit_target):
+            return {
+                "normal": cls._define_qled_preview_material(
+                    stage,
+                    cls.QLED_MATERIAL_PATHS["normal"],
+                    qled.normal_emission_color,
+                    qled.normal_emission_color,
+                    qled.emission_intensity,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+                "warning": cls._define_qled_preview_material(
+                    stage,
+                    cls.QLED_MATERIAL_PATHS["warning"],
+                    qled.warning_emission_color,
+                    qled.warning_emission_color,
+                    qled.emission_intensity,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+                "off": cls._define_qled_preview_material(
+                    stage,
+                    cls.QLED_MATERIAL_PATHS["off"],
+                    qled.off_color,
+                    (0.0, 0.0, 0.0),
+                    0.0,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+            }
+
+    @staticmethod
+    def _define_qled_preview_material(
+        stage,
+        material_path: str,
+        diffuse_color,
+        emission_color,
+        emission_intensity: float,
+        Gf,
+        Sdf,
+        UsdShade,
+    ):
+        material = UsdShade.Material.Define(stage, material_path)
+        shader = UsdShade.Shader.Define(stage, f"{material_path}/PreviewSurface")
+        shader.CreateIdAttr("UsdPreviewSurface")
+        shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(*diffuse_color)
+        )
+        shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(
+                *(float(value) * float(emission_intensity) for value in emission_color)
+            )
+        )
+        shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.35)
+        shader_output = shader.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+        material.CreateSurfaceOutput().ConnectToSource(
+            shader.ConnectableAPI(),
+            shader_output.GetBaseName(),
+        )
+        return material
+
+    @classmethod
+    def _apply_front_panel_indicator_state(
+        cls,
+        stage,
+        indicators: FrontPanelIndicatorsConfig,
+        state,
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    ) -> bool:
+        materials = cls._ensure_front_panel_indicator_materials(
+            stage,
+            indicators,
+            Gf,
+            Sdf,
+            Usd,
+            UsdShade,
+        )
+        bindings = (
+            (
+                indicators.power_path,
+                materials["power"] if state.power else materials["off"],
+            ),
+            (indicators.hdd_path, materials["hdd"] if state.hdd else materials["off"]),
+            (
+                indicators.lan_01_path,
+                materials["lan_01"] if state.lan_01 else materials["off"],
+            ),
+            (
+                indicators.lan_02_path,
+                materials["lan_02"] if state.lan_02 else materials["off"],
+            ),
+        )
+
+        matched_count = 0
+        edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
+        with Usd.EditContext(stage, edit_target):
+            for path, material in bindings:
+                prim = stage.GetPrimAtPath(path)
+                if not prim or not prim.IsValid():
+                    continue
+                UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+                matched_count += 1
+        return matched_count > 0
+
+    @classmethod
+    def _ensure_front_panel_indicator_materials(
+        cls,
+        stage,
+        indicators,
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    ):
+        edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
+        with Usd.EditContext(stage, edit_target):
+            return {
+                "power": cls._define_qled_preview_material(
+                    stage,
+                    cls.FRONT_PANEL_MATERIAL_PATHS["power"],
+                    indicators.power_color,
+                    indicators.power_color,
+                    indicators.emission_intensity,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+                "hdd": cls._define_qled_preview_material(
+                    stage,
+                    cls.FRONT_PANEL_MATERIAL_PATHS["hdd"],
+                    indicators.hdd_color,
+                    indicators.hdd_color,
+                    indicators.emission_intensity,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+                "lan_01": cls._define_qled_preview_material(
+                    stage,
+                    cls.FRONT_PANEL_MATERIAL_PATHS["lan_01"],
+                    indicators.lan_01_color,
+                    indicators.lan_01_color,
+                    indicators.emission_intensity,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+                "lan_02": cls._define_qled_preview_material(
+                    stage,
+                    cls.FRONT_PANEL_MATERIAL_PATHS["lan_02"],
+                    indicators.lan_02_color,
+                    indicators.lan_02_color,
+                    indicators.emission_intensity,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+                "off": cls._define_qled_preview_material(
+                    stage,
+                    cls.FRONT_PANEL_MATERIAL_PATHS["off"],
+                    indicators.off_color,
+                    (0.0, 0.0, 0.0),
+                    0.0,
+                    Gf,
+                    Sdf,
+                    UsdShade,
+                ),
+            }
 
     def _resolve_hdri_path(self, lighting: LightingConfig) -> Path:
         hdri_path = Path(lighting.hdri_path)

@@ -54,7 +54,10 @@ def test_runtime_usd_preflight_reports_missing_configured_prims():
 
     codes = _finding_codes(result)
     assert result.success is False
-    assert "missing_chassis_cover" in codes
+    assert "missing_chassis_visibility_group" in codes
+    assert "missing_chassis_face_panel" in codes
+    assert "missing_chassis_qled_segment" in codes
+    assert "missing_chassis_front_panel_indicator" in codes
     assert "missing_fan_mesh" in codes
     assert "missing_fan_rotation_target" in codes
 
@@ -130,6 +133,24 @@ def _define_configured_prims(stage, config: RuntimeConfig) -> None:
 
     for path in config.chassis_presentation.cover_paths:
         UsdGeom.Xform.Define(stage, path)
+    for group in config.chassis_presentation.visibility_groups:
+        for path in group.paths:
+            UsdGeom.Xform.Define(stage, path)
+    if config.chassis_presentation.face_panel.enabled:
+        UsdGeom.Xform.Define(stage, config.chassis_presentation.face_panel.target_path)
+    if config.chassis_presentation.qled_display.enabled:
+        for segment_paths in config.chassis_presentation.qled_display.digits.values():
+            for path in segment_paths.values():
+                UsdGeom.Mesh.Define(stage, path)
+    if config.chassis_presentation.front_panel_indicators.enabled:
+        indicators = config.chassis_presentation.front_panel_indicators
+        for path in (
+            indicators.power_path,
+            indicators.hdd_path,
+            indicators.lan_01_path,
+            indicators.lan_02_path,
+        ):
+            UsdGeom.Mesh.Define(stage, path)
     for binding in config.fan_motion_bindings:
         UsdGeom.Xform.Define(stage, binding.rotation_target_path)
         UsdGeom.Mesh.Define(stage, binding.mesh_path)
@@ -137,7 +158,7 @@ def _define_configured_prims(stage, config: RuntimeConfig) -> None:
 
 def _minimal_config():
     return SimpleNamespace(
-        chassis_presentation=SimpleNamespace(cover_paths=()),
+        chassis_presentation=SimpleNamespace(cover_paths=(), visibility_groups=()),
         fan_motion_bindings=(),
     )
 

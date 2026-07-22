@@ -16,6 +16,7 @@ import omni.ui as ui
 EXTENSION_SETTINGS = "/exts/msp.bw.monitoring"
 PANEL_WIDTH = 340
 ROW_LABEL_WIDTH = 104
+SERVER_VIEW_LABEL_WIDTH = 150
 TELEMETRY_VALUE_RIGHT_PADDING = 8
 COMPACT_TEXT_LENGTH = 44
 
@@ -59,6 +60,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._asset_label = None
         self._load_task = None
         self._airflow_task = None
+        self._view_task = None
         self._auxiliary_windows_task = None
         self._airflow_status_label = None
         self._lighting_task = None
@@ -70,9 +72,15 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._telemetry_provider = None
         self._telemetry_latch = None
         self._telemetry_frame = None
+        self._view_frame = None
         self._config_frame = None
         self._telemetry_tab_button = None
+        self._view_tab_button = None
         self._config_tab_button = None
+        self._chassis_visibility_models = {}
+        self._face_panel_open_model = None
+        self._face_panel_action_label = None
+        self._face_panel_open_state = False
         self._workload_combo = None
         self._refresh_combo = None
         self._freeze_button = None
@@ -135,6 +143,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             "_load_task",
             "_lighting_task",
             "_airflow_task",
+            "_view_task",
             "_auxiliary_windows_task",
         ):
             task = getattr(self, task_name, None)
@@ -230,6 +239,16 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._camera_rotation_x_model = ui.SimpleFloatModel(0.0)
         self._camera_rotation_y_model = ui.SimpleFloatModel(0.0)
         self._camera_rotation_z_model = ui.SimpleFloatModel(0.0)
+        self._chassis_visibility_models = {
+            group.group_id: ui.SimpleBoolModel(group.default_visible)
+            for group in config.chassis_presentation.visibility_groups
+        }
+        self._face_panel_open_model = ui.SimpleBoolModel(
+            config.chassis_presentation.face_panel.default_open
+        )
+        self._face_panel_open_state = (
+            config.chassis_presentation.face_panel.default_open
+        )
         if config.camera:
             self._set_camera_controls(config.camera)
         self._install_camera_edit_callbacks()
@@ -254,6 +273,12 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                         width=ui.Fraction(1),
                         height=28,
                     )
+                    self._view_tab_button = ui.Button(
+                        "View",
+                        clicked_fn=lambda: self._select_sidebar_tab("View"),
+                        width=ui.Fraction(1),
+                        height=28,
+                    )
                     self._config_tab_button = ui.Button(
                         "Config",
                         clicked_fn=lambda: self._select_sidebar_tab("Config"),
@@ -264,6 +289,10 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                 self._telemetry_frame = ui.Frame(visible=True)
                 with self._telemetry_frame:
                     self._build_telemetry_tab()
+
+                self._view_frame = ui.Frame(visible=False)
+                with self._view_frame:
+                    self._build_view_tab(config)
 
                 self._config_frame = ui.Frame(visible=False)
                 with self._config_frame:
@@ -280,10 +309,6 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                 self._build_config_section(
                     "Asset",
                     lambda: self._build_asset_config_controls(default_asset),
-                )
-                self._build_config_section(
-                    "Airflow cache",
-                    self._build_airflow_cache_controls,
                 )
                 self._build_config_section(
                     "Lighting",
@@ -304,6 +329,63 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                     "Telemetry provider",
                     self._build_telemetry_config_section,
                 )
+
+    def _build_view_tab(self, config) -> None:
+        with ui.ScrollingFrame(
+            horizontal_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_OFF,
+            vertical_scrollbar_policy=ui.ScrollBarPolicy.SCROLLBAR_ALWAYS_ON,
+        ):
+            with ui.VStack(spacing=6, content_clipping=True):
+                self._build_config_section(
+                    "Server enclosure",
+                    lambda: self._build_server_view_controls(
+                        config.chassis_presentation
+                    ),
+                )
+                self._build_config_section(
+                    "Airflow cache",
+                    self._build_airflow_cache_controls,
+                )
+
+    def _build_server_view_controls(self, presentation) -> None:
+        face_panel = presentation.face_panel
+        if not presentation.visibility_groups and not face_panel.enabled:
+            ui.Label("No visibility groups configured.", height=34, elided_text=True)
+            return
+
+        for group in presentation.visibility_groups:
+            model = self._chassis_visibility_models.get(group.group_id)
+            if not model:
+                model = ui.SimpleBoolModel(group.default_visible)
+                self._chassis_visibility_models[group.group_id] = model
+            with ui.HStack(height=24, spacing=6, content_clipping=True):
+                ui.Label(
+                    group.label,
+                    width=SERVER_VIEW_LABEL_WIDTH,
+                    elided_text=True,
+                    tooltip=group.label,
+                )
+                ui.CheckBox(model=model)
+        if face_panel.enabled:
+            from blackwell_monitoring_suite.app.view_controls import (
+                face_panel_action_label,
+            )
+
+            with ui.HStack(height=24, spacing=6, content_clipping=True):
+                action_text = face_panel_action_label(self._face_panel_open_state)
+                self._face_panel_action_label = ui.Label(
+                    action_text,
+                    width=SERVER_VIEW_LABEL_WIDTH,
+                    elided_text=True,
+                    tooltip=action_text,
+                )
+                ui.CheckBox(model=self._face_panel_open_model)
+        ui.Button(
+            "Apply",
+            clicked_fn=self._schedule_apply_chassis_visibility_controls,
+            height=26,
+            width=ui.Percent(100),
+        )
 
     def _build_config_section(self, title, build_fn, collapsed: bool = False) -> None:
         with ui.CollapsableFrame(
@@ -841,14 +923,20 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
     def _select_sidebar_tab(self, tab_name: str) -> None:
         telemetry_selected = tab_name == "Telemetry"
+        view_selected = tab_name == "View"
+        config_selected = tab_name == "Config"
         if self._telemetry_frame:
             self._telemetry_frame.visible = telemetry_selected
+        if self._view_frame:
+            self._view_frame.visible = view_selected
         if self._config_frame:
-            self._config_frame.visible = not telemetry_selected
+            self._config_frame.visible = config_selected
         if self._telemetry_tab_button:
             self._telemetry_tab_button.checked = telemetry_selected
+        if self._view_tab_button:
+            self._view_tab_button.checked = view_selected
         if self._config_tab_button:
-            self._config_tab_button.checked = not telemetry_selected
+            self._config_tab_button.checked = config_selected
 
     def _install_telemetry_callbacks(self) -> None:
         workload_model = self._combo_index_model(self._workload_combo)
@@ -939,10 +1027,18 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
                 if self._controller:
                     self._controller.sync_simulation_cache_frame_in_kit()
 
+                latest = self._telemetry_provider.latest_snapshot
+                displayed = self._telemetry_latch.displayed(latest)
+                if self._controller:
+                    self._controller.apply_front_panel_indicators_snapshot_in_kit(
+                        displayed,
+                        now,
+                    )
+
                 if now >= self._next_telemetry_ui_update:
-                    latest = self._telemetry_provider.latest_snapshot
-                    displayed = self._telemetry_latch.displayed(latest)
                     self._update_telemetry_labels(displayed)
+                    if self._controller:
+                        self._controller.apply_qled_display_snapshot_in_kit(displayed)
                     self._next_telemetry_ui_update = now + latest.refresh_interval_s
         except asyncio.CancelledError:
             return
@@ -1065,6 +1161,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             self._asset_label.tooltip = asset_text
         self._set_lighting_controls(config.lighting)
         self._set_grid_controls(config.grid)
+        self._set_chassis_visibility_controls(config.chassis_presentation)
         if config.camera:
             self._set_camera_controls(config.camera)
         if self._lighting_status_label:
@@ -1114,6 +1211,11 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
     def _schedule_detach_airflow(self) -> None:
         self._airflow_task = asyncio.ensure_future(self._detach_airflow())
+
+    def _schedule_apply_chassis_visibility_controls(self) -> None:
+        self._view_task = asyncio.ensure_future(
+            self._apply_chassis_visibility_controls()
+        )
 
     def _play_airflow(self) -> None:
         result = self._controller.play_simulation_cache_in_kit()
@@ -1174,6 +1276,25 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             self._grid_step_model.set_value(grid.step)
         if self._grid_width_model:
             self._grid_width_model.set_value(grid.width)
+
+    def _set_chassis_visibility_controls(self, presentation) -> None:
+        for group in presentation.visibility_groups:
+            model = self._chassis_visibility_models.get(group.group_id)
+            if model:
+                model.set_value(group.default_visible)
+        if self._face_panel_open_model:
+            self._face_panel_open_model.set_value(presentation.face_panel.default_open)
+        self._face_panel_open_state = presentation.face_panel.default_open
+        self._set_face_panel_action_label(self._face_panel_open_state)
+
+    def _set_face_panel_action_label(self, is_open: bool) -> None:
+        if not self._face_panel_action_label:
+            return
+        from blackwell_monitoring_suite.app.view_controls import face_panel_action_label
+
+        action_text = face_panel_action_label(is_open)
+        self._face_panel_action_label.text = action_text
+        self._face_panel_action_label.tooltip = action_text
 
     def _set_camera_controls(self, camera) -> None:
         self._updating_camera_controls = True
@@ -1331,6 +1452,37 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
     async def _detach_airflow(self) -> None:
         result = self._controller.detach_simulation_cache_in_kit()
         self._set_airflow_status(result.message)
+
+    async def _apply_chassis_visibility_controls(self) -> None:
+        from blackwell_monitoring_suite.app.view_controls import (
+            build_face_panel_state,
+            build_visibility_state,
+        )
+
+        group_ids = tuple(
+            group.group_id
+            for group in self._controller.config.chassis_presentation.visibility_groups
+        )
+        visibility_by_group = build_visibility_state(
+            self._chassis_visibility_models,
+            group_ids,
+        )
+        await self._controller.apply_chassis_visibility_state_in_kit(
+            visibility_by_group,
+            status_callback=self._set_status,
+        )
+        face_panel_state = build_face_panel_state(self._face_panel_open_model)
+        if (
+            face_panel_state is not None
+            and self._controller.config.chassis_presentation.face_panel.enabled
+        ):
+            applied = await self._controller.apply_face_panel_state_in_kit(
+                face_panel_state,
+                status_callback=self._set_status,
+            )
+            if applied:
+                self._face_panel_open_state = face_panel_state
+                self._set_face_panel_action_label(face_panel_state)
 
     async def _apply_lighting(self) -> None:
         lighting = self._build_lighting_config_from_controls()

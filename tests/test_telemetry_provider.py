@@ -147,6 +147,23 @@ def test_connectx7_metrics_respect_link_and_pcie_limits():
     assert metrics["nic_temp_c"].value < 105.0
 
 
+def test_front_panel_activity_metrics_are_bounded_and_tunable():
+    provider = _provider(seed=6)
+
+    for mode in provider.config.modes:
+        provider.set_mode(mode)
+        for _ in range(20):
+            metrics = provider.tick().metrics
+            for metric_id in (
+                "storage_activity_percent",
+                "lan_1_activity_percent",
+                "lan_2_activity_percent",
+            ):
+                assert metrics[metric_id].unit == "%"
+                assert metrics[metric_id].quality == "synthetic"
+                assert 0.0 <= metrics[metric_id].value <= 100.0
+
+
 def test_gpu_memory_usage_never_exceeds_card_or_node_capacity():
     provider = _provider(seed=7)
     provider.set_mode("Critical")

@@ -71,6 +71,24 @@ jitter = 2.0
 min = 80.0
 max = 110.0
 
+[modes.Idle.storage_activity_percent]
+target = 8.0
+jitter = 3.0
+min = 0.0
+max = 22.0
+
+[modes.Idle.lan_1_activity_percent]
+target = 12.0
+jitter = 4.0
+min = 0.0
+max = 30.0
+
+[modes.Idle.lan_2_activity_percent]
+target = 6.0
+jitter = 3.0
+min = 0.0
+max = 20.0
+
 [modes.Nominal]
 health_state = "OK"
 link_state = "Up"
@@ -117,6 +135,24 @@ target = 142.0
 jitter = 3.0
 min = 125.0
 max = 160.0
+
+[modes.Nominal.storage_activity_percent]
+target = 34.0
+jitter = 8.0
+min = 12.0
+max = 62.0
+
+[modes.Nominal.lan_1_activity_percent]
+target = 46.0
+jitter = 10.0
+min = 18.0
+max = 72.0
+
+[modes.Nominal.lan_2_activity_percent]
+target = 28.0
+jitter = 8.0
+min = 8.0
+max = 55.0
 
 [modes.Surge]
 health_state = "Warning"
@@ -165,6 +201,24 @@ jitter = 4.0
 min = 178.0
 max = 220.0
 
+[modes.Surge.storage_activity_percent]
+target = 66.0
+jitter = 12.0
+min = 35.0
+max = 92.0
+
+[modes.Surge.lan_1_activity_percent]
+target = 78.0
+jitter = 12.0
+min = 48.0
+max = 100.0
+
+[modes.Surge.lan_2_activity_percent]
+target = 58.0
+jitter = 12.0
+min = 28.0
+max = 88.0
+
 [modes.Critical]
 health_state = "Critical"
 link_state = "Up"
@@ -211,6 +265,24 @@ target = 238.0
 jitter = 3.0
 min = 225.0
 max = 250.0
+
+[modes.Critical.storage_activity_percent]
+target = 88.0
+jitter = 8.0
+min = 60.0
+max = 100.0
+
+[modes.Critical.lan_1_activity_percent]
+target = 92.0
+jitter = 6.0
+min = 72.0
+max = 100.0
+
+[modes.Critical.lan_2_activity_percent]
+target = 84.0
+jitter = 8.0
+min = 58.0
+max = 100.0
 
 [modes.Idle.gpu_1_temp_c]
 target = 40.0
