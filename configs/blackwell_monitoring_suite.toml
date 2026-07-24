@@ -241,10 +241,14 @@ z = 0.0
 
 [simulation_cache]
 enabled = true
-wrapper_path = "usd/server_airflow_v001/server_airflow_load_50.usda"
+runtime_mode = "kit_cae"
+wrapper_path = "usd/server_airflows/sim_test.usda"
 root_prim_path = "/sim"
-volume_prim_path = "/sim/server_airflow_load_50"
+volume_prim_path = "/sim/test"
 field_name = "density"
-sampling_distance = 0.012
+sampling_distance = 0.0255
 resolution_scale = 25
 rendering_samples = 1
+filter_mode = "nearest"
+velocity_vti_path = "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti"
+velocity_field_name = "vel"

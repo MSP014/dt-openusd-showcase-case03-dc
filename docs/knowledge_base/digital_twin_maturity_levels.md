@@ -147,4 +147,4 @@
 146:
 147: **Document Status:** Knowledge Base Entry
 148: **Last Updated:** 2026-02-01
-149: **Maintained by:** Gilfoyle (Case 03 Assistant)
+149: **Maintained by:** Case 03 Engineering

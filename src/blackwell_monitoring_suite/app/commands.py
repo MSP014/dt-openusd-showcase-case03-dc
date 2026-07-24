@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from blackwell_monitoring_suite.app.kit_cae_flow_parity import (
+    capture_flow_scene,
+    write_flow_snapshot,
+)
 
 # isort: off
 from blackwell_monitoring_suite.app.config import (
@@ -78,6 +85,12 @@ class RuntimeController:
     """Coordinates config-backed runtime operations for the viewer."""
 
     FACE_PANEL_ROTATE_OP_SUFFIX = "mspViewHinge"
+    KIT_CAE_SERVER_ROOT = "/blackwell_rig"
+    KIT_CAE_FLOW_ALPHA_PRESETS = {
+        "native": (0.3, 0.3, 1.0),
+        "medium": (0.6, 0.6, 1.0),
+        "strong": (0.85, 0.85, 1.0),
+    }
     QLED_MATERIAL_PATHS = {
         "normal": "/BMS_Runtime/Looks/QLEDOnNormal",
         "warning": "/BMS_Runtime/Looks/QLEDOnWarning",
@@ -96,6 +109,7 @@ class RuntimeController:
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
+        self._flow_airflow_simulate_path: str | None = None
         self._front_panel_indicator_state_key: (
             tuple[int, bool, bool, bool, bool] | None
         ) = None
@@ -106,6 +120,7 @@ class RuntimeController:
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
+        self._flow_airflow_simulate_path = None
         self._front_panel_indicator_state_key = None
         return self.config
 
@@ -642,6 +657,9 @@ class RuntimeController:
                 message="Airflow cache is disabled in the runtime config.",
             )
 
+        if cache.runtime_mode == "kit_cae":
+            return await self._attach_kit_cae_airflow_in_kit(status_callback)
+
         if status_callback:
             status_callback("Checking airflow cache")
         preflight = run_simulation_cache_preflight(
@@ -721,8 +739,348 @@ class RuntimeController:
             "Airflow cache is playing through RTX / NVIDIA IndeX Compositing.",
         )
 
+    async def _attach_kit_cae_airflow_in_kit(
+        self,
+        status_callback: StatusCallback | None = None,
+    ) -> SimulationCacheResult:
+        """Import one Houdini VTI velocity field and drive a Kit-CAE Flow probe."""
+
+        cache = self.config.simulation_cache
+        velocity_path = self.config.velocity_vti_path
+        if not velocity_path.is_file():
+            return SimulationCacheResult(
+                False,
+                f"Kit-CAE airflow VTI is missing: {velocity_path}",
+            )
+        if status_callback:
+            status_callback("Importing Houdini velocity VTI through Kit-CAE")
+
+        import carb
+        import omni.kit.app
+        import omni.timeline
+        import omni.usd
+        from omni.cae.data.commands import execute_command
+        from omni.cae.importer.vtk import import_to_stage
+        from omni.cae.schema import cae
+        from omni.cae.schema import viz as cae_viz
+        from omni.cae.schema import vtk as cae_vtk
+        from pxr import Gf, Usd, UsdGeom
+
+        extension_manager = omni.kit.app.get_app().get_extension_manager()
+        required_extensions = (
+            "omni.flowusd",
+            "omni.cae.delegate.vtk",
+            "omni.cae.importer.vtk",
+            "omni.cae.viz",
+        )
+        disabled_extensions = [
+            extension_id
+            for extension_id in required_extensions
+            if not extension_manager.is_extension_enabled(extension_id)
+        ]
+        if disabled_extensions:
+            return SimulationCacheResult(
+                False,
+                "Kit-CAE airflow is unavailable; start BMS through start_bms.bat "
+                f"with these extensions enabled: {', '.join(disabled_extensions)}.",
+            )
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
+
+        # Kit-CAE's current VTK importer copies its result into the root layer.
+        # The import destination itself must be top-level: Sdf.CopySpec does not
+        # create its parent specs in that layer.
+        runtime_root = "/BMS_KitCAE"
+        import_root = "/BMS_HoudiniVelocity"
+        dataset_path = f"{import_root}/VTKImageData"
+        field_path = f"{import_root}/PointData/{cache.velocity_field_name}"
+        bbox_path = f"{runtime_root}/BoundingBox"
+        flow_environment_path = f"{runtime_root}/FlowSimulation"
+        smoke_injector_path = f"{runtime_root}/SmokeInjector"
+        boundary_emitter_path = f"{runtime_root}/BoundaryEmitter"
+        dataset_emitter_path = f"{runtime_root}/DataSetEmitter"
+        app = omni.kit.app.get_app()
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            if stage.GetPrimAtPath(runtime_root).IsValid():
+                stage.RemovePrim(runtime_root)
+            await import_to_stage(str(velocity_path), import_root)
+            await app.next_update_async()
+
+            metadata = self._read_kit_cae_vti_metadata(
+                velocity_path,
+                cache.velocity_field_name,
+            )
+            dataset_prim = stage.GetPrimAtPath(dataset_path)
+            field_prim = stage.GetPrimAtPath(field_path)
+            origin_after_import = self._read_kit_cae_vti_origin_opinion(
+                dataset_prim,
+                cae_vtk,
+            )
+            self._author_kit_cae_vti_origin_session_opinion(
+                dataset_prim,
+                metadata["vti_header_origin"],
+                cae_vtk,
+                Gf,
+            )
+            await app.next_update_async()
+            imported_grid = self._validate_kit_cae_velocity_field(
+                dataset_prim,
+                field_prim,
+                metadata,
+                cae,
+                cae_vtk,
+            )
+
+            if status_callback:
+                status_callback("Creating Kit-CAE Flow environment")
+            await execute_command(
+                "CreateCaeVizBoundingBox",
+                dataset_paths=[dataset_path],
+                prim_path=bbox_path,
+            )
+            await app.next_update_async()
+            self._author_kit_cae_spatial_sanity_wireframes(
+                stage,
+                imported_grid["world_bounds"],
+                Gf,
+                Usd,
+                UsdGeom,
+            )
+            await app.next_update_async()
+            origin_after_bms_composition = self._read_kit_cae_vti_origin_opinion(
+                dataset_prim,
+                cae_vtk,
+            )
+            await execute_command(
+                "CreateCaeVizFlowEnvironment",
+                prim_path=flow_environment_path,
+                layer_number=0,
+            )
+            await app.next_update_async()
+            flow_environment_prim = stage.GetPrimAtPath(flow_environment_path)
+            await execute_command(
+                "CreateCaeVizFlowSmokeInjector",
+                boundable_paths=[bbox_path],
+                prim_path=smoke_injector_path,
+                layer_number=0,
+                mode="sphere",
+                simulation_prim=flow_environment_prim,
+            )
+            await app.next_update_async()
+            self._position_kit_cae_smoke_probe_injector(
+                stage,
+                smoke_injector_path,
+                metadata,
+                Gf,
+                UsdGeom,
+            )
+            self._hide_kit_cae_smoke_injector_mesh(
+                stage,
+                smoke_injector_path,
+                UsdGeom,
+            )
+            await execute_command(
+                "CreateCaeVizFlowBoundaryEmitter",
+                boundable_paths=[bbox_path],
+                prim_path=boundary_emitter_path,
+                layer_number=0,
+            )
+            await app.next_update_async()
+            await execute_command(
+                "CreateCaeVizFlowDataSetEmitter",
+                dataset_path=dataset_path,
+                prim_path=dataset_emitter_path,
+                layer_number=0,
+                simulation_prim=flow_environment_prim,
+            )
+            emitter_prim = stage.GetPrimAtPath(dataset_emitter_path)
+            if not emitter_prim.HasAPI(cae_viz.FieldSelectionAPI, "velocities"):
+                raise RuntimeError(
+                    "Kit-CAE DataSetEmitter has no velocities field selector."
+                )
+            emitter_operator = cae_viz.OperatorAPI(emitter_prim)
+            emitter_operator.CreateEnabledAttr().Set(False)
+            velocity_selector = cae_viz.FieldSelectionAPI(emitter_prim, "velocities")
+            velocity_selector.CreateTargetRel().SetTargets([field_path])
+            dav_origin_trace = await self._trace_kit_cae_dav_velocity_dataset(
+                emitter_prim,
+                Usd,
+            )
+            emitter_operator.CreateEnabledAttr().Set(True)
+            operator_readiness = await self._wait_for_kit_cae_dataset_emitter_ready(
+                app,
+                emitter_prim,
+            )
+            self._configure_kit_cae_native_fuel_smoke_probe(
+                stage,
+                flow_environment_path,
+            )
+            timeline = omni.timeline.get_timeline_interface()
+            timeline.pause()
+            timeline.set_current_time(0.0)
+            await self._pulse_kit_cae_flow_clear(app, flow_environment_path)
+            self._clear_kit_cae_server_visibility_session_opinion(
+                stage,
+                UsdGeom,
+            )
+
+            await app.next_update_async()
+            timeline.play()
+            timeline_time_before = float(timeline.get_current_time())
+            for _ in range(12):
+                await app.next_update_async()
+            timeline_time_after = float(timeline.get_current_time())
+            self._log_kit_cae_render_probe(
+                stage,
+                flow_environment_path,
+                "NATIVE_FUEL",
+                carb,
+            )
+            self._log_kit_cae_origin_trace(
+                metadata,
+                origin_after_import,
+                origin_after_bms_composition,
+                dav_origin_trace,
+                carb,
+            )
+            self._log_kit_cae_flow_full_diagnostics(
+                stage,
+                velocity_path,
+                metadata,
+                imported_grid,
+                dataset_path,
+                flow_environment_path,
+                smoke_injector_path,
+                boundary_emitter_path,
+                dataset_emitter_path,
+                bbox_path,
+                field_path,
+                velocity_selector,
+                timeline,
+                timeline_time_before,
+                timeline_time_after,
+                operator_readiness,
+                "NATIVE_FUEL",
+                Usd,
+                UsdGeom,
+                carb,
+            )
+            parity_snapshot_path = self._write_kit_cae_flow_parity_snapshot(
+                stage,
+                dataset_path=dataset_path,
+                field_path=field_path,
+                bbox_path=bbox_path,
+                flow_environment_path=flow_environment_path,
+                smoke_injector_path=smoke_injector_path,
+                boundary_emitter_path=boundary_emitter_path,
+                dataset_emitter_path=dataset_emitter_path,
+            )
+            carb.log_warn(f"BMS Kit-CAE parity snapshot saved: {parity_snapshot_path}")
+        except Exception as error:
+            carb.log_error(f"BMS Kit-CAE Flow probe failed: {error}")
+            if stage.GetPrimAtPath(runtime_root).IsValid():
+                stage.RemovePrim(runtime_root)
+            if stage.GetPrimAtPath(import_root).IsValid():
+                stage.RemovePrim(import_root)
+            return SimulationCacheResult(False, f"Kit-CAE airflow failed: {error}")
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        self._simulation_cache_contract = None
+        self._simulation_cache_time_code = None
+        self._flow_airflow_simulate_path = f"{flow_environment_path}/flowSimulate"
+        return SimulationCacheResult(
+            True,
+            "Kit-CAE Flow is running: "
+            f"PointData/{cache.velocity_field_name} Vector3 drives live smoke.",
+        )
+
+    async def apply_kit_cae_flow_presentation_in_kit(
+        self,
+        attenuation: float,
+        alpha_preset: str,
+    ) -> SimulationCacheResult:
+        """Apply a presentation-only Flow ray-march and colormap preset."""
+
+        if not self._flow_airflow_simulate_path:
+            return SimulationCacheResult(
+                False, "Attach the airflow cache before tuning Flow."
+            )
+
+        import carb
+        import omni.kit.app
+        import omni.usd
+        from pxr import Gf, UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return SimulationCacheResult(False, "Flow tuning skipped: no open stage.")
+
+        flow_environment_path = self._flow_airflow_simulate_path.removesuffix(
+            "/flowSimulate"
+        )
+        smoke_injector_path = "/BMS_KitCAE/SmokeInjector"
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            alpha_values = self._author_kit_cae_flow_presentation(
+                stage,
+                flow_environment_path,
+                smoke_injector_path,
+                attenuation,
+                alpha_preset,
+                Gf,
+                UsdGeom,
+            )
+        except (RuntimeError, ValueError) as error:
+            return SimulationCacheResult(False, f"Flow presentation failed: {error}")
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        app = omni.kit.app.get_app()
+        for _ in range(3):
+            await app.next_update_async()
+
+        server_prim = stage.GetPrimAtPath(RuntimeController.KIT_CAE_SERVER_ROOT)
+        injector_mesh = stage.GetPrimAtPath(smoke_injector_path)
+        server_visible = (
+            UsdGeom.Imageable(server_prim).ComputeVisibility()
+            != UsdGeom.Tokens.invisible
+            if server_prim and server_prim.IsValid()
+            else None
+        )
+        injector_mesh_visible = (
+            UsdGeom.Imageable(injector_mesh).ComputeVisibility()
+            != UsdGeom.Tokens.invisible
+            if injector_mesh and injector_mesh.IsValid()
+            else None
+        )
+        carb.log_warn(
+            "BMS Kit-CAE Flow presentation: "
+            f"attenuation={attenuation:g}, alpha_preset={alpha_preset}, "
+            f"rgba_alphas={alpha_values}, server_visible={server_visible}, "
+            f"smoke_injector_mesh_visible={injector_mesh_visible}"
+        )
+
+        return SimulationCacheResult(
+            True,
+            "Flow presentation applied: "
+            f"attenuation={attenuation:g}, {alpha_preset} opacity "
+            f"{tuple(round(value, 2) for value in alpha_values)}.",
+        )
+
     def play_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Play the attached cache over its authored frame range."""
+
+        if self._flow_airflow_simulate_path:
+            import omni.timeline
+
+            omni.timeline.get_timeline_interface().play()
+            return SimulationCacheResult(True, "Kit-CAE velocity-driven Flow started.")
 
         if not self._simulation_cache_contract:
             return SimulationCacheResult(
@@ -743,6 +1101,12 @@ class RuntimeController:
     def pause_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Pause the attached cache at the current frame."""
 
+        if self._flow_airflow_simulate_path:
+            import omni.timeline
+
+            omni.timeline.get_timeline_interface().pause()
+            return SimulationCacheResult(True, "Kit-CAE velocity-driven Flow paused.")
+
         if not self._simulation_cache_contract:
             return SimulationCacheResult(
                 False, "Attach the airflow cache before playback."
@@ -755,6 +1119,26 @@ class RuntimeController:
 
     def reset_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Return the attached cache to its first authored frame."""
+
+        if self._flow_airflow_simulate_path:
+            import omni.timeline
+            import omni.usd
+
+            stage = omni.usd.get_context().get_stage()
+            simulate = (
+                stage.GetPrimAtPath(self._flow_airflow_simulate_path) if stage else None
+            )
+            if not simulate or not simulate.IsValid():
+                return SimulationCacheResult(
+                    False, "Flow airflow is no longer attached."
+                )
+            force_clear = simulate.GetAttribute("forceClear")
+            force_clear.Set(True)
+            asyncio.ensure_future(self._clear_flow_after_update(force_clear))
+            timeline = omni.timeline.get_timeline_interface()
+            timeline.pause()
+            timeline.set_current_time(0.0)
+            return SimulationCacheResult(True, "Kit-CAE velocity-driven Flow reset.")
 
         if not self._simulation_cache_contract:
             return SimulationCacheResult(
@@ -825,6 +1209,47 @@ class RuntimeController:
         )
         return profile_path
 
+    def _write_kit_cae_flow_parity_snapshot(
+        self,
+        stage,
+        *,
+        dataset_path: str,
+        field_path: str,
+        bbox_path: str,
+        flow_environment_path: str,
+        smoke_injector_path: str,
+        boundary_emitter_path: str,
+        dataset_emitter_path: str,
+    ) -> Path:
+        """Persist a read-only effective-state snapshot for the Flow parity audit."""
+
+        snapshot = capture_flow_scene(
+            stage,
+            label="BMS_CASE03_VTI_FLOW",
+            paths={
+                "dataset": dataset_path,
+                "velocity_field": field_path,
+                "bounding_box": bbox_path,
+                "flow_environment": flow_environment_path,
+                "flow_simulate": f"{flow_environment_path}/flowSimulate",
+                "flow_offscreen": f"{flow_environment_path}/flowOffscreen",
+                "flow_render": f"{flow_environment_path}/flowRender",
+                "ray_march": f"{flow_environment_path}/flowRender/rayMarch",
+                "debug_volume": f"{flow_environment_path}/flowOffscreen/debugVolume",
+                "smoke_injector": smoke_injector_path,
+                "smoke_emitter": f"{smoke_injector_path}/EmitterSphere",
+                "boundary_emitter_root": boundary_emitter_path,
+                "dataset_emitter": dataset_emitter_path,
+            },
+        )
+        return write_flow_snapshot(
+            snapshot,
+            self.config.repo_root
+            / "out"
+            / "diagnostics"
+            / "kit_cae_flow_snapshot_bms.json",
+        )
+
     def sync_simulation_cache_frame_in_kit(self) -> bool:
         """Native USD volume playback follows the Kit timeline automatically."""
 
@@ -845,14 +1270,28 @@ class RuntimeController:
         try:
             stage.RemovePrim("/BMS_Runtime/Airflow")
             stage.RemovePrim("/BMS_Runtime/Looks/AirflowIndex")
+            stage.RemovePrim("/BMS_Runtime/Flow")
+            stage.RemovePrim("/BMS_KitCAE")
+            stage.RemovePrim("/BMS_HoudiniVelocity")
         finally:
             stage.SetEditTarget(previous_target)
         omni.timeline.get_timeline_interface().pause()
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
+        self._flow_airflow_simulate_path = None
         return SimulationCacheResult(
-            True, "Airflow cache detached from the session layer."
+            True,
+            "Airflow cache detached from the session layer.",
         )
+
+    @staticmethod
+    async def _clear_flow_after_update(force_clear) -> None:
+        """Pulse Flow's clear switch for one update instead of freezing simulation."""
+
+        import omni.kit.app
+
+        await omni.kit.app.get_app().next_update_async()
+        force_clear.Set(False)
 
     def capture_review_camera_config(self) -> CameraConfig | None:
         """Return the current review camera transform, if the stage has one."""
@@ -941,6 +1380,905 @@ class RuntimeController:
         return f"; viewport framed; {lighting_result.message}"
 
     @staticmethod
+    def _read_kit_cae_vti_metadata(
+        velocity_path: Path,
+        field_name: str,
+    ) -> dict[str, object]:
+        """Read the VTI header through Kit-CAE's VTK runtime before Flow binds it."""
+
+        from vtkmodules.vtkIOXML import vtkXMLImageDataReader
+
+        header = velocity_path.read_bytes()[:16384].decode("utf-8", errors="ignore")
+        header_match = re.search(r'<ImageData[^>]*\bOrigin="([^"]+)"', header)
+        if header_match is None:
+            raise RuntimeError("VTI ImageData header is missing its Origin attribute.")
+        header_origin = tuple(float(value) for value in header_match.group(1).split())
+        if len(header_origin) != 3:
+            raise RuntimeError(
+                "VTI ImageData header Origin must have three components."
+            )
+
+        reader = vtkXMLImageDataReader()
+        reader.SetFileName(str(velocity_path))
+        reader.Update()
+        image = reader.GetOutput()
+        array = image.GetPointData().GetArray(field_name) if image else None
+        if array is None:
+            raise RuntimeError(f"VTI PointData array '{field_name}' was not found.")
+        components = int(array.GetNumberOfComponents())
+        data_type = str(array.GetDataTypeAsString()).lower()
+        if components != 3:
+            raise RuntimeError(
+                f"VTI PointData/{field_name} must have 3 components, got {components}."
+            )
+        if data_type not in {"float", "float32"}:
+            raise RuntimeError(
+                f"VTI PointData/{field_name} must be float32, got {data_type}."
+            )
+        reader_origin = tuple(float(value) for value in image.GetOrigin())
+        return {
+            "components": components,
+            "data_type": data_type,
+            "dimensions": tuple(int(value) for value in image.GetDimensions()),
+            "point_count": int(image.GetNumberOfPoints()),
+            "origin": reader_origin,
+            "vti_header_origin": header_origin,
+            "vtk_reader_origin": reader_origin,
+            "spacing": tuple(float(value) for value in image.GetSpacing()),
+        }
+
+    @staticmethod
+    async def _wait_for_kit_cae_dataset_emitter_ready(
+        app,
+        dataset_emitter,
+        *,
+        timeout_seconds: float = 5.0,
+        max_update_cycles: int = 300,
+    ) -> dict[str, object]:
+        """Wait for Kit-CAE to materialize its internal Flow velocity payload."""
+
+        started_at = time.monotonic()
+        cycles = 0
+
+        def readiness() -> tuple[bool, int, float]:
+            payload_attribute = dataset_emitter.GetAttribute("nanoVdbVelocities")
+            payload = (
+                payload_attribute.Get()
+                if payload_attribute and payload_attribute.IsValid()
+                else None
+            )
+            payload_count = len(payload) if payload is not None else 0
+            couple_rate = dataset_emitter.GetAttribute("coupleRateVelocity")
+            couple_rate_raw = (
+                couple_rate.Get() if couple_rate and couple_rate.IsValid() else None
+            )
+            couple_rate_value = (
+                float(couple_rate_raw) if couple_rate_raw is not None else 0.0
+            )
+            return (
+                payload_count > 0 and couple_rate_value > 0.0,
+                payload_count,
+                couple_rate_value,
+            )
+
+        ready, payload_count, couple_rate_value = readiness()
+        while (
+            not ready
+            and cycles < max_update_cycles
+            and time.monotonic() - started_at < timeout_seconds
+        ):
+            await app.next_update_async()
+            cycles += 1
+            ready, payload_count, couple_rate_value = readiness()
+
+        waited_seconds = time.monotonic() - started_at
+        return {
+            "ready": ready,
+            "cycles": cycles,
+            "seconds": waited_seconds,
+            "timed_out": not ready,
+            "payload_count": payload_count,
+            "couple_rate_velocity": couple_rate_value,
+        }
+
+    @staticmethod
+    async def _trace_kit_cae_dav_velocity_dataset(
+        dataset_emitter, Usd
+    ) -> dict[str, object]:
+        """Read the exact CAE source dataset consumed by FlowNanoVDBEmitter."""
+
+        from omni.cae.viz import utils as cae_viz_utils
+
+        source_dataset = await cae_viz_utils.get_input_dataset(
+            dataset_emitter,
+            "source",
+            timeCode=Usd.TimeCode.Default(),
+            device="cuda:0",
+        )
+        bounds_min, bounds_max = source_dataset.get_bounds()
+        velocity_field = source_dataset.get_field("velocities")
+        velocity_volume = velocity_field.get_data()
+        return {
+            "bounds": (
+                tuple(float(value) for value in bounds_min),
+                tuple(float(value) for value in bounds_max),
+            ),
+            "origin": tuple(float(value) for value in bounds_min),
+            "voxel_size": tuple(
+                float(value) for value in velocity_volume.get_voxel_size()
+            ),
+        }
+
+    @staticmethod
+    def _position_kit_cae_smoke_probe_injector(
+        stage,
+        smoke_injector_path: str,
+        metadata: dict[str, object],
+        Gf,
+        UsdGeom,
+    ) -> None:
+        """Move the diagnostic injector toward the server front without resizing it."""
+
+        injector = stage.GetPrimAtPath(smoke_injector_path)
+        if not injector or not injector.IsValid():
+            raise RuntimeError("Kit-CAE did not create the smoke probe injector.")
+
+        xformable = UsdGeom.Xformable(injector)
+        translate_op = next(
+            (
+                op
+                for op in xformable.GetOrderedXformOps()
+                if op.GetOpType() == UsdGeom.XformOp.TypeTranslate
+            ),
+            None,
+        )
+        if translate_op is None:
+            raise RuntimeError(
+                "Kit-CAE smoke probe injector is missing a translate op."
+            )
+
+        position = translate_op.Get()
+        origin = metadata["vti_header_origin"]
+        spacing = metadata["spacing"]
+        dimensions = metadata["dimensions"]
+        domain_z_max = origin[2] + (dimensions[2] - 1) * spacing[2]
+        target_z = domain_z_max - (domain_z_max - origin[2]) * 0.25
+        translate_op.Set(Gf.Vec3d(position[0], position[1], target_z))
+
+    @staticmethod
+    def _configure_kit_cae_native_fuel_smoke_probe(
+        stage,
+        flow_environment_path: str,
+    ) -> None:
+        """Return Flow rendering to the stock fuel-to-smoke path."""
+
+        flow_environment = stage.GetPrimAtPath(flow_environment_path)
+        offscreen = flow_environment.GetChild("flowOffscreen")
+        render = flow_environment.GetChild("flowRender")
+        debug_volume = offscreen.GetChild("debugVolume") if offscreen else None
+        ray_march = render.GetChild("rayMarch") if render else None
+        required_attributes = (
+            (debug_volume, "enableVelocityAsDensity"),
+            (ray_march, "enableRawMode"),
+        )
+        for prim, attribute_name in required_attributes:
+            attribute = prim.GetAttribute(attribute_name) if prim else None
+            if not attribute or not attribute.IsValid():
+                prim_path = prim.GetPath() if prim else flow_environment_path
+                raise RuntimeError(
+                    "Kit-CAE Flow render probe is missing "
+                    f"{prim_path}.{attribute_name}."
+                )
+
+        debug_volume.GetAttribute("enableVelocityAsDensity").Set(False)
+        ray_march.GetAttribute("enableRawMode").Set(False)
+
+    @classmethod
+    def _author_kit_cae_flow_presentation(
+        cls,
+        stage,
+        flow_environment_path: str,
+        smoke_injector_path: str,
+        attenuation: float,
+        alpha_preset: str,
+        Gf,
+        UsdGeom,
+    ) -> tuple[float, float, float]:
+        """Author a render-only visibility preset without changing Flow physics."""
+
+        if attenuation <= 0:
+            raise ValueError("Flow attenuation must be greater than zero.")
+        alpha_values = cls.KIT_CAE_FLOW_ALPHA_PRESETS.get(alpha_preset)
+        if alpha_values is None:
+            raise ValueError(f"Unknown Flow opacity preset: {alpha_preset}.")
+
+        flow_environment = stage.GetPrimAtPath(flow_environment_path)
+        flow_render = (
+            flow_environment.GetChild("flowRender") if flow_environment else None
+        )
+        flow_offscreen = (
+            flow_environment.GetChild("flowOffscreen") if flow_environment else None
+        )
+        ray_march = flow_render.GetChild("rayMarch") if flow_render else None
+        colormap = flow_offscreen.GetChild("colormap") if flow_offscreen else None
+        attenuation_attr = ray_march.GetAttribute("attenuation") if ray_march else None
+        rgba_points_attr = colormap.GetAttribute("rgbaPoints") if colormap else None
+        if not attenuation_attr or not attenuation_attr.IsValid():
+            raise RuntimeError("Kit-CAE Flow ray march is missing attenuation.")
+        if not rgba_points_attr or not rgba_points_attr.IsValid():
+            raise RuntimeError("Kit-CAE Flow colormap is missing rgbaPoints.")
+
+        rgba_points = rgba_points_attr.Get()
+        if rgba_points is None or len(rgba_points) != len(alpha_values):
+            raise RuntimeError(
+                "Kit-CAE Flow colormap does not expose three RGBA points."
+            )
+        attenuation_attr.Set(float(attenuation))
+        rgba_points_attr.Set(
+            [
+                Gf.Vec4f(point[0], point[1], point[2], alpha_values[index])
+                for index, point in enumerate(rgba_points)
+            ]
+        )
+        cls._hide_kit_cae_smoke_injector_mesh(
+            stage,
+            smoke_injector_path,
+            UsdGeom,
+        )
+        return alpha_values
+
+    @staticmethod
+    def _hide_kit_cae_smoke_injector_mesh(
+        stage,
+        smoke_injector_path: str,
+        UsdGeom,
+    ) -> None:
+        """Hide only the injector's diagnostic mesh; Flow data remain on its child."""
+
+        injector_mesh = stage.GetPrimAtPath(smoke_injector_path)
+        if not injector_mesh or not injector_mesh.IsA(UsdGeom.Mesh):
+            raise RuntimeError("Kit-CAE smoke injector mesh is unavailable.")
+        UsdGeom.Imageable(injector_mesh).CreateVisibilityAttr().Set(
+            UsdGeom.Tokens.invisible
+        )
+
+    @classmethod
+    def _clear_kit_cae_server_visibility_session_opinion(cls, stage, UsdGeom) -> bool:
+        """Remove a leftover diagnostic visibility override from the server root."""
+
+        server_prim = stage.GetPrimAtPath(cls.KIT_CAE_SERVER_ROOT)
+        if not server_prim or not server_prim.IsValid():
+            return False
+        UsdGeom.Imageable(server_prim).GetVisibilityAttr().Clear()
+        return True
+
+    @staticmethod
+    async def _pulse_kit_cae_flow_clear(app, flow_environment_path: str) -> None:
+        """Clear prior density before the one-phase native fuel control run."""
+
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        flow_environment = stage.GetPrimAtPath(flow_environment_path) if stage else None
+        simulate = (
+            flow_environment.GetChild("flowSimulate") if flow_environment else None
+        )
+        force_clear = simulate.GetAttribute("forceClear") if simulate else None
+        if not force_clear or not force_clear.IsValid():
+            raise RuntimeError(
+                "Kit-CAE Flow native fuel probe is missing flowSimulate.forceClear."
+            )
+        force_clear.Set(True)
+        await app.next_update_async()
+        force_clear.Set(False)
+        await app.next_update_async()
+
+    @staticmethod
+    def _log_kit_cae_render_probe(
+        stage,
+        flow_environment_path: str,
+        smoke_probe_phase: str,
+        carb,
+    ) -> None:
+        """Report the active Flow render mode after the control run settles."""
+
+        flow_environment = stage.GetPrimAtPath(flow_environment_path)
+        simulate = (
+            flow_environment.GetChild("flowSimulate") if flow_environment else None
+        )
+        offscreen = (
+            flow_environment.GetChild("flowOffscreen") if flow_environment else None
+        )
+        render = flow_environment.GetChild("flowRender") if flow_environment else None
+        debug_volume = offscreen.GetChild("debugVolume") if offscreen else None
+        ray_march = render.GetChild("rayMarch") if render else None
+
+        def attr_value(prim, name: str):
+            attribute = prim.GetAttribute(name) if prim else None
+            return attribute.Get() if attribute and attribute.IsValid() else None
+
+        diagnostics = {
+            "smoke_probe_phase": smoke_probe_phase,
+            "debug_volume_present": bool(debug_volume and debug_volume.IsValid()),
+            "enableVelocityAsDensity": attr_value(
+                debug_volume,
+                "enableVelocityAsDensity",
+            ),
+            "debug_velocityScale": attr_value(debug_volume, "velocityScale"),
+            "rayMarch_enableRawMode": attr_value(ray_march, "enableRawMode"),
+            "rayMarch_enableBlockWireframe": attr_value(
+                ray_march,
+                "enableBlockWireframe",
+            ),
+            "rayMarch_attenuation": attr_value(ray_march, "attenuation"),
+            "flow_offscreen_layer": attr_value(offscreen, "layer"),
+            "flow_render_layer": attr_value(render, "layer"),
+            "flow_simulate_layer": attr_value(simulate, "layer"),
+        }
+        details = ", ".join(f"{key}={value}" for key, value in diagnostics.items())
+        carb.log_warn(f"BMS Kit-CAE render probe: {details}")
+
+    @staticmethod
+    def _log_kit_cae_origin_trace(
+        metadata: dict[str, object],
+        origin_after_import: dict[str, object],
+        origin_after_bms_composition: dict[str, object],
+        dav_origin_trace: dict[str, object],
+        carb,
+    ) -> None:
+        """Log the origin handoff from VTI bytes through DAV's Flow input."""
+
+        diagnostics = {
+            "raw_vti_header_origin": metadata["vti_header_origin"],
+            "vtkXMLImageDataReader_output_origin": metadata["vtk_reader_origin"],
+            "ImageDataAPI_origin_after_import": origin_after_import["origin"],
+            "ImageDataAPI_origin_after_bms_composition": (
+                origin_after_bms_composition["origin"]
+            ),
+            "composed_usd_origin": origin_after_bms_composition["origin"],
+            "ImageDataAPI_origin_property_stack": (
+                origin_after_bms_composition["property_stack"]
+            ),
+            "dav_dataset_origin_before_FlowNanoVDBEmitter": (
+                dav_origin_trace["origin"]
+            ),
+            "dav_dataset_bounds_before_FlowNanoVDBEmitter": (
+                dav_origin_trace["bounds"]
+            ),
+            "dav_velocity_voxel_size_before_FlowNanoVDBEmitter": (
+                dav_origin_trace["voxel_size"]
+            ),
+        }
+        details = ", ".join(f"{key}={value}" for key, value in diagnostics.items())
+        carb.log_warn(f"BMS Kit-CAE origin trace: {details}")
+
+    @staticmethod
+    def _log_kit_cae_flow_full_diagnostics(
+        stage,
+        velocity_path: Path,
+        metadata: dict[str, object],
+        imported_grid: dict[str, object],
+        dataset_path: str,
+        flow_environment_path: str,
+        smoke_injector_path: str,
+        boundary_emitter_path: str,
+        dataset_emitter_path: str,
+        bbox_path: str,
+        field_path: str,
+        velocity_selector,
+        timeline,
+        timeline_time_before: float,
+        timeline_time_after: float,
+        operator_readiness: dict[str, object],
+        smoke_probe_phase: str,
+        Usd,
+        UsdGeom,
+        carb,
+    ) -> None:
+        """Report one post-settle checkpoint for the VTI -> Kit-CAE -> Flow route."""
+
+        dimensions = metadata["dimensions"]
+        vti_header_origin = metadata["vti_header_origin"]
+        vti_header_spacing = metadata["spacing"]
+        vti_header_max = tuple(
+            vti_header_origin[index]
+            + (dimensions[index] - 1) * vti_header_spacing[index]
+            for index in range(3)
+        )
+        bbox_cache = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+        )
+
+        def world_bounds(
+            path: str,
+        ) -> tuple[tuple[float, float, float], tuple[float, float, float]] | None:
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                return None
+            bounds = bbox_cache.ComputeWorldBound(prim).ComputeAlignedRange()
+            if bounds.IsEmpty():
+                return None
+            return tuple(bounds.GetMin()), tuple(bounds.GetMax())
+
+        def attr_value(prim, name: str):
+            if not prim or not prim.IsValid():
+                return None
+            attribute = prim.GetAttribute(name)
+            return attribute.Get() if attribute and attribute.IsValid() else None
+
+        def relationship_targets(prim, name: str) -> list[str]:
+            if not prim or not prim.IsValid():
+                return []
+            relationship = prim.GetRelationship(name)
+            if not relationship or not relationship.IsValid():
+                return []
+            return [str(path) for path in relationship.GetTargets()]
+
+        def array_count(prim, name: str) -> int | None:
+            value = attr_value(prim, name)
+            return len(value) if value is not None else None
+
+        dataset_prim = stage.GetPrimAtPath(dataset_path)
+        field_prim = stage.GetPrimAtPath(field_path)
+        flow_environment = stage.GetPrimAtPath(flow_environment_path)
+        flow_simulate = (
+            flow_environment.GetChild("flowSimulate") if flow_environment else None
+        )
+        flow_offscreen = (
+            flow_environment.GetChild("flowOffscreen") if flow_environment else None
+        )
+        flow_render = (
+            flow_environment.GetChild("flowRender") if flow_environment else None
+        )
+        flow_colormap = flow_offscreen.GetChild("colormap") if flow_offscreen else None
+        dataset_emitter = stage.GetPrimAtPath(dataset_emitter_path)
+        smoke_injector = stage.GetPrimAtPath(smoke_injector_path)
+        smoke_emitter = (
+            smoke_injector.GetChild("EmitterSphere") if smoke_injector else None
+        )
+        smoke_position = None
+        smoke_local_scale = None
+        if smoke_injector and smoke_injector.IsValid():
+            injector_xform = UsdGeom.Xformable(smoke_injector)
+            smoke_position = tuple(
+                injector_xform.ComputeLocalToWorldTransform(
+                    Usd.TimeCode.Default()
+                ).ExtractTranslation()
+            )
+            scale_op = next(
+                (
+                    op
+                    for op in injector_xform.GetOrderedXformOps()
+                    if op.GetOpType() == UsdGeom.XformOp.TypeScale
+                ),
+                None,
+            )
+            smoke_local_scale = (
+                tuple(scale_op.Get())
+                if scale_op and scale_op.Get() is not None
+                else None
+            )
+
+        bbox_world_bounds = world_bounds(bbox_path)
+        colormap_rgba_points = attr_value(flow_colormap, "rgbaPoints")
+        colormap_alpha_values = (
+            tuple(float(point[3]) for point in colormap_rgba_points)
+            if colormap_rgba_points is not None
+            else None
+        )
+        smoke_injector_mesh_visible = (
+            UsdGeom.Imageable(smoke_injector).ComputeVisibility()
+            != UsdGeom.Tokens.invisible
+            if smoke_injector and smoke_injector.IsValid()
+            else None
+        )
+        server_prim = stage.GetPrimAtPath(RuntimeController.KIT_CAE_SERVER_ROOT)
+        server_visible = (
+            UsdGeom.Imageable(server_prim).ComputeVisibility()
+            != UsdGeom.Tokens.invisible
+            if server_prim and server_prim.IsValid()
+            else None
+        )
+        smoke_radius = attr_value(smoke_emitter, "radius")
+        radius_is_world_space = attr_value(smoke_emitter, "radiusIsWorldSpace")
+        world_radius = None
+        if smoke_radius is not None:
+            world_radius = (
+                float(smoke_radius)
+                if radius_is_world_space
+                else float(smoke_radius) * max(smoke_local_scale or (1.0,))
+            )
+        injector_inside_bounds = bool(
+            smoke_position is not None
+            and world_radius is not None
+            and bbox_world_bounds is not None
+            and all(
+                bbox_world_bounds[0][index] <= smoke_position[index] - world_radius
+                and smoke_position[index] + world_radius <= bbox_world_bounds[1][index]
+                for index in range(3)
+            )
+        )
+
+        boundary_root = stage.GetPrimAtPath(boundary_emitter_path)
+        boundary_emitters = (
+            [
+                prim
+                for prim in Usd.PrimRange(boundary_root)
+                if prim.GetTypeName() == "FlowEmitterBox"
+            ]
+            if boundary_root and boundary_root.IsValid()
+            else []
+        )
+        target_paths = [
+            str(path) for path in velocity_selector.GetTargetRel().GetTargets()
+        ]
+        advection = flow_simulate.GetChild("advection") if flow_simulate else None
+        ray_march = flow_render.GetChild("rayMarch") if flow_render else None
+        data_set_bbox_match = bbox_world_bounds is not None and all(
+            abs(
+                bbox_world_bounds[bound][axis]
+                - imported_grid["world_bounds"][bound][axis]
+            )
+            < 1e-5
+            for bound in range(2)
+            for axis in range(3)
+        )
+        diagnostics = [
+            ("active_route", "VTI_KIT_CAE_FLOW"),
+            ("vti_asset_path", velocity_path),
+            ("dataset_path", dataset_path),
+            ("dataset_prim_type", dataset_prim.GetTypeName()),
+            ("velocity_field_path", field_path),
+            ("velocity_field_association", attr_value(field_prim, "fieldAssociation")),
+            ("velocity_field_components", metadata["components"]),
+            ("velocity_field_dtype", metadata["data_type"]),
+            ("vti_header_origin", vti_header_origin),
+            ("vti_header_spacing", vti_header_spacing),
+            ("usd_imagedata_origin", imported_grid["origin"]),
+            ("vti_world_bounds", (vti_header_origin, vti_header_max)),
+            ("dataset_world_bounds", imported_grid["world_bounds"]),
+            ("kit_cae_imported_spacing", imported_grid["spacing"]),
+            ("vti_dimensions", dimensions),
+            ("server_bounds", world_bounds("/blackwell_rig")),
+            ("bbox_world_bounds", bbox_world_bounds),
+            ("flow_world_bounds", bbox_world_bounds),
+            ("dataset_bbox_bounds_match", data_set_bbox_match),
+            ("flow_environment_path", flow_environment_path),
+            ("flow_simulate_path", flow_simulate.GetPath() if flow_simulate else None),
+            ("flow_simulate_layer", attr_value(flow_simulate, "layer")),
+            ("densityCellSize", attr_value(flow_simulate, "densityCellSize")),
+            ("forceDisableEmitters", attr_value(flow_simulate, "forceDisableEmitters")),
+            (
+                "forceDisableCoreSimulation",
+                attr_value(flow_simulate, "forceDisableCoreSimulation"),
+            ),
+            ("forceClear", attr_value(flow_simulate, "forceClear")),
+            ("forceSimulate", attr_value(flow_simulate, "forceSimulate")),
+            ("flow_offscreen_layer", attr_value(flow_offscreen, "layer")),
+            ("flow_render_layer", attr_value(flow_render, "layer")),
+            ("buoyancyPerTemp", attr_value(advection, "buoyancyPerTemp")),
+            ("burnPerTemp", attr_value(advection, "burnPerTemp")),
+            ("fuelPerBurn", attr_value(advection, "fuelPerBurn")),
+            ("ignitionTemp", attr_value(advection, "ignitionTemp")),
+            ("rayMarch_attenuation", attr_value(ray_march, "attenuation")),
+            ("rayMarch_colormap_alphas", colormap_alpha_values),
+            ("dataset_emitter_path", dataset_emitter_path),
+            (
+                "dataset_emitter_prim_type",
+                dataset_emitter.GetTypeName() if dataset_emitter else None,
+            ),
+            ("dataset_emitter_layer", attr_value(dataset_emitter, "layer")),
+            (
+                "operator_enabled",
+                attr_value(dataset_emitter, "cae:viz:operator:enabled"),
+            ),
+            (
+                "source_targets",
+                relationship_targets(
+                    dataset_emitter,
+                    "cae:viz:dataset_selection:source:target",
+                ),
+            ),
+            ("velocity_targets", target_paths),
+            (
+                "rescaleMode",
+                attr_value(
+                    dataset_emitter,
+                    "cae:viz:configure_flow_environment:source:rescaleMode",
+                ),
+            ),
+            (
+                "densityCellSizeIncludes",
+                relationship_targets(
+                    dataset_emitter,
+                    "cae:viz:configure_flow_environment:source:densityCellSizeIncludes",
+                ),
+            ),
+            (
+                "nanoVdbVelocities_present",
+                attr_value(dataset_emitter, "nanoVdbVelocities") is not None,
+            ),
+            (
+                "nanoVdbVelocities_type",
+                (
+                    dataset_emitter.GetAttribute("nanoVdbVelocities").GetTypeName()
+                    if dataset_emitter
+                    and dataset_emitter.GetAttribute("nanoVdbVelocities")
+                    else None
+                ),
+            ),
+            (
+                "nanoVdbVelocities_uint_count",
+                array_count(dataset_emitter, "nanoVdbVelocities"),
+            ),
+            ("velocityScale", attr_value(dataset_emitter, "velocityScale")),
+            (
+                "coupleRateVelocity",
+                attr_value(dataset_emitter, "coupleRateVelocity"),
+            ),
+            ("operator_ready", operator_readiness["ready"]),
+            ("operator_wait_cycles", operator_readiness["cycles"]),
+            ("operator_wait_seconds", f"{operator_readiness['seconds']:.3f}"),
+            ("operator_wait_timed_out", operator_readiness["timed_out"]),
+            ("allocationScale", attr_value(dataset_emitter, "allocationScale")),
+            ("applyPostPressure", attr_value(dataset_emitter, "applyPostPressure")),
+            ("smoke_injector_path", smoke_injector_path),
+            (
+                "smoke_emitter_path",
+                smoke_emitter.GetPath() if smoke_emitter else None,
+            ),
+            (
+                "smoke_emitter_prim_type",
+                smoke_emitter.GetTypeName() if smoke_emitter else None,
+            ),
+            ("smoke_probe_phase", smoke_probe_phase),
+            ("server_visible", server_visible),
+            ("smoke_injector_mesh_visible", smoke_injector_mesh_visible),
+            ("smoke_emitter_enabled", attr_value(smoke_emitter, "enabled")),
+            (
+                "smoke_emitter_allocationScale",
+                attr_value(smoke_emitter, "allocationScale"),
+            ),
+            ("smoke_injector_local_scale", smoke_local_scale),
+            ("smoke_injector_world_scale", smoke_local_scale),
+            ("emitter_position", smoke_position),
+            ("emitter_layer", attr_value(smoke_emitter, "layer")),
+            ("radius", smoke_radius),
+            ("radiusIsWorldSpace", radius_is_world_space),
+            ("smoke", attr_value(smoke_emitter, "smoke")),
+            ("coupleRateSmoke", attr_value(smoke_emitter, "coupleRateSmoke")),
+            ("burn", attr_value(smoke_emitter, "burn")),
+            ("coupleRateBurn", attr_value(smoke_emitter, "coupleRateBurn")),
+            ("fuel", attr_value(smoke_emitter, "fuel")),
+            ("coupleRateFuel", attr_value(smoke_emitter, "coupleRateFuel")),
+            ("temperature", attr_value(smoke_emitter, "temperature")),
+            (
+                "coupleRateTemperature",
+                attr_value(smoke_emitter, "coupleRateTemperature"),
+            ),
+            (
+                "smoke_emitter_coupleRateVelocity",
+                attr_value(smoke_emitter, "coupleRateVelocity"),
+            ),
+            ("injector_inside_flow_bounds", injector_inside_bounds),
+            ("boundary_emitter_path", boundary_emitter_path),
+            ("boundary_emitter_count", len(boundary_emitters)),
+            (
+                "boundary_layers",
+                [attr_value(prim, "layer") for prim in boundary_emitters],
+            ),
+            (
+                "all_boundary_emitters_valid",
+                len(boundary_emitters) == 6
+                and all(prim.IsValid() for prim in boundary_emitters),
+            ),
+            ("timeline_is_playing", timeline.is_playing()),
+            ("timeline_time_before", timeline_time_before),
+            ("timeline_time_after", timeline_time_after),
+            ("timeline_advancing", timeline_time_after > timeline_time_before),
+            ("stage_timeCodesPerSecond", stage.GetTimeCodesPerSecond()),
+        ]
+        details = ", ".join(f"{key}={value}" for key, value in diagnostics)
+        carb.log_warn(f"BMS Kit-CAE Flow full diagnostics: {details}")
+
+    @staticmethod
+    def _validate_kit_cae_velocity_field(
+        dataset_prim,
+        field_prim,
+        metadata: dict[str, object],
+        cae,
+        cae_vtk,
+    ) -> dict[str, object]:
+        """Verify that Kit-CAE represented the Houdini VTI as a point vector field."""
+
+        if not dataset_prim or not dataset_prim.IsA(cae.DataSet):
+            raise RuntimeError("Kit-CAE did not create a CaeDataSet from the VTI.")
+        if not dataset_prim.HasAPI(cae.DenseVolumeAPI):
+            raise RuntimeError("Kit-CAE VTI dataset is missing DenseVolumeAPI.")
+        if not field_prim or field_prim.GetTypeName() != "CaeVtkFieldArray":
+            raise RuntimeError("Kit-CAE did not create the expected CaeVtkFieldArray.")
+        association = str(field_prim.GetAttribute("fieldAssociation").Get())
+        if association != str(cae.Tokens.vertex):
+            raise RuntimeError(
+                "Kit-CAE velocity field is not associated with VTI PointData."
+            )
+
+        dense_volume = cae.DenseVolumeAPI(dataset_prim)
+        min_extent = dense_volume.GetMinExtentAttr().Get()
+        max_extent = dense_volume.GetMaxExtentAttr().Get()
+        imported_dimensions = tuple(
+            int(max_extent[index] - min_extent[index] + 1) for index in range(3)
+        )
+        if imported_dimensions != metadata["dimensions"]:
+            raise RuntimeError(
+                "Kit-CAE VTI dimensions do not match the source VTI PointData grid."
+            )
+        imported_spacing = tuple(
+            float(value) for value in dense_volume.GetSpacingAttr().Get()
+        )
+        expected_spacing = metadata["spacing"]
+        if any(
+            abs(imported_spacing[index] - expected_spacing[index]) > 1e-6
+            for index in range(3)
+        ):
+            raise RuntimeError(
+                "Kit-CAE VTI spacing does not match the source VTI grid."
+            )
+
+        image_data = cae_vtk.ImageDataAPI(dataset_prim)
+        imported_origin = tuple(
+            float(value) for value in image_data.GetOriginAttr().Get()
+        )
+        imported_min = tuple(
+            imported_origin[index] + min_extent[index] * imported_spacing[index]
+            for index in range(3)
+        )
+        imported_max = tuple(
+            imported_origin[index] + max_extent[index] * imported_spacing[index]
+            for index in range(3)
+        )
+        return {
+            "origin": imported_origin,
+            "spacing": imported_spacing,
+            "world_bounds": (imported_min, imported_max),
+        }
+
+    @staticmethod
+    def _read_kit_cae_vti_origin_opinion(
+        dataset_prim,
+        cae_vtk,
+    ) -> dict[str, object]:
+        """Capture the composed ImageData origin and each authored USD opinion."""
+
+        if not dataset_prim or not dataset_prim.IsValid():
+            raise RuntimeError("Kit-CAE did not create a VTI dataset to inspect.")
+        origin_attr = cae_vtk.ImageDataAPI(dataset_prim).GetOriginAttr()
+        if not origin_attr or not origin_attr.IsValid():
+            raise RuntimeError("Kit-CAE VTI dataset is missing ImageDataAPI.origin.")
+
+        def serialise_value(value):
+            if value is None:
+                return None
+            try:
+                return tuple(float(component) for component in value)
+            except TypeError:
+                return str(value)
+
+        return {
+            "origin": serialise_value(origin_attr.Get()),
+            "property_stack": [
+                {
+                    "layer": spec.layer.identifier,
+                    "path": str(spec.path),
+                    "default": serialise_value(spec.default),
+                }
+                for spec in origin_attr.GetPropertyStack()
+            ],
+        }
+
+    @staticmethod
+    def _author_kit_cae_vti_origin_session_opinion(
+        dataset_prim,
+        vti_header_origin: tuple[float, float, float],
+        cae_vtk,
+        Gf,
+    ) -> None:
+        """Restore the VTI origin through the active BMS session layer."""
+
+        if not dataset_prim or not dataset_prim.IsValid():
+            raise RuntimeError("Kit-CAE did not create a VTI dataset to register.")
+        origin_attr = cae_vtk.ImageDataAPI(dataset_prim).GetOriginAttr()
+        if not origin_attr or not origin_attr.IsValid():
+            raise RuntimeError("Kit-CAE VTI dataset is missing ImageDataAPI.origin.")
+        origin_attr.Set(Gf.Vec3f(*vti_header_origin))
+
+    @staticmethod
+    def _author_kit_cae_spatial_sanity_wireframes(
+        stage,
+        dataset_world_bounds: tuple[
+            tuple[float, float, float], tuple[float, float, float]
+        ],
+        Gf,
+        Usd,
+        UsdGeom,
+    ) -> None:
+        """Draw probe-only dataset and server bounds in distinct colors."""
+
+        bbox_cache = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+        )
+        server_prim = stage.GetPrimAtPath("/blackwell_rig")
+        server_range = bbox_cache.ComputeWorldBound(server_prim).ComputeAlignedRange()
+        if server_range.IsEmpty():
+            raise RuntimeError(
+                "Cannot draw Flow spatial sanity check: server bounds are empty."
+            )
+        server_world_bounds = (
+            tuple(server_range.GetMin()),
+            tuple(server_range.GetMax()),
+        )
+        root_path = "/BMS_KitCAE/SpatialSanity"
+        stage.RemovePrim(root_path)
+        UsdGeom.Xform.Define(stage, root_path)
+
+        def author_wireframe(
+            name: str,
+            bounds: tuple[tuple[float, float, float], tuple[float, float, float]],
+            color: tuple[float, float, float],
+            width: float,
+        ) -> None:
+            minimum, maximum = bounds
+            corners = (
+                (minimum[0], minimum[1], minimum[2]),
+                (maximum[0], minimum[1], minimum[2]),
+                (maximum[0], maximum[1], minimum[2]),
+                (minimum[0], maximum[1], minimum[2]),
+                (minimum[0], minimum[1], maximum[2]),
+                (maximum[0], minimum[1], maximum[2]),
+                (maximum[0], maximum[1], maximum[2]),
+                (minimum[0], maximum[1], maximum[2]),
+            )
+            edges = (
+                (0, 1),
+                (1, 2),
+                (2, 3),
+                (3, 0),
+                (4, 5),
+                (5, 6),
+                (6, 7),
+                (7, 4),
+                (0, 4),
+                (1, 5),
+                (2, 6),
+                (3, 7),
+            )
+            points = [Gf.Vec3f(*corners[index]) for edge in edges for index in edge]
+            curve = UsdGeom.BasisCurves.Define(stage, f"{root_path}/{name}")
+            curve.CreateTypeAttr(UsdGeom.Tokens.linear)
+            curve.CreateCurveVertexCountsAttr([2] * len(edges))
+            curve.CreatePointsAttr(points)
+            curve.CreateWidthsAttr([width] * len(points))
+            curve.CreateDisplayColorPrimvar(UsdGeom.Tokens.vertex).Set(
+                [Gf.Vec3f(*color)] * len(points)
+            )
+
+        # The wider server frame remains visible around an aligned dataset frame.
+        author_wireframe(
+            "ServerBounds",
+            server_world_bounds,
+            (1.0, 0.28, 0.55),
+            0.003,
+        )
+        author_wireframe(
+            "DatasetBounds",
+            dataset_world_bounds,
+            (0.1, 0.9, 1.0),
+            0.0015,
+        )
+
+    @staticmethod
     def _author_airflow_cache_session_layer(
         stage,
         cache,
@@ -987,7 +2325,7 @@ class RuntimeController:
         volume_prim.SetCustomDataByKey(
             "nvindex.renderSettings",
             {
-                "filterMode": "trilinear",
+                "filterMode": cache.filter_mode,
                 "samplingDistance": cache.sampling_distance,
             },
         )

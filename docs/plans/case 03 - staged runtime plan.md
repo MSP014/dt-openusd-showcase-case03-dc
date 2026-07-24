@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-20
+**Last Updated**: 2026-07-24
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -18,7 +18,7 @@ Current decisions already made:
 
 - The public application name is **Blackwell Monitoring Suite**.
 - The first build was **Blackwell Monitoring Suite v0.1**.
-- The current runtime build is **Blackwell Monitoring Suite v0.3.0**.
+- The current runtime build is **Blackwell Monitoring Suite v0.4.0**.
 - BMS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
   default through the `blackwell_rig_gb203` runtime asset entry.
 - The shared left sidebar now contains `Telemetry` and `Config` tabs without
@@ -54,11 +54,31 @@ Jira tracking:
   Slice.
 - Completed implementation task: `DC-44` - Stage 5 Full Blackwell Rig server
   review.
-- Next implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
+- Active implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
   next stage task In Progress when work on that stage starts.
+
+Stage 6 current checkpoint:
+
+- The full BMS server scene without airflow has a measured `67-69 FPS`
+  baseline at `1280 x 720` on the RTX 3080. The direct
+  OpenVDB/RTX-IndeX playback route has been closed after the final fast-path
+  test remained around `2.4 FPS`.
+- **STATIC VTI -> KIT-CAE -> FLOW CAPABILITY PROOF: PASSED.** The real Houdini
+  velocity asset `server_airflow_velocity_1014.vti` drives native NVIDIA Flow
+  smoke through Kit-CAE in BMS. The static full-server scene runs at about
+  `47-48 FPS` at `1280 x 720` on the RTX 3080; applying a Flow presentation
+  change briefly dips to about `41 FPS` before returning to the steady range.
+- The source VTI is `184 x 72 x 232` at approximately `0.00255 m` spacing.
+  Its authoritative header origin is restored as a BMS session-layer
+  compatibility opinion before downstream CAE/Flow setup, so
+  `dataset_bbox_bounds_match=True` while the source VTI and authored server
+  USD remain unchanged.
+- The remaining Stage 6 work is bounded: finish minimal static presentation
+  tuning, prove three temporal VTI frames, choose a temporal sampling cadence,
+  validate performance, and decide the production visualisation mode.
 
 The local authoring and tooling environment still uses `case03-env`. Blackwell
 Monitoring Suite runtime code, however, runs inside Kit's Python environment
@@ -73,9 +93,17 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Stage 6 is the next active runtime slice. It should introduce cached simulation
-playback or a cached simulation visual layer only when the hydrated asset
-package contains a real exported cache or matching visual layer to drive.
+Resume `DC-45` with a deliberately bounded presentation pass: compare
+attenuation `8` / Medium opacity against the current `10` / Medium baseline,
+then replace the thermal blue/yellow/red ramp with one engineering airflow
+tracer ramp from deep blue/cyan through cyan to pale cyan/near-white. Do not
+alter the VTI, origin/spacing, CAE bridge, Flow grid, injector physics, or
+velocity coupling during this pass.
+
+Then prove exactly three consecutive VTI frames, determine the lowest viable
+source update cadence, and run the full performance proof. Keep all Case 03
+changes inside BMS or the private Houdini project; the three local NVIDIA
+repositories remain read-only references.
 
 Do not expand Stage 6 into Engineering X-Ray, workload-to-cache state binding,
 velocity trails, heatmaps, automatic workload cycling, rack/data-hall
@@ -335,12 +363,12 @@ engineering value.
 ## Runtime Implementation Decisions
 
 The first staged build was **Blackwell Monitoring Suite v0.1**. The current
-runtime build is **Blackwell Monitoring Suite v0.3.0**.
+runtime build is **Blackwell Monitoring Suite v0.4.0**.
 
 Fixed names and identifiers:
 
 - Public app title: `Blackwell Monitoring Suite`
-- Version: `0.3.0`
+- Version: `0.4.0`
 - Kit extension id: `msp.bw.monitoring`
 - Python package root: `blackwell_monitoring_suite`
 - Runtime config: `configs/blackwell_monitoring_suite.toml`
@@ -605,14 +633,28 @@ Jira: `DC-45`
 
 Release track: `0.4.0` (released on Stage 8 completion).
 
-Introduce cached simulation playback or a cached simulation visual layer only
-when the asset package contains a real cache or layer to drive.
+Introduce an honest runtime airflow layer only when the asset package contains
+a real Houdini-authored cache, velocity field, or matching visual layer to
+drive. Stage 6 must not present generated live simulation as baked simulation
+playback.
 
 Required scope:
-- **Cached Playback:** Implement playback and visual mapping of baked Houdini airflow/thermal simulation caches (e.g., OpenVDB or matching visual layers).
+- **Runtime airflow evidence:** Implement playback or visual mapping of baked
+  Houdini airflow/thermal simulation data, using direct OpenVDB playback only
+  if it is performant enough for the full BMS scene. If direct density playback
+  fails the frame-budget target, use a velocity-driven runtime visualisation or
+  a streamlines/hybrid route backed by the same Houdini simulation source.
+- **Measured acceptance:** Treat the route as shippable only when the full
+  Blackwell Rig server scene, interactive camera, airflow layer, correct
+  geometry depth/compositing, and smooth frame changes run at about 25 FPS or
+  better at 1280 x 720 on the target RTX 3080 workstation profile.
+- **Status honesty:** Report whether the active route is direct density
+  playback, velocity-driven airflow visualisation, engineering streamlines, or
+  a missing/unsupported simulation layer.
 
-Done when the app can enable or play the cached simulation state and report its
-load and playback status without pretending to generate the simulation live.
+Done when the app can enable the selected airflow evidence route and report its
+load, playback, performance, and fallback status without pretending to generate
+the Houdini simulation live.
 
 #### Implementation Checkpoint - 2026-07-19 Pit Stop
 
@@ -717,21 +759,24 @@ Rejected NanoVDB proxy experiment:
   `OpenVDB importer (NanoVDB): failed to fetch OpenVDB data` and no volume was
   rendered. Do not repeat this route through `OpenVDBAsset`.
 
-Next controlled test:
+Historical next controlled test (superseded on 2026-07-23):
 
-1. Keep the original 800-frame `.vdb` cache untouched and restore the local
-   BMS override to its original wrapper before the next launch.
-2. Use Houdini `VDB Resample` with `mode = voxelsizeonly`, linear filtering,
-   and `voxel size = 0.00255` (2x the original `0.001275`) to create a separate
+The following VDB proxy test records the path that was taken after this
+checkpoint. It is retained as evidence only: the final IndeX fast-path A/B
+failed, so direct `OpenVDBAsset`/RTX-IndeX playback and further VDB resampling
+are closed for Stage 6.
+
+1. The original 800-frame `.vdb` cache remained untouched; the local BMS
+   override was restored to its original wrapper before the test launch.
+2. Houdini `VDB Resample` with `mode = voxelsizeonly`, linear filtering, and
+   `voxel size = 0.00255` (2x the original `0.001275`) created a separate
    30-frame `.vdb` proxy from `1001, 1003, ..., 1059`, mapped to runtime frames
    `1001-1030` at 25 FPS.
 3. A one-frame proof at this resolution produced a valid `.vdb` of 4.7 MiB,
-   versus roughly 33 MiB for the source frame. The next session must first
-   validate this 30-frame `.vdb` wrapper in BMS, then record playing and paused
-   FPS before deciding whether a stronger resample is necessary.
-4. Do not generate a full 400-frame proxy, modify the master cache, use NanoVDB
-   through `OpenVDBAsset`, or start another renderer branch until that single
-   A/B measurement is captured.
+   versus roughly 33 MiB for the source frame. The historical next session
+   validated this 30-frame `.vdb` wrapper in BMS before the route was closed.
+4. No full 400-frame proxy was generated, the master cache was not modified,
+   and NanoVDB was not retried through `OpenVDBAsset` before the A/B result.
 
 #### Implementation Checkpoint - 2026-07-20 Long Pit Stop
 
@@ -778,47 +823,262 @@ Findings that must not be re-investigated as primary fixes:
   `OpenVDBAsset`/IndeX wrapper: it produced a larger `.nvdb` payload and the
   importer failed to load it. Do not retry that route through `OpenVDBAsset`.
 
-Viable routes and hypotheses:
+Updated decision boundary - 2026-07-22:
 
-1. **IndeX fast-path A/B.** NVIDIA documents `Nearest` as the faster volume
-   filter and identifies sampling distance as a direct quality/performance
-   control. One settings-only test can change the filter from `trilinear` to
-   `nearest` and increase sampling distance to at least `0.0255` (about ten
-   voxels), while retaining the existing 25 percent resolution scale and one
-   sample. A further resolution reduction to 12-15 percent is a possible
-   second setting, but only after recording the first result. This may reduce
-   ray-marching cost; it is not a promise of 25 FPS.
-2. **Native RTX Interactive Path Tracing volume route.** NVIDIA documents a
-   separate non-uniform VDB path that converts VDB data to GPU-friendly
-   NanoVDB internally. Its documented authoring contract is a cube mesh with
-   a native VDB material and `/rtx/pathtracing/ptvol/enabled`; fog-like
-   volumes can use one scattering bounce, one sample, and denoising. This is
-   an alternative authoring proof, not a request to recompute the Houdini
-   simulation. It must be implemented only after checking an official Kit API
-   example for the animated material path; the earlier generic MDL texture
-   experiment was incompatible and crashed.
-3. **IndeX cluster rendering** is documented for purpose-built multi-host
-   installations. It is not the next experiment and must not be assumed to
-   distribute the current workstation's GPUs automatically.
+The measured bottleneck is the runtime representation and rendering path, not
+the absence of simulation data and not only the VDB file size. Direct density
+playback through `OpenVDBAsset` and RTX/NVIDIA IndeX is now treated as a final
+fast-path check, not as the route to rescue at any cost.
 
-Exact resume order:
+A no-airflow BMS baseline captured on 2026-07-23 shows the full Blackwell Rig
+server review scene running at about 67-69 FPS at 1280 x 720 on the RTX 3080,
+with frame time around 14.5-14.8 ms, approximately 3.1 GiB of GPU memory used,
+and approximately 5.3-5.4 GiB of process memory used. This confirms that the
+server scene, UI, and base viewport are not the current Stage 6 bottleneck; the
+remaining performance risk belongs to the airflow representation and rendering
+path.
 
-1. Before editing BMS or Houdini, obtain an official NVIDIA example or API
-   reference for an animated native RTX Interactive Path Tracing VDB material
-   on a cube mesh. Do not infer the material graph from the failed generic MDL
-   setup.
-2. Record the current BMS renderer and Index settings, then run one
-   settings-only IndeX fast-path A/B: `nearest`, `samplingDistance = 0.0255`,
-   25 percent resolution scale, and one sample. Capture playing FPS, a frame
-   profile, and a screenshot for readability. Do not regenerate or resample
-   VDB data for this test.
-3. If that result remains clearly below a usable showreel threshold, stop
-   tuning the current IndeX route. Implement a first-frame native RTX
-   Interactive Path Tracing proof using the existing test sequence, then make
-   a single short animated A/B before expanding the implementation.
-4. Do not perform further Houdini VDB resampling, wrapper exports, extent
-   cleanup, NanoVDB conversion, or cluster configuration until either route
-   has a measured positive result.
+Baseline and route order:
+
+1. **Preserve the verified BMS frame budget.** Treat the 67-69 FPS no-airflow
+   baseline as the control measurement before changing airflow routes. Record
+   the active renderer/settings with the next performance capture, but do not
+   spend Stage 6 time on broad baseline tuning unless later changes regress the
+   no-airflow scene. If the full server scene falls back near 24-26 FPS without
+   airflow, restore the baseline before judging any airflow route.
+2. **IndeX fast-path A/B failed on 2026-07-23.** The existing test VDB sequence
+   was run with `filterMode = nearest`, `samplingDistance = 0.0255`, 25 percent
+   resolution scale, and one sample. The full BMS scene measured about
+   `2.38-2.44 FPS` (`410 ms` frame time), with no meaningful improvement over
+   the prior approximately 3 FPS result. The captured GPU profile identifies a
+   single `RTX Rendering` block of about `312 ms`; it confirms that rendering
+   dominates the frame, but does not resolve a more granular IndeX sub-cost.
+   Do not proceed to the 15 percent or 12.5 percent variants: their entry
+   criterion was a meaningful gain at 25 percent. Close direct
+   `OpenVDBAsset`/RTX-IndeX playback as the interactive Stage 6 route and do
+   not continue Houdini VDB resampling as a speculative fix.
+3. **Next capability spike: velocity-driven Flow/CAE route.** Treat Kit-CAE or
+   NVIDIA Flow driven by exported Houdini velocity as the main capability
+   spike, not as a guaranteed production route. Use 10-30 representative
+   frames, not the full cache. Prefer VTI if the export path is clean; otherwise
+   test NPY/NPZ velocity data. The proof must show that the runtime airflow
+   follows the Houdini velocity field, reads as movement through the server,
+   respects geometry depth/compositing, avoids visible frame-change stalls, and
+   keeps the full BMS scene near the 25 FPS target. The first VTI proof must
+   import a Case 03-owned vector field through BMS with the minimal compatible
+   Kit-CAE VTK extensions loaded from the read-only reference checkout, verify
+   that its three-component `vel` point data becomes a CAE vector field, and
+   only then connect that field to a CAE Flow dataset emitter.
+4. **Flow OpenVDB/NanoVDB emitter route only if needed.** If the velocity-driven
+   route is unavailable or inconclusive, test a separate NVIDIA Flow ingestion
+   path. This is not the rejected `.nvdb` through `OpenVDBAsset` route. Use an
+   early-fail ladder: one static frame, then 10 frames, then 30 frames. Stop if
+   the static frame is already expensive or if sequence switching introduces
+   visible stalls.
+5. **Hybrid fallback.** If volumetric smoke cannot meet the target, Stage 6
+   should ship interactive velocity-field engineering visualisation in BMS
+   using streamlines or an equivalent lightweight airflow layer, while keeping
+   high-fidelity Houdini density VDB evidence for offline cinematic render.
+   This preserves the digital-twin value: Houdini remains the source
+   simulation, and BMS remains the interactive review surface.
+
+Do not spend more Stage 6 time on:
+
+- further VDB resampling without new measured evidence;
+- `.nvdb` experiments through `OpenVDBAsset`;
+- `fieldName`, `fieldIndex`, or extent cleanup as a performance fix;
+- RTX Interactive non-uniform volumes as the main route before the Flow/CAE
+  capability spike;
+- Kit-CAE Volume Operator work before the Flow/CAE velocity hypothesis is
+  checked;
+- full 400-frame exports before a 10-30 frame proof passes.
+
+#### Kit-CAE Reference Boundary - 2026-07-24
+
+`E:\omniverse_kit_cae` is an external NVIDIA Kit-CAE reference application.
+It may be built, launched, inspected, and used to run unmodified NVIDIA
+examples. It must not become a home for Case 03 scripts, converters, test
+datasets, generated output, or BMS modifications.
+
+All public Case 03 artifacts for the Flow/CAE capability spike belong in this
+repository: VTI interchange assets, small reproducible test datasets, probe
+scripts, BMS integration code, and the resulting engineering documentation.
+The Houdini-side velocity exporter remains private production tooling inside
+the Houdini project: it depends on `hou.VDB` and is neither public BMS code nor
+content for the Kit-CAE checkout. Kit-CAE may be invoked as an external
+runtime/reference; it is not a second authored project tree.
+
+#### Historical Kit-CAE Velocity Flow Checkpoint - 2026-07-24
+
+Status: superseded by the static capability proof below. This records the
+intermediate state before origin repair and visible smoke validation.
+
+Confirmed evidence:
+
+- The external Kit-CAE reference checkout builds and launches on the target
+  workstation with Kit `110.1.2`; its VTK variant enables the VTK importer and
+  delegate required for `.vti` assets.
+- NVIDIA's `example_npz_flow.py` was run successfully. It connects a dataset
+  vector field through `FieldSelectionAPI("velocities")` to
+  `CreateCaeVizFlowDataSetEmitter` and produces live Flow smoke. This proves
+  the Dataset -> velocity field -> Flow DataSetEmitter architecture, rather
+  than replaying a baked density cache.
+- The real Case 03 asset
+  `assets/_external/vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti`
+  now imports through Kit-CAE inside BMS. Its `PointData/vel` array is accepted
+  as a three-component vector field, and BMS creates the official Kit-CAE
+  bounding box, Flow environment, smoke injector, boundary emitter, and Flow
+  DataSetEmitter without an attach-time exception.
+- The current Kit-CAE VTK importer copies into the stage root layer. The BMS
+  probe therefore imports the asset at a top-level prim and keeps its transient
+  Flow objects separate; do not move that import under a session-only BMS
+  parent without replacing the importer behaviour.
+- The first BMS viewport proof was intentionally **not a pass**: Flow was live,
+  but the VTI bounds and smoke injector are displaced from `/blackwell_rig`.
+  The source VTI bounds are `(-0.93585, -0.01265, -2.17330)` to
+  `(0.93075, 0.71155, 0.18290)`. Do not compensate by eye with an arbitrary
+  scale or translation. Compare the logged VTI, server, and Flow world bounds,
+  then author the measured registration transform at the correct boundary.
+- The initial Flow update warns that its DataSetEmitter has no selected fields
+  before BMS assigns the `velocities` target. Verify the post-bind target and
+  visible velocity response before treating the smoke sphere as evidence that
+  `vel` is influencing Flow.
+- The real Houdini velocity source is an axis-aligned Vector3 VDB with
+  resolution `184 x 72 x 232`, voxel spacing `0.0102`, and `3,073,536` voxels.
+  Houdini HOM exposes its bulk values through `voxelRangeAsVector3()` in
+  `X -> Y -> Z` order (`X` changes fastest). A small fixture has proved the
+  private conversion chain Vector3 VDB -> float32 vectors -> `vtkFloatArray`
+  -> `vtkImageData` -> `.vti`.
+
+Architecture and ownership boundary:
+
+```text
+PRIVATE PRODUCTION
+Houdini .hip -> Vector3 VDB vel -> Houdini-side Python exporter -> VTI
+
+PUBLIC RUNTIME CONTRACT
+BMS-owned VTI -> Kit-CAE VTK importer -> CAE velocity field
+              -> NVIDIA Flow DataSetEmitter -> live smoke
+```
+
+The public VTI contract is a regular `vtkImageData` asset with point-data field
+`vel`, three `float32` components, and Houdini-authored dimensions, spacing,
+and spatial origin. Preserve and verify VDB voxel-center versus VTK ImageData
+origin semantics before treating spatial registration as complete. The public
+repository documents and consumes this interchange asset; it does not expose
+the private `.hip` or Houdini exporter implementation.
+
+Spatial registration ownership: a stable Houdini-to-BMS coordinate mapping is
+production data and must be baked by the private Houdini VDB -> VTI exporter
+into the VTI origin/direction/spacing representation. BMS consumes that
+registered VTI without a magic per-asset correction. A temporary, documented
+BMS probe override is allowed only to validate the measured mapping before the
+VTI is regenerated.
+
+Historical proof ladder and decision gates:
+
+1. **Complete the static field proof in BMS.** Use the existing
+   `server_airflow_velocity_1014.vti` integration probe. First capture the
+   `BMS Kit-CAE spatial diagnostics` line after attach, compare server/VTI/Flow
+   bounds, and derive the coordinate registration. Validate it transiently in
+   BMS if necessary, then bake it in the private exporter and regenerate the
+   VTI. Then verify that the post-bind `FieldSelectionAPI("velocities")` target
+   resolves to `vel` and live smoke visibly follows the field through the
+   server. Hide or remove the diagnostic bounding-box helper from the review
+   frame once it has served this purpose. PASS only when geometry
+   depth/compositing is correct and the velocity response is visually
+   unambiguous.
+2. **Temporal proof.** Use exactly three consecutive VTI frames. Determine
+   whether the active dataset/emitter can update in place, must be recreated,
+   or should use a Kit-CAE temporal dataset path; verify that existing smoke
+   reacts without visible discontinuities or stalls.
+3. **Sampling proof.** One raw velocity frame is about `35.2 MiB`; 800 raw
+   frames would be about `27.5 GiB` before VTI compression. Do not assume a
+   50 FPS VTI update rate. Compare every `1`, `2`, `4`, and `8` source frames
+   after the temporal proof, then choose the least frequent update cadence that
+   preserves the readable Houdini airflow character.
+4. **Performance proof.** Only after the above passes, validate full-server
+   compositing, camera interaction, frame-change behaviour, and the Stage 6
+   target of about 25 FPS at 1280 x 720. Do not treat the current static
+   screenshot FPS as a result, and do not export the full 800-frame loop until
+   this decision gate has passed.
+
+#### Static VTI -> Kit-CAE -> Flow Capability Proof - 2026-07-24
+
+**Status: PASSED.** The static Houdini velocity route is now a demonstrated
+runtime capability, not a speculative architecture.
+
+```text
+Houdini Vector3 VDB vel
+  -> private Houdini VDB-to-VTI exporter
+  -> VTI structured vector field
+  -> Kit-CAE VTK importer
+  -> CAE PointData/vel
+  -> Flow DataSetEmitter
+  -> internal NanoVDB velocity payload
+  -> NVIDIA Flow native fuel smoke
+  -> advection by the Houdini velocity field
+```
+
+Static proof evidence:
+
+- `server_airflow_velocity_1014.vti` is a `184 x 72 x 232` structured vector
+  field with `vel` as three `float32` point-data components and approximately
+  `0.00255 m` spacing.
+- The DataSetEmitter reaches an internal populated `nanoVdbVelocities` payload;
+  `coupleRateVelocity=120` and `operator_ready=True`. Timeline stepping and
+  the Flow/RTX runtime were verified in BMS.
+- Native `NATIVE_FUEL` smoke is visible and follows the field with the full
+  `/blackwell_rig` visible. The diagnostic smoke-injector mesh is hidden while
+  its active Flow emitter remains in the scene.
+- The static scene sustains approximately `47-48 FPS` at `1280 x 720` on the
+  RTX 3080. Applying a Flow presentation change briefly falls to about
+  `41 FPS`, then returns to the measured steady range.
+- Reference parity is complete: `REFERENCE_FLOW_WORKS=True`,
+  `REFERENCE_IN_BMS_WORKS=True`, and `VTI_REFERENCE_IMPORT_WORKS=True`.
+
+Known compatibility issue - VTI ImageData origin:
+
+The current Kit-CAE/BMS integration imports a VTI with a valid non-zero header
+origin as `ImageDataAPI.origin=(0,0,0)`. Before creating the BoundingBox or
+CAE/Flow objects, BMS authors a session-layer compatibility opinion that
+restores the authoritative VTI header origin. The source VTI and the authored
+server USD asset are not modified. The current VTI is already in world scale:
+the old runtime `x0.25` and bounding-box-only spatial corrections were removed.
+The resulting check is `dataset_bbox_bounds_match=True`.
+
+The private Houdini VDB-to-VTI exporter remains the production owner of source
+interchange data. BMS consumes the VTI contract and retains only this narrow,
+non-destructive compatibility shim until the Kit-CAE behaviour is understood
+or corrected upstream.
+
+Closed diagnostic hypotheses:
+
+- invalid VTI or missing vector field;
+- CAE-to-Flow payload failure;
+- timeline stepping failure;
+- Flow/RTX or BMS runtime incompatibility;
+- spatial origin mismatch; and
+- Flow smoke-emitter failure.
+
+Remaining Stage 6 proof ladder:
+
+1. **Finish minimal static presentation tuning.** Compare attenuation `8` /
+   Medium opacity with the current `10` / Medium baseline and add one
+   engineering airflow-tracer colour ramp. Do not alter simulation data,
+   physics, Flow grid settings, velocity coupling, or emitter placement.
+2. **Temporal proof.** Use exactly three consecutive VTI frames. Determine
+   whether the active dataset/emitter can update in place, must be recreated,
+   or should use a Kit-CAE temporal dataset path; verify that existing smoke
+   reacts without visible discontinuities or stalls.
+3. **Sampling proof.** One raw velocity frame is about `35.2 MiB`; 800 raw
+   frames would be about `27.5 GiB` before VTI compression. Compare every `1`,
+   `2`, `4`, and `8` source frames after the temporal proof, then choose the
+   least frequent update cadence that preserves the readable airflow character.
+4. **Performance proof and production decision.** Validate full-server
+   compositing, camera interaction, frame-change behaviour, and the Stage 6
+   target of about 25 FPS at `1280 x 720`; then select the production
+   visualisation mode. Do not export the full 800-frame loop before this gate.
 
 ### Stage 7 - Engineering X-Ray Visual Mode Slice
 
@@ -1137,6 +1397,11 @@ Required scope:
 - keep the active scale visible and consolidate or remove duplicated controls;
 - review the remaining camera, scene, lighting, telemetry, status, visual-layer,
   scenario, and runtime controls after their delivery stages are complete;
+- design and implement a user-facing runtime feedback pattern for asynchronous
+  commands that can fail, beginning with airflow attach: distinguish progress,
+  actionable error, recoverable warning, and success without requiring an
+  operator to inspect a Python traceback or Kit log; decide the final visual
+  form, placement, and persistence during the Stage 17 UI design pass;
 - implement an interactive viewport HUD overlay using `omni.ui.scene` for
   spatial information, hierarchical scale indication, and quick stress-test
   commands routed through the existing runtime state services.
