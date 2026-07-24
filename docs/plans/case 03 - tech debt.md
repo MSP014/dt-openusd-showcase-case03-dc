@@ -2,6 +2,55 @@
 
 ## 1. Unresolved Technical Debt
 
+### [RUNTIME] Investigate Kit-CAE VTI Origin Loss and Retire Compatibility Shim
+
+- **Status:** Open
+- **Severity:** Low (Upstream Compatibility / Regression Risk)
+- **Description:**
+  - A VTI with a valid non-zero header origin currently imports into the
+    Kit-CAE/BMS stage with `ImageDataAPI.origin=(0,0,0)`.
+  - BMS restores the authoritative VTI header origin through a session-layer
+    opinion before creating dataset bounding-box and Flow objects. The source
+    VTI and authored USD asset remain unmodified.
+- **Why Deferred:**
+  - The compatibility layer is narrow, reversible, and has passed the static
+    VTI-to-Flow proof. Patching the upstream importer during active Stage 6
+    delivery would turn a bounded integration repair into unrelated R&D.
+- **Action Plan:**
+  - [ ] Build a minimal VTI-only reproducer outside BMS.
+  - [ ] Determine whether origin loss occurs in the importer, USD authoring, or
+        composition.
+  - [ ] Check the behaviour against a newer Kit-CAE version when available.
+  - [ ] Remove the BMS session-layer shim if upstream behaviour is fixed.
+  - [ ] Retain a regression check that VTI header origin equals composed
+        `ImageDataAPI.origin`.
+
+### [RUNTIME] Retire the Rejected RTX/IndeX Airflow Playback Route
+
+- **Status:** Deferred until the replacement airflow route is accepted
+- **Severity:** Low (Runtime Cleanup / Scope Control)
+- **Description:**
+  - Stage 6 established that direct `OpenVDBAsset` playback through RTX/NVIDIA
+    IndeX is not viable for the interactive BMS target. The final fast-path
+    test remained near 2-3 FPS, while the same BMS scene without airflow holds
+    67-69 FPS.
+  - The current BMS app still contains the IndeX dependency, VDB cache
+    configuration, cache controls, and session-layer authoring code so the
+    failed route remains reproducible while the Flow or hybrid replacement is
+    being proven.
+- **Why Deferred:**
+  - Removing the route before a replacement passes would erase a useful
+    comparison point and add cleanup churn during the active Stage 6 spike.
+  - The Houdini density VDB remains valid offline cinematic evidence and is not
+    part of this cleanup.
+- **Action Plan:**
+  - [ ] Accept a replacement interactive airflow route.
+  - [ ] Remove `omni.rtx.index_composite` from the BMS app dependencies.
+  - [ ] Remove the direct VDB cache config, UI controls, controller code, and
+        focused tests.
+  - [ ] Retain the measured result in the Stage 6 plan and keep the offline
+        Houdini density VDB evidence intact.
+
 ### [RUNTIME] Backfill UI Control Contract Tests for Existing BMS Controls
 
 - **Status:** Open

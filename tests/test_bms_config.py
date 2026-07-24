@@ -31,13 +31,19 @@ def test_v02_runtime_config_resolves_default_asset():
     assert config.default_asset_path.name == "Blackwell_Rig_server_assembly.usd"
     assert config.default_asset_path.exists()
     assert config.simulation_cache.enabled is True
-    assert config.simulation_cache_path.name == "server_airflow_load_50.usda"
-    assert config.simulation_cache.wrapper_path == (
-        "usd/server_airflow_v001/server_airflow_load_50.usda"
-    )
-    assert config.simulation_cache.sampling_distance == 0.012
+    assert config.simulation_cache.runtime_mode == "kit_cae"
+    assert config.simulation_cache_path.name == "sim_test.usda"
+    assert config.simulation_cache.wrapper_path == "usd/server_airflows/sim_test.usda"
+    assert config.simulation_cache.volume_prim_path == "/sim/test"
+    assert config.simulation_cache.sampling_distance == 0.0255
     assert config.simulation_cache.resolution_scale == 25
     assert config.simulation_cache.rendering_samples == 1
+    assert config.simulation_cache.filter_mode == "nearest"
+    assert config.velocity_vti_path.name == "server_airflow_velocity_1014.vti"
+    assert config.simulation_cache.velocity_vti_path == (
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti"
+    )
+    assert config.simulation_cache.velocity_field_name == "vel"
 
 
 def test_v02_runtime_config_resolves_server_fan_motion_bindings():

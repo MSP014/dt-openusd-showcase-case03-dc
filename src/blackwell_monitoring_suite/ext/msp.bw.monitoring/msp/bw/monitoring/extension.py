@@ -63,6 +63,8 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._view_task = None
         self._auxiliary_windows_task = None
         self._airflow_status_label = None
+        self._airflow_attenuation_combo = None
+        self._airflow_alpha_combo = None
         self._lighting_task = None
         self._camera_sync_task = None
         self._telemetry_task = None
@@ -433,7 +435,13 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
     def _build_airflow_cache_controls(self) -> None:
         cache = self._controller.config.simulation_cache
         wrapper_name = (
-            Path(cache.wrapper_path).name if cache.wrapper_path else "Not configured"
+            Path(cache.velocity_vti_path).name
+            if cache.runtime_mode == "kit_cae" and cache.velocity_vti_path
+            else (
+                Path(cache.wrapper_path).name
+                if cache.wrapper_path
+                else "Not configured"
+            )
         )
         ui.Label(
             _compact_text(wrapper_name),
@@ -471,6 +479,31 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         ui.Button(
             "Capture GPU profile",
             clicked_fn=self._capture_airflow_gpu_profile,
+            height=26,
+            width=ui.Percent(100),
+        )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Attenuation", width=SERVER_VIEW_LABEL_WIDTH)
+            self._airflow_attenuation_combo = ui.ComboBox(
+                0,
+                "3",
+                "6",
+                "10",
+                "15",
+                width=ui.Fraction(1),
+            )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Smoke opacity", width=SERVER_VIEW_LABEL_WIDTH)
+            self._airflow_alpha_combo = ui.ComboBox(
+                0,
+                "Native",
+                "Medium",
+                "Strong",
+                width=ui.Fraction(1),
+            )
+        ui.Button(
+            "Apply Flow look",
+            clicked_fn=self._schedule_apply_airflow_presentation,
             height=26,
             width=ui.Percent(100),
         )
@@ -1212,6 +1245,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
     def _schedule_detach_airflow(self) -> None:
         self._airflow_task = asyncio.ensure_future(self._detach_airflow())
 
+    def _schedule_apply_airflow_presentation(self) -> None:
+        self._airflow_task = asyncio.ensure_future(self._apply_airflow_presentation())
+
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
             self._apply_chassis_visibility_controls()
@@ -1451,6 +1487,28 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
 
     async def _detach_airflow(self) -> None:
         result = self._controller.detach_simulation_cache_in_kit()
+        self._set_airflow_status(result.message)
+
+    async def _apply_airflow_presentation(self) -> None:
+        attenuation_values = (3.0, 6.0, 10.0, 15.0)
+        alpha_presets = ("native", "medium", "strong")
+        attenuation_model = self._combo_index_model(self._airflow_attenuation_combo)
+        alpha_model = self._combo_index_model(self._airflow_alpha_combo)
+        if not attenuation_model or not alpha_model:
+            self._set_airflow_status("Flow presentation controls are unavailable.")
+            return
+        attenuation_index = self._model_int(attenuation_model)
+        alpha_index = self._model_int(alpha_model)
+        if not (
+            0 <= attenuation_index < len(attenuation_values)
+            and 0 <= alpha_index < len(alpha_presets)
+        ):
+            self._set_airflow_status("Flow presentation selection is invalid.")
+            return
+        result = await self._controller.apply_kit_cae_flow_presentation_in_kit(
+            attenuation_values[attenuation_index],
+            alpha_presets[alpha_index],
+        )
         self._set_airflow_status(result.message)
 
     async def _apply_chassis_visibility_controls(self) -> None:

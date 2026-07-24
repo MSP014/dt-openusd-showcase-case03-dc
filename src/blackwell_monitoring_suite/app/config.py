@@ -18,6 +18,7 @@ LIGHTING_OVERRIDE_KEYS = (
 
 SIMULATION_CACHE_OVERRIDE_KEYS = (
     "enabled",
+    "runtime_mode",
     "wrapper_path",
     "root_prim_path",
     "volume_prim_path",
@@ -25,6 +26,9 @@ SIMULATION_CACHE_OVERRIDE_KEYS = (
     "sampling_distance",
     "resolution_scale",
     "rendering_samples",
+    "filter_mode",
+    "velocity_vti_path",
+    "velocity_field_name",
 )
 
 
@@ -170,9 +174,10 @@ class FanMotionBindingConfig:
 
 @dataclass(frozen=True)
 class SimulationCacheConfig:
-    """Configured OpenVDB cache playback contract."""
+    """Configured airflow runtime input and rendering route."""
 
     enabled: bool = False
+    runtime_mode: str = "index"
     wrapper_path: str = ""
     root_prim_path: str = "/sim"
     volume_prim_path: str = "/sim/server_airflow_load_50"
@@ -180,6 +185,9 @@ class SimulationCacheConfig:
     sampling_distance: float = 0.012
     resolution_scale: int = 25
     rendering_samples: int = 1
+    filter_mode: str = "nearest"
+    velocity_vti_path: str = ""
+    velocity_field_name: str = "vel"
 
 
 @dataclass(frozen=True)
@@ -304,9 +312,15 @@ class RuntimeConfig:
 
     @property
     def simulation_cache_path(self) -> Path:
-        """Return the resolved path for the configured cache wrapper."""
+        """Return the resolved path for the configured IndeX cache wrapper."""
 
         return (self.asset_root / self.simulation_cache.wrapper_path).resolve()
+
+    @property
+    def velocity_vti_path(self) -> Path:
+        """Return the resolved Houdini-generated VTI velocity field."""
+
+        return (self.asset_root / self.simulation_cache.velocity_vti_path).resolve()
 
     @property
     def local_config_path(self) -> Path:
@@ -757,9 +771,18 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         return SimulationCacheConfig()
 
     enabled = bool(data.get("enabled", True))
+    runtime_mode = str(data.get("runtime_mode", "index")).strip().lower()
     wrapper_path = str(data.get("wrapper_path", "")).strip()
-    if enabled and not wrapper_path:
+    velocity_vti_path = str(data.get("velocity_vti_path", "")).strip()
+    velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
+    if runtime_mode not in {"index", "kit_cae"}:
+        raise ValueError("simulation_cache.runtime_mode must be 'index' or 'kit_cae'.")
+    if enabled and runtime_mode == "index" and not wrapper_path:
         raise ValueError("simulation_cache.wrapper_path is required when enabled.")
+    if enabled and runtime_mode == "kit_cae" and not velocity_vti_path:
+        raise ValueError(
+            "simulation_cache.velocity_vti_path is required for the Kit-CAE route."
+        )
 
     root_prim_path = str(data.get("root_prim_path", "/sim")).strip()
     volume_prim_path = str(
@@ -769,6 +792,7 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     sampling_distance = float(data.get("sampling_distance", 0.012))
     resolution_scale = int(data.get("resolution_scale", 25))
     rendering_samples = int(data.get("rendering_samples", 1))
+    filter_mode = str(data.get("filter_mode", "nearest")).strip().lower()
     for field_name_value, value in (
         ("root_prim_path", root_prim_path),
         ("volume_prim_path", volume_prim_path),
@@ -779,15 +803,21 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
             )
     if not field_name:
         raise ValueError("simulation_cache.field_name must not be empty.")
+    if not velocity_field_name:
+        raise ValueError("simulation_cache.velocity_field_name must not be empty.")
     if sampling_distance <= 0:
         raise ValueError("simulation_cache.sampling_distance must be positive.")
     if not 1 <= resolution_scale <= 100:
         raise ValueError("simulation_cache.resolution_scale must be in 1..100.")
     if not 1 <= rendering_samples <= 32:
         raise ValueError("simulation_cache.rendering_samples must be in 1..32.")
-
+    if filter_mode not in {"nearest", "trilinear"}:
+        raise ValueError(
+            "simulation_cache.filter_mode must be 'nearest' or 'trilinear'."
+        )
     return SimulationCacheConfig(
         enabled=enabled,
+        runtime_mode=runtime_mode,
         wrapper_path=wrapper_path,
         root_prim_path=root_prim_path,
         volume_prim_path=volume_prim_path,
@@ -795,6 +825,9 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         sampling_distance=sampling_distance,
         resolution_scale=resolution_scale,
         rendering_samples=rendering_samples,
+        filter_mode=filter_mode,
+        velocity_vti_path=velocity_vti_path,
+        velocity_field_name=velocity_field_name,
     )
 
 

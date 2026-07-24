@@ -61,6 +61,8 @@ These Houdini-solved airflow caches are physically inspired, presentation-grade 
 
 The Blackwell Monitoring Suite runtime is intentionally cache/live agnostic: the same visualisation layer can consume precomputed VDB sequences for Demo Mode or externally generated live volumetric/vector-field data for a future Live Mode. In that sense, cached airflow plays the same role as synthetic telemetry: it proves the pipeline now without narrowing the final digital-twin architecture.
 
+A static Houdini velocity-field capability proof now runs in the suite through VTI, Kit-CAE and NVIDIA Flow: the structured `PointData/vel` field drives native runtime smoke/advection while preserving the full server presentation. Temporal field playback and final airflow presentation remain staged follow-up work.
+
 → [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
 → See also: [Rack Airflow Budget](./docs/knowledge_base/rack_airflow_budget.md)

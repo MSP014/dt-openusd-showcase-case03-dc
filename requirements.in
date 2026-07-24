@@ -24,4 +24,5 @@ pytest-cov
 pydantic
 numpy
 scipy
+vtk==9.6.2
 usd-core
