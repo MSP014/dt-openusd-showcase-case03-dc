@@ -31,7 +31,7 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
-> **Want a real Digital Twin?** The `Data Provider` exposes a standard interface — swap the synthetic generator for any real monitoring feed (HWiNFO64, Grafana, MQTT, Kafka) and the entire visualisation layer works unchanged. This is the designed upgrade path for anyone adapting this Tech Pack to their own infrastructure.
+> **External telemetry ready by design.** BMS currently ships with a synthetic telemetry provider. Its normalised telemetry model and planned provider boundary allow future source-specific adapters to map systems such as Grafana, Prometheus, MQTT, Kafka, NVML, Redfish, or other monitoring feeds into the same BMS data model. Production connectors for those systems are intentionally outside the current Case 03 scope.
 
 ## Blackwell Monitoring Suite 0.4.0 Runtime Preview
 

@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-24
+**Last Updated**: 2026-07-25
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -62,23 +62,34 @@ Jira tracking:
 
 Stage 6 current checkpoint:
 
-- The full BMS server scene without airflow has a measured `67-69 FPS`
-  baseline at `1280 x 720` on the RTX 3080. The direct
-  OpenVDB/RTX-IndeX playback route has been closed after the final fast-path
-  test remained around `2.4 FPS`.
+- The full BMS server scene without airflow has a measured `78.6 FPS`
+  pre-Attach baseline at `1280 x 720` on the RTX 3080. The direct
+  OpenVDB/RTX-IndeX playback route remains closed after its final fast-path
+  test stayed around `2.4 FPS`.
 - **STATIC VTI -> KIT-CAE -> FLOW CAPABILITY PROOF: PASSED.** The real Houdini
   velocity asset `server_airflow_velocity_1014.vti` drives native NVIDIA Flow
-  smoke through Kit-CAE in BMS. The static full-server scene runs at about
-  `47-48 FPS` at `1280 x 720` on the RTX 3080; applying a Flow presentation
-  change briefly dips to about `41 FPS` before returning to the steady range.
-- The source VTI is `184 x 72 x 232` at approximately `0.00255 m` spacing.
-  Its authoritative header origin is restored as a BMS session-layer
-  compatibility opinion before downstream CAE/Flow setup, so
-  `dataset_bbox_bounds_match=True` while the source VTI and authored server
-  USD remain unchanged.
-- The remaining Stage 6 work is bounded: finish minimal static presentation
-  tuning, prove three temporal VTI frames, choose a temporal sampling cadence,
-  validate performance, and decide the production visualisation mode.
+  smoke through Kit-CAE in BMS.
+- **3-FRAME TEMPORAL VTI -> KIT-CAE -> FLOW PROOF: PASSED.** The one live
+  `FlowSimulation` and one `DataSetEmitter` continue while composed
+  `PointData/vel` resolves `1014 -> 1015 -> 1016`: three distinct assets and
+  SHA-256 identities, two successful transitions, `operator_ready_all=True`,
+  `origin_match_all=True`, `grid_match_all=True`,
+  `timeline_continuous=True`, and `Flow resets=0`.
+- The three-frame fixture uses the resampled `184 x 72 x 232` VTI grid at
+  approximately `0.00255 m` spacing. Its authoritative header origin is
+  restored as a BMS session-layer compatibility opinion before downstream
+  CAE/Flow setup, leaving the source VTI and authored server USD unchanged.
+- Static Flow presentation is selected: attenuation 8, Medium opacity, and a
+  deep-blue/cyan through cyan to pale-cyan/near-white tracer ramp. The BMS
+  default applies this look during Attach; diagnostic bounds remain available
+  through an explicit control but are hidden by default.
+- The temporary Stage 6 performance logger records the Kit HUD statistics.
+  After settle, ten-second averages were `48.8-52.5 FPS` through 70 seconds of
+  attached temporal playback, with GPU memory around `4.6-4.7 GiB` and process
+  RSS around `6.1-6.4 GiB`.
+- The remaining Stage 6 work is bounded: test temporal sampling cadence, then
+  make the production playback and storage decision. No longer sequence is
+  warranted until the cadence probes provide that evidence.
 
 The local authoring and tooling environment still uses `case03-env`. Blackwell
 Monitoring Suite runtime code, however, runs inside Kit's Python environment
@@ -93,17 +104,29 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Resume `DC-45` with a deliberately bounded presentation pass: compare
-attenuation `8` / Medium opacity against the current `10` / Medium baseline,
-then replace the thermal blue/yellow/red ramp with one engineering airflow
-tracer ramp from deep blue/cyan through cyan to pale cyan/near-white. Do not
-alter the VTI, origin/spacing, CAE bridge, Flow grid, injector physics, or
-velocity coupling during this pass.
+The next Stage 6 gate is a temporal sampling cadence probe, not further static
+Flow tuning. The three-frame temporal runtime contract is already proved, and
+the temporary performance logger remains enabled for the rest of Stage 6.
 
-Then prove exactly three consecutive VTI frames, determine the lowest viable
-source update cadence, and run the full performance proof. Keep all Case 03
-changes inside BMS or the private Houdini project; the three local NVIDIA
-repositories remain read-only references.
+Start with exactly three resampled runtime VTI frames at source stride `Delta 5`:
+`server_airflow_velocity_1014.vti`,
+`server_airflow_velocity_1019.vti`, and
+`server_airflow_velocity_1024.vti`. Preserve the current `184 x 72 x 232`
+grid, origin/spacing compatibility repair, Kit-CAE bridge, one Flow simulation,
+one DataSetEmitter, velocity coupling, smoke setup, and selected airflow look.
+First produce those three resampled VTI fixtures with the private Houdini
+exporter; do not alter the current BMS temporal fixture or configuration until
+they are available. The proof must again show three distinct asset hashes, two
+successful source transitions, a continuous timeline, and zero Flow resets while
+the performance logger captures the settled interval statistics.
+
+This first probe tests source-frame distance and visible airflow response with
+the current one-second hold per selected source. It is not yet a claim about the
+final real-time source-to-BMS playback mapping or final storage count; those are
+separate decisions. If `Delta 5` remains readable and the runtime evidence
+passes, repeat with `1014 -> 1024 -> 1034` (`Delta 10`). Only then choose the
+least frequent source stride that preserves the intended airflow character and
+plan a longer Houdini export.
 
 Do not expand Stage 6 into Engineering X-Ray, workload-to-cache state binding,
 velocity trails, heatmaps, automatic workload cycling, rack/data-hall
@@ -119,14 +142,15 @@ milestones. A minor `0.x.0` release represents a coherent operator-visible
 capability, not an automatic increment for every delivery stage. Patch releases
 such as `0.3.1` are reserved for fixes to an already released milestone.
 
-The current runtime is `0.3.0`, released after Stage 5. Future release
+The current runtime build is `0.4.0` on the Stage 6-8 release track. The
+last completed release milestone is `0.3.0`, after Stage 5. Future release
 milestones are:
 
 | Completed through | Version | Runtime milestone |
 | :--- | :--- | :--- |
 | Stage 4 | `0.2.0` | Telemetry and CPU fan motion. |
-| Stage 5 | `0.3.0` | Full Server Runtime; current release. |
-| Stage 8 | `0.4.0` | Cached Simulation Review. |
+| Stage 5 | `0.3.0` | Full Server Runtime; last completed release. |
+| Stage 8 | `0.4.0` | Cached Simulation Review; current release track. |
 | Stage 10 | `0.5.0` | Server Visual Analytics. |
 | Stage 12 | `0.6.0` | Multi-Scale Runtime Foundation. |
 | Stage 14 | `0.7.0` | Multi-Scale Visual Analytics. |
@@ -293,7 +317,7 @@ from making future capabilities sound like v0.1 requirements.
 | Synthetic telemetry values | Stage 3 | Implemented |
 | Fan motion driven by telemetry | Stage 4 | Implemented |
 | Full server / Blackwell Rig stage | Stage 5 | Implemented |
-| Cached simulation visual layer | Stage 6 | Future |
+| Cached simulation visual layer | Stage 6 | In Progress |
 | Engineering X-Ray visual mode | Stage 7 | Future |
 | Workload-to-cache state binding | Stage 8 | Future |
 | Server velocity trail foundation | Stage 9 | Future |
@@ -564,7 +588,7 @@ configs/blackwell_monitoring_suite.toml
 Minimum runtime fields:
 
 - `app.name`: `Blackwell Monitoring Suite`
-- `app.version`: `0.3.0`
+- `app.version`: `0.4.0`
 - `paths.app_root`: `src/blackwell_monitoring_suite`
 - `paths.asset_root`: `../../assets/_external`
 - `assets.default_asset_id`: `blackwell_rig_gb203`
@@ -977,31 +1001,24 @@ VTI is regenerated.
 
 Historical proof ladder and decision gates:
 
-1. **Complete the static field proof in BMS.** Use the existing
-   `server_airflow_velocity_1014.vti` integration probe. First capture the
-   `BMS Kit-CAE spatial diagnostics` line after attach, compare server/VTI/Flow
-   bounds, and derive the coordinate registration. Validate it transiently in
-   BMS if necessary, then bake it in the private exporter and regenerate the
-   VTI. Then verify that the post-bind `FieldSelectionAPI("velocities")` target
-   resolves to `vel` and live smoke visibly follows the field through the
-   server. Hide or remove the diagnostic bounding-box helper from the review
-   frame once it has served this purpose. PASS only when geometry
-   depth/compositing is correct and the velocity response is visually
-   unambiguous.
-2. **Temporal proof.** Use exactly three consecutive VTI frames. Determine
-   whether the active dataset/emitter can update in place, must be recreated,
-   or should use a Kit-CAE temporal dataset path; verify that existing smoke
-   reacts without visible discontinuities or stalls.
-3. **Sampling proof.** One raw velocity frame is about `35.2 MiB`; 800 raw
-   frames would be about `27.5 GiB` before VTI compression. Do not assume a
-   50 FPS VTI update rate. Compare every `1`, `2`, `4`, and `8` source frames
-   after the temporal proof, then choose the least frequent update cadence that
-   preserves the readable Houdini airflow character.
-4. **Performance proof.** Only after the above passes, validate full-server
-   compositing, camera interaction, frame-change behaviour, and the Stage 6
-   target of about 25 FPS at 1280 x 720. Do not treat the current static
-   screenshot FPS as a result, and do not export the full 800-frame loop until
-   this decision gate has passed.
+1. **Static field proof: PASSED.** The registered
+   `server_airflow_velocity_1014.vti` reaches `PointData/vel`, produces the
+   internal Flow velocity payload, and visibly drives native smoke with the
+   server in the review frame. Diagnostic bounds are now hidden by default.
+2. **Three-frame temporal proof: PASSED.** The native Kit-CAE VTK delegate
+   advances the time-sampled `fileNames` field in place from `1014 -> 1015 ->
+   1016`; the existing Flow simulation and DataSetEmitter remain live, and the
+   proof logs distinct asset hashes, continuous time, and zero resets.
+3. **Sampling cadence proof: next.** Treat source-frame stride and BMS playback
+   hold duration as independent variables. Start with the `Delta 5` fixture
+   `1014 -> 1019 -> 1024`, then test `Delta 10` only if the first probe passes.
+   Do not infer a final real-time playback rate or 800-frame storage count from
+   either three-frame probe.
+4. **Performance and production decision: later Stage 6 gate.** The attached
+   temporal fixture already sustains ten-second averages of `48.8-52.5 FPS` at
+   `1280 x 720` on the RTX 3080, above the approximately 25 FPS threshold.
+   Repeat the same evidence collection for the chosen cadence before selecting
+   the production visualisation and export plan.
 
 #### Static VTI -> Kit-CAE -> Flow Capability Proof - 2026-07-24
 
@@ -1061,24 +1078,51 @@ Closed diagnostic hypotheses:
 - spatial origin mismatch; and
 - Flow smoke-emitter failure.
 
+#### Three-Frame Temporal VTI -> Kit-CAE -> Flow Proof - 2026-07-25
+
+**Status: PASSED.** BMS now proves time-varying Houdini velocity data through
+one continuous Kit-CAE/Flow runtime chain:
+
+```text
+server_airflow_velocity_1014.vti
+  -> server_airflow_velocity_1015.vti
+  -> server_airflow_velocity_1016.vti
+  -> time-sampled PointData/vel
+  -> one DataSetEmitter
+  -> one FlowSimulation
+  -> native smoke response
+```
+
+Temporal evidence:
+
+- `Frames observed: 1014 -> 1015 -> 1016`; three unique asset paths and three
+  unique SHA-256 identities.
+- `Successful transitions: 2`, `operator_ready_all=True`,
+  `origin_match_all=True`, `grid_match_all=True`, and
+  `timeline_continuous=True`.
+- `Flow resets: 0`: the active FlowSimulation and DataSetEmitter paths stay
+  stable through both source updates.
+- The post-proof sampler continues to resolve the cyclic temporal sources while
+  Flow remains attached. Across 10.5-70.5 seconds, the measured ten-second
+  FPS averages were `48.8-52.5` at `1280 x 720` on the RTX 3080; GPU memory
+  stayed near `4.6-4.7 GiB` and process RSS near `6.1-6.4 GiB`.
+
 Remaining Stage 6 proof ladder:
 
-1. **Finish minimal static presentation tuning.** Compare attenuation `8` /
-   Medium opacity with the current `10` / Medium baseline and add one
-   engineering airflow-tracer colour ramp. Do not alter simulation data,
-   physics, Flow grid settings, velocity coupling, or emitter placement.
-2. **Temporal proof.** Use exactly three consecutive VTI frames. Determine
-   whether the active dataset/emitter can update in place, must be recreated,
-   or should use a Kit-CAE temporal dataset path; verify that existing smoke
-   reacts without visible discontinuities or stalls.
-3. **Sampling proof.** One raw velocity frame is about `35.2 MiB`; 800 raw
-   frames would be about `27.5 GiB` before VTI compression. Compare every `1`,
-   `2`, `4`, and `8` source frames after the temporal proof, then choose the
-   least frequent update cadence that preserves the readable airflow character.
-4. **Performance proof and production decision.** Validate full-server
-   compositing, camera interaction, frame-change behaviour, and the Stage 6
-   target of about 25 FPS at `1280 x 720`; then select the production
-   visualisation mode. Do not export the full 800-frame loop before this gate.
+1. **Temporal sampling cadence: next.** Use the exact three-frame `Delta 5`
+   fixture `1014 -> 1019 -> 1024` without changing the runtime architecture.
+   Preserve the current per-source hold for this probe, capture the same proof
+   and performance evidence, and assess both visible response and transition
+   readability. This is a source-stride experiment, not a final playback-rate
+   or storage decision.
+2. **Wider stride only after evidence.** If `Delta 5` passes, repeat with
+   `1014 -> 1024 -> 1034` (`Delta 10`) under the same runtime contract. Select
+   a longer export cadence only after comparing the actual visual and runtime
+   evidence from both probes.
+3. **Production decision.** Define the final source-time-to-BMS-time mapping,
+   longer-sequence storage budget, and production visualisation mode only after
+   a chosen stride has passed the same full-server evidence gate. Do not export
+   the full 800-frame loop before that decision.
 
 ### Stage 7 - Engineering X-Ray Visual Mode Slice
 

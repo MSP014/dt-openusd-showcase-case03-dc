@@ -120,45 +120,47 @@
 - **Status:** Open
 - **Severity:** Medium (Architecture / Integration)
 - **Description:**
-  - Blackwell Monitoring Suite intentionally starts Stage 3 with a synthetic
-    telemetry provider. This proves that telemetry values update inside the Kit
-    runtime without depending on Houdini playback or a real data centre.
-  - The broader product concept still includes a future provider boundary where
-    a real monitoring feed can replace the synthetic generator. Possible
-    sources include HWiNFO-like local sensors, NVIDIA/NVML, Redfish, IPMI,
-    PMBus, smart PDUs, UPS or branch-circuit monitors, Grafana, MQTT, Kafka, or
-    another monitoring system.
-  - This is technical debt because the provider contract should exist before
-    Stage 3 hardcodes UI assumptions, but implementing real adapters now would
-    expand scope into hardware access, credentials, polling cadence, stale data,
-    source-specific naming, unit normalisation, topology mapping, and measured
-    versus estimated value semantics.
+  - Case 03 intentionally ships with `SyntheticTelemetryProvider`. It is a
+    valid demonstration and simulation source, not a temporary stub to remove.
+  - `TelemetrySnapshot` defines the normalised telemetry model, but the runtime
+    currently constructs the synthetic provider directly. A common provider
+    interface, source adapters, provider factory, and production connectors are
+    not implemented.
 - **Context:**
   - The active Stage 3 scope remains the first-layer node telemetry subset
     documented in `docs/knowledge_base/bms_telemetry_contract.md`.
-  - The future live-provider superset is documented now so the synthetic
-    provider, UI, and data model do not paint BMS into a toy-only corner.
   - The current Case 03 node uses a consumer/workstation PSU, so PSU contribution
     is represented as `psu_load_estimate_w` in Stage 3. Server-class PSU
     measurements such as input/output power, status, temperature, or PSU fan RPM
     are valid only when future hardware or external monitoring feeds actually
     provide them.
 - **Why Deferred:**
-  - Stage 3 only needs changing synthetic values visible in BMS.
-  - Real provider adapters require access to actual monitoring systems and a
-    security/credential boundary that does not exist in the current local Kit
-    slice.
-  - Deferring implementation protects the roadmap while preserving a clear
-    architecture path for future live-mode work.
-- **Action Plan:**
-  - [x] Document the Stage 3 synthetic subset and future live-provider superset.
-  - [ ] Keep Stage 3 implementation behind a provider boundary.
-  - [ ] Add source, unit, timestamp, topology, and data-quality semantics to the
-        runtime telemetry model.
-  - [ ] Add live provider adapters only when a real source and validation path
-        are selected.
-  - [ ] Ensure live adapters degrade safely when sensors are missing, stale, or
-        estimated.
+  - Full production adapters for Grafana, Prometheus, Kafka, MQTT, and similar
+    systems are not required for the Case 03 PoC. They introduce credentials,
+    authentication, polling versus streaming, reconnects, network topology,
+    source schemas, security, retry/backoff, and vendor-specific APIs.
+  - A single substitution proof is more valuable here than several incomplete
+    vendor integrations.
+- **Future Implementation Plan:**
+  - [ ] Define an explicit provider interface or `Protocol` that returns the
+        same normalised `TelemetrySnapshot`. BMS consumers must not know the
+        source of the data.
+  - [ ] Keep `SyntheticTelemetryProvider` as one complete implementation of
+        that contract for autonomous Case 03 demonstration and simulation.
+  - [ ] Add one minimal reference external provider, such as
+        `JsonTelemetryProvider` or `RecordedTelemetryProvider`, using a JSON
+        fixture or replay stream. It must map external telemetry into
+        `TelemetrySnapshot` and leave the visualisation layer unchanged.
+  - [ ] Select the provider through configuration and a factory, rather than
+        hard-wiring `SyntheticTelemetryProvider(...)` in the extension.
+  - [ ] Make source adapters responsible for source metric-name mapping to BMS
+        metric IDs, unit normalisation, receive and source timestamps, topology
+        mapping, missing or malformed data, stale data, and quality semantics:
+        `measured`, `estimated`, `derived`, `synthetic`, `stale`, `unavailable`.
+        Source-specific naming must not leak into UI or visualisation code.
+  - [ ] Add contract tests proving `SyntheticTelemetryProvider` and the
+        reference provider both return `TelemetrySnapshot`, and that the same
+        BMS consumer works with both.
 
 ## 2. Resolved Technical Debt
 

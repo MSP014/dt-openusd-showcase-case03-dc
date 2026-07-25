@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from blackwell_monitoring_suite.app.commands import RuntimeController
+from blackwell_monitoring_suite.app.commands import (
+    FlowPerformanceSample,
+    RuntimeController,
+)
 from blackwell_monitoring_suite.app.config import RuntimeConfig
 from blackwell_monitoring_suite.app.simulation_cache import (
     run_simulation_cache_preflight,
@@ -65,6 +68,21 @@ def _test_cache_config() -> tuple[RuntimeConfig, object]:
     )
 
 
+def test_flow_performance_statistics_use_viewport_samples() -> None:
+    samples = [
+        FlowPerformanceSample(0.0, 50.0, 20.0, 4.5, 6.0, "1014.vti"),
+        FlowPerformanceSample(0.5, 40.0, 25.0, 4.6, 6.1, "1015.vti"),
+        FlowPerformanceSample(1.0, 60.0, 16.0, 4.7, 6.2, "1016.vti"),
+    ]
+
+    statistics = RuntimeController._flow_performance_statistics(samples)
+
+    assert statistics["fps_average"] == 50.0
+    assert statistics["fps_minimum"] == 40.0
+    assert statistics["fps_maximum"] == 60.0
+    assert abs(float(statistics["frame_time_average"]) - 20.333333333) < 1e-8
+
+
 def test_airflow_cache_preflight_accepts_a_hydrated_wrapper(tmp_path):
     _, cache_config = _test_cache_config()
     wrapper_path = _write_test_cache_wrapper(tmp_path)
@@ -124,7 +142,7 @@ def test_airflow_cache_authors_only_session_layer_native_volume_reference(tmp_pa
     assert "OmniVolumeDensity.mdl" not in session_text
 
 
-def test_kit_cae_spatial_sanity_wireframes_show_dataset_and_server_bounds():
+def test_kit_cae_spatial_sanity_wireframes_are_hidden_by_default_and_toggle():
     from pxr import Gf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
@@ -144,10 +162,81 @@ def test_kit_cae_spatial_sanity_wireframes_show_dataset_and_server_bounds():
 
     assert dataset_wireframe.GetTypeName() == "BasisCurves"
     assert server_wireframe.GetTypeName() == "BasisCurves"
+    overlays_root = stage.GetPrimAtPath("/BMS_KitCAE/SpatialSanity")
+    flow_bounds = UsdGeom.Cube.Define(stage, "/BMS_KitCAE/BoundingBox")
+    assert (
+        UsdGeom.Imageable(overlays_root).ComputeVisibility() == UsdGeom.Tokens.invisible
+    )
+    assert RuntimeController._set_kit_cae_spatial_sanity_wireframes_visibility(
+        stage,
+        False,
+        UsdGeom,
+    )
+    assert (
+        UsdGeom.Imageable(flow_bounds).ComputeVisibility() == UsdGeom.Tokens.invisible
+    )
+    assert RuntimeController._set_kit_cae_spatial_sanity_wireframes_visibility(
+        stage,
+        True,
+        UsdGeom,
+    )
+    assert (
+        UsdGeom.Imageable(overlays_root).ComputeVisibility() == UsdGeom.Tokens.inherited
+    )
+    assert (
+        UsdGeom.Imageable(flow_bounds).ComputeVisibility() == UsdGeom.Tokens.inherited
+    )
+    assert RuntimeController._set_kit_cae_spatial_sanity_wireframes_visibility(
+        stage,
+        False,
+        UsdGeom,
+    )
+    assert (
+        UsdGeom.Imageable(overlays_root).ComputeVisibility() == UsdGeom.Tokens.invisible
+    )
     assert len(dataset_wireframe.GetAttribute("points").Get()) == 24
     assert len(server_wireframe.GetAttribute("points").Get()) == 24
     assert abs(dataset_wireframe.GetAttribute("widths").Get()[0] - 0.0015) < 1e-6
     assert abs(server_wireframe.GetAttribute("widths").Get()[0] - 0.003) < 1e-6
+
+
+def test_kit_cae_temporal_velocity_samples_author_three_vti_frames(tmp_path):
+    from pxr import Sdf, Usd, UsdGeom
+
+    stage = Usd.Stage.CreateInMemory()
+    field = UsdGeom.Xform.Define(stage, "/BMS_HoudiniVelocity/PointData/vel")
+    file_names_attr = field.GetPrim().CreateAttribute(
+        "fileNames",
+        Sdf.ValueTypeNames.AssetArray,
+    )
+
+    class FakeFieldArray:
+        def __init__(self, prim):
+            self._prim = prim
+
+        def GetFileNamesAttr(self):
+            return self._prim.GetAttribute("fileNames")
+
+    class FakeCaeVtk:
+        FieldArray = FakeFieldArray
+
+    paths = tuple(
+        tmp_path / f"server_airflow_velocity_{frame}.vti"
+        for frame in (1014, 1015, 1016)
+    )
+    time_codes = RuntimeController._author_kit_cae_temporal_velocity_samples(
+        field.GetPrim(),
+        paths,
+        50.0,
+        FakeCaeVtk,
+        Sdf,
+        Usd,
+    )
+
+    assert time_codes == (0.0, 50.0, 100.0)
+    assert [
+        file_names_attr.Get(Usd.TimeCode(time_code))[0].path for time_code in time_codes
+    ] == [path.as_posix() for path in paths]
 
 
 def test_kit_cae_vti_origin_compatibility_opinion_uses_session_layer():
@@ -228,7 +317,7 @@ def test_kit_cae_native_fuel_probe_disables_only_render_debug_overrides():
     assert render.GetPrim().IsValid()
 
 
-def test_kit_cae_flow_presentation_changes_only_ray_march_and_colormap_opacity():
+def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
     from pxr import Gf, Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
@@ -285,9 +374,9 @@ def test_kit_cae_flow_presentation_changes_only_ray_march_and_colormap_opacity()
         tuple(round(float(point[index]), 3) for index in range(3))
         for point in rgba_points
     ] == [
-        (0.2, 0.3, 0.8),
-        (1.0, 1.0, 0.0),
-        (0.7, 0.01, 0.14),
+        (0.015, 0.08, 0.3),
+        (0.0, 0.72, 0.88),
+        (0.82, 1.0, 1.0),
     ]
     assert (
         UsdGeom.Imageable(injector.GetPrim()).ComputeVisibility()
