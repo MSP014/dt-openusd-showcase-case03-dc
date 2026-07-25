@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from blackwell_monitoring_suite.app.config import RuntimeConfig
-from blackwell_monitoring_suite.app.usd_preflight import run_usd_preflight
+from digital_twin_runtime_suite.app.config import RuntimeConfig
+from digital_twin_runtime_suite.app.usd_preflight import run_usd_preflight
 
 
 def test_runtime_usd_preflight_accepts_configured_full_rig_contract():
     config = RuntimeConfig.load(
-        Path("configs/blackwell_monitoring_suite.toml"),
+        Path("configs/digital_twin_runtime_suite.toml"),
         apply_local_overrides=False,
     )
     stage = _make_contract_stage()
@@ -45,7 +45,7 @@ def test_runtime_usd_preflight_reports_stage_contract_mismatches():
 
 def test_runtime_usd_preflight_reports_missing_configured_prims():
     config = RuntimeConfig.load(
-        Path("configs/blackwell_monitoring_suite.toml"),
+        Path("configs/digital_twin_runtime_suite.toml"),
         apply_local_overrides=False,
     )
     stage = _make_contract_stage()

@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from blackwell_monitoring_suite.app.telemetry.config import (
+from digital_twin_runtime_suite.app.telemetry.config import (
     NUMERIC_METRICS,
     TUNING_METRICS,
     TelemetryConfig,
 )
 
-CONFIG_PATH = Path("src/blackwell_monitoring_suite/configs/telemetry_provider.toml")
+CONFIG_PATH = Path("src/digital_twin_runtime_suite/configs/telemetry_provider.toml")
 
 
 def test_packaged_telemetry_config_loads_all_modes_and_metrics():

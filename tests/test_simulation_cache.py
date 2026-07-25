@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from blackwell_monitoring_suite.app.commands import (
+from digital_twin_runtime_suite.app.commands import (
     FlowPerformanceSample,
     RuntimeController,
 )
-from blackwell_monitoring_suite.app.config import RuntimeConfig
-from blackwell_monitoring_suite.app.simulation_cache import (
+from digital_twin_runtime_suite.app.config import RuntimeConfig
+from digital_twin_runtime_suite.app.simulation_cache import (
     run_simulation_cache_preflight,
 )
 
@@ -58,7 +58,7 @@ def Xform "sim"
 
 def _test_cache_config() -> tuple[RuntimeConfig, object]:
     config = RuntimeConfig.load(
-        Path("configs/blackwell_monitoring_suite.toml"),
+        Path("configs/digital_twin_runtime_suite.toml"),
         apply_local_overrides=False,
     )
     return config, replace(
@@ -124,8 +124,8 @@ def test_airflow_cache_authors_only_session_layer_native_volume_reference(tmp_pa
         UsdShade,
     )
 
-    volume = stage.GetPrimAtPath("/BMS_Runtime/Airflow/test")
-    field = stage.GetPrimAtPath("/BMS_Runtime/Airflow/test/density")
+    volume = stage.GetPrimAtPath("/DTRS_Runtime/Airflow/test")
+    field = stage.GetPrimAtPath("/DTRS_Runtime/Airflow/test/density")
 
     assert volume.GetTypeName() == "Volume"
     assert field.GetTypeName() == "OpenVDBAsset"
@@ -135,7 +135,7 @@ def test_airflow_cache_authors_only_session_layer_native_volume_reference(tmp_pa
     assert (
         volume.GetCustomDataByKey("nvindex.renderSettings")["filterMode"] == "nearest"
     )
-    assert stage.GetPrimAtPath("/BMS_Runtime/Looks/AirflowIndex").IsValid()
+    assert stage.GetPrimAtPath("/DTRS_Runtime/Looks/AirflowIndex").IsValid()
     session_text = stage.GetSessionLayer().ExportToString()
     assert "references = @" in session_text
     assert "outputs:nvindex:volume.connect" in session_text
@@ -157,13 +157,13 @@ def test_kit_cae_spatial_sanity_wireframes_are_hidden_by_default_and_toggle():
         UsdGeom,
     )
 
-    dataset_wireframe = stage.GetPrimAtPath("/BMS_KitCAE/SpatialSanity/DatasetBounds")
-    server_wireframe = stage.GetPrimAtPath("/BMS_KitCAE/SpatialSanity/ServerBounds")
+    dataset_wireframe = stage.GetPrimAtPath("/DTRS_KitCAE/SpatialSanity/DatasetBounds")
+    server_wireframe = stage.GetPrimAtPath("/DTRS_KitCAE/SpatialSanity/ServerBounds")
 
     assert dataset_wireframe.GetTypeName() == "BasisCurves"
     assert server_wireframe.GetTypeName() == "BasisCurves"
-    overlays_root = stage.GetPrimAtPath("/BMS_KitCAE/SpatialSanity")
-    flow_bounds = UsdGeom.Cube.Define(stage, "/BMS_KitCAE/BoundingBox")
+    overlays_root = stage.GetPrimAtPath("/DTRS_KitCAE/SpatialSanity")
+    flow_bounds = UsdGeom.Cube.Define(stage, "/DTRS_KitCAE/BoundingBox")
     assert (
         UsdGeom.Imageable(overlays_root).ComputeVisibility() == UsdGeom.Tokens.invisible
     )
@@ -204,7 +204,7 @@ def test_kit_cae_temporal_velocity_samples_author_three_vti_frames(tmp_path):
     from pxr import Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
-    field = UsdGeom.Xform.Define(stage, "/BMS_HoudiniVelocity/PointData/vel")
+    field = UsdGeom.Xform.Define(stage, "/DTRS_HoudiniVelocity/PointData/vel")
     file_names_attr = field.GetPrim().CreateAttribute(
         "fileNames",
         Sdf.ValueTypeNames.AssetArray,
@@ -243,7 +243,7 @@ def test_kit_cae_vti_origin_compatibility_opinion_uses_session_layer():
     from pxr import Gf, Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
-    dataset = UsdGeom.Xform.Define(stage, "/BMS_HoudiniVelocity/VTKImageData")
+    dataset = UsdGeom.Xform.Define(stage, "/DTRS_HoudiniVelocity/VTKImageData")
     origin_attr = dataset.GetPrim().CreateAttribute(
         "cae:vtk:origin",
         Sdf.ValueTypeNames.Float3,
@@ -280,22 +280,22 @@ def test_kit_cae_native_fuel_probe_disables_only_render_debug_overrides():
     from pxr import Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
-    environment = UsdGeom.Xform.Define(stage, "/BMS_KitCAE/FlowSimulation")
+    environment = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/FlowSimulation")
     offscreen = UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowOffscreen",
+        "/DTRS_KitCAE/FlowSimulation/flowOffscreen",
     )
     render = UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowRender",
+        "/DTRS_KitCAE/FlowSimulation/flowRender",
     )
     debug_volume = UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowOffscreen/debugVolume",
+        "/DTRS_KitCAE/FlowSimulation/flowOffscreen/debugVolume",
     )
     ray_march = UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowRender/rayMarch",
+        "/DTRS_KitCAE/FlowSimulation/flowRender/rayMarch",
     )
     debug_volume.GetPrim().CreateAttribute(
         "enableVelocityAsDensity",
@@ -321,18 +321,18 @@ def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
     from pxr import Gf, Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
-    environment = UsdGeom.Xform.Define(stage, "/BMS_KitCAE/FlowSimulation")
+    environment = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/FlowSimulation")
     UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowOffscreen",
+        "/DTRS_KitCAE/FlowSimulation/flowOffscreen",
     )
     UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowRender",
+        "/DTRS_KitCAE/FlowSimulation/flowRender",
     )
     ray_march = UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowRender/rayMarch",
+        "/DTRS_KitCAE/FlowSimulation/flowRender/rayMarch",
     )
     ray_march.GetPrim().CreateAttribute(
         "attenuation",
@@ -340,7 +340,7 @@ def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
     ).Set(3.0)
     colormap = UsdGeom.Xform.Define(
         stage,
-        "/BMS_KitCAE/FlowSimulation/flowOffscreen/colormap",
+        "/DTRS_KitCAE/FlowSimulation/flowOffscreen/colormap",
     )
     colormap.GetPrim().CreateAttribute(
         "rgbaPoints",
@@ -352,8 +352,8 @@ def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
             Gf.Vec4f(0.7, 0.01, 0.14, 1.0),
         ]
     )
-    injector = UsdGeom.Mesh.Define(stage, "/BMS_KitCAE/SmokeInjector")
-    emitter = UsdGeom.Xform.Define(stage, "/BMS_KitCAE/SmokeInjector/EmitterSphere")
+    injector = UsdGeom.Mesh.Define(stage, "/DTRS_KitCAE/SmokeInjector")
+    emitter = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/SmokeInjector/EmitterSphere")
     stage.SetEditTarget(stage.GetSessionLayer())
 
     alphas = RuntimeController._author_kit_cae_flow_presentation(

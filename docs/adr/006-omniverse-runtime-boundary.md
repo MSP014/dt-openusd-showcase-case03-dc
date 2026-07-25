@@ -10,8 +10,7 @@ Case 03 separates Houdini/OpenUSD asset authoring from the Omniverse runtime
 layer.
 
 Houdini produces authored USD assets, textures, material assignments, camera
-data, simulation caches, and review-ready scene packages. **Blackwell
-Monitoring Suite** consumes those outputs as a staged Omniverse Kit runtime.
+data, simulation caches, and review-ready scene packages. **Digital Twin Runtime Suite** consumes those outputs as a staged Omniverse Kit runtime.
 
 The runtime must not become a workstation-bound monolithic scene. It should be
 structured around explicit contracts so the project remains reproducible,
@@ -27,7 +26,7 @@ splitting are outside the current staged build.
 The Case 03 Omniverse application must be designed as a contract-driven runtime
 layer, not as a local-only scene file.
 
-Blackwell Monitoring Suite v0.1 consumes a deliberately small contract:
+Digital Twin Runtime Suite v0.1 consumes a deliberately small contract:
 
 - application title and version;
 - application source root;
@@ -74,7 +73,7 @@ asset package are stable.
 
 ## Consequences
 
-- Blackwell Monitoring Suite has a clear boundary: it presents and reviews
+- Digital Twin Runtime Suite has a clear boundary: it presents and reviews
   hydrated USD assets, but does not perform Houdini-side asset authoring or
   repair.
 - Asset hydration from ADR005 becomes part of the runtime contract.

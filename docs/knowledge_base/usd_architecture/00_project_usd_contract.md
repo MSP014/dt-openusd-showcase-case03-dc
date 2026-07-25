@@ -1,7 +1,7 @@
 # 00. Case 03 USD Architecture Baseline
 
 This document defines the current OpenUSD baseline for Case 03 assets and the
-long-term target architecture for Blackwell Monitoring Suite.
+long-term target architecture for Digital Twin Runtime Suite.
 
 The baseline applies now. The long-term target applies only when the staged
 runtime reaches the server, rack, data hall, telemetry, cache, or scale features
@@ -24,10 +24,10 @@ that require it.
 
 ## 2. Current Runtime Root
 
-Blackwell Monitoring Suite v0.2.0 uses:
+Digital Twin Runtime Suite v0.2.0 uses:
 
-- application source root: `src/blackwell_monitoring_suite/`;
-- runtime config: `configs/blackwell_monitoring_suite.toml`;
+- application source root: `src/digital_twin_runtime_suite/`;
+- runtime config: `configs/digital_twin_runtime_suite.toml`;
 - external asset root from that source root: `../../assets/_external/`;
 - first asset id: `noctua_nh_d9_tr5_sp6`;
 - first asset path under asset root: `usd/cpu_fan/cpu_fan.usd`.
@@ -63,15 +63,14 @@ When scale requires them:
 
 ## 5. Export and Runtime Mutation Boundary
 
-Houdini exports should describe clean, static authored assets. Blackwell
-Monitoring Suite should apply runtime state on top of those assets.
+Houdini exports should describe clean, static authored assets. Digital Twin Runtime Suite should apply runtime state on top of those assets.
 
 For runtime-addressable moving or monitored parts:
 
 - export separate prims for parts that need independent control;
 - keep stable, readable prim paths;
 - set pivots at the physical rotation or transform origin before export;
-- do not bake DCC timeline animation into parts that BMS will drive from
+- do not bake DCC timeline animation into parts that DTRS will drive from
   telemetry.
 
 For fans, this means the blade geometry should be a separate addressable prim

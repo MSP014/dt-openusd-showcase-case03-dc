@@ -11,15 +11,15 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and the first five completed Blackwell Monitoring Suite
+external asset layout, and the first five completed Digital Twin Runtime Suite
 slices through the full-server runtime review milestone.
 
 Current decisions already made:
 
-- The public application name is **Blackwell Monitoring Suite**.
-- The first build was **Blackwell Monitoring Suite v0.1**.
-- The current runtime build is **Blackwell Monitoring Suite v0.4.0**.
-- BMS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
+- The public application name is **Digital Twin Runtime Suite**.
+- The first build was **Digital Twin Runtime Suite v0.1**.
+- The current runtime build is **Digital Twin Runtime Suite v0.4.0**.
+- DTRS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
   default through the `blackwell_rig_gb203` runtime asset entry.
 - The shared left sidebar now contains `Telemetry` and `Config` tabs without
   changing the viewport footprint.
@@ -39,15 +39,15 @@ Current decisions already made:
   not alter the complete Houdini/USD assembly.
 - Heavy USD, texture, VDB, HDRI, and future runtime assets stay outside the
   source package and are hydrated through `assets/_external/`.
-- The application source root is `src/blackwell_monitoring_suite/`.
-- The first Kit extension id is `msp.bw.monitoring`.
+- The application source root is `src/digital_twin_runtime_suite/`.
+- The first Kit extension id is `msp.dtrs`.
 - The app should launch through Kit with a dedicated `.kit` application config.
 
 Jira tracking:
 
-- Runtime epic: `DC-38` - Blackwell Monitoring Suite Runtime.
+- Runtime epic: `DC-38` - Digital Twin Runtime Suite Runtime.
 - Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
-- Completed implementation task: `DC-40` - Stage 1 BMS v0.1 asset preview.
+- Completed implementation task: `DC-40` - Stage 1 DTRS v0.1 asset preview.
 - Completed implementation task: `DC-41` - Stage 2 Look Review Slice.
 - Completed implementation task: `DC-42` - Stage 3 Synthetic Telemetry Slice.
 - Completed implementation task: `DC-43` - Stage 4 Telemetry Driven Motion
@@ -62,13 +62,13 @@ Jira tracking:
 
 Stage 6 current checkpoint:
 
-- The full BMS server scene without airflow has a measured `78.6 FPS`
+- The full DTRS server scene without airflow has a measured `78.6 FPS`
   pre-Attach baseline at `1280 x 720` on the RTX 3080. The direct
   OpenVDB/RTX-IndeX playback route remains closed after its final fast-path
   test stayed around `2.4 FPS`.
 - **STATIC VTI -> KIT-CAE -> FLOW CAPABILITY PROOF: PASSED.** The real Houdini
   velocity asset `server_airflow_velocity_1014.vti` drives native NVIDIA Flow
-  smoke through Kit-CAE in BMS.
+  smoke through Kit-CAE in DTRS.
 - **3-FRAME TEMPORAL VTI -> KIT-CAE -> FLOW PROOF: PASSED.** The one live
   `FlowSimulation` and one `DataSetEmitter` continue while composed
   `PointData/vel` resolves `1014 -> 1015 -> 1016`: three distinct assets and
@@ -77,10 +77,10 @@ Stage 6 current checkpoint:
   `timeline_continuous=True`, and `Flow resets=0`.
 - The three-frame fixture uses the resampled `184 x 72 x 232` VTI grid at
   approximately `0.00255 m` spacing. Its authoritative header origin is
-  restored as a BMS session-layer compatibility opinion before downstream
+  restored as a DTRS session-layer compatibility opinion before downstream
   CAE/Flow setup, leaving the source VTI and authored server USD unchanged.
 - Static Flow presentation is selected: attenuation 8, Medium opacity, and a
-  deep-blue/cyan through cyan to pale-cyan/near-white tracer ramp. The BMS
+  deep-blue/cyan through cyan to pale-cyan/near-white tracer ramp. The DTRS
   default applies this look during Attach; diagnostic bounds remain available
   through an explicit control but are hidden by default.
 - The temporary Stage 6 performance logger records the Kit HUD statistics.
@@ -91,13 +91,11 @@ Stage 6 current checkpoint:
   make the production playback and storage decision. No longer sequence is
   warranted until the cadence probes provide that evidence.
 
-The local authoring and tooling environment still uses `case03-env`. Blackwell
-Monitoring Suite runtime code, however, runs inside Kit's Python environment
+The local authoring and tooling environment still uses `case03-env`. Digital Twin Runtime Suite runtime code, however, runs inside Kit's Python environment
 when launched through `kit.exe`. Any Python dependency used by runtime code must
 therefore be available to Kit, not only to `case03-env`.
 
-No separate Conda environment is required for the current Blackwell Monitoring
-Suite runtime.
+No separate Conda environment is required for the current Digital Twin Runtime Suite runtime.
 If a later stage introduces external service processes, automation, or a web
 control surface outside Kit, the project should define that environment
 deliberately and update README, ADRs, plans, and tooling references in one pass.
@@ -115,14 +113,14 @@ Start with exactly three resampled runtime VTI frames at source stride `Delta 5`
 grid, origin/spacing compatibility repair, Kit-CAE bridge, one Flow simulation,
 one DataSetEmitter, velocity coupling, smoke setup, and selected airflow look.
 First produce those three resampled VTI fixtures with the private Houdini
-exporter; do not alter the current BMS temporal fixture or configuration until
+exporter; do not alter the current DTRS temporal fixture or configuration until
 they are available. The proof must again show three distinct asset hashes, two
 successful source transitions, a continuous timeline, and zero Flow resets while
 the performance logger captures the settled interval statistics.
 
 This first probe tests source-frame distance and visible airflow response with
 the current one-second hold per selected source. It is not yet a claim about the
-final real-time source-to-BMS playback mapping or final storage count; those are
+final real-time source-to-DTRS playback mapping or final storage count; those are
 separate decisions. If `Delta 5` remains readable and the runtime evidence
 passes, repeat with `1014 -> 1024 -> 1034` (`Delta 10`). Only then choose the
 least frequent source stride that preserves the intended airflow character and
@@ -137,7 +135,7 @@ the cached playback surface is stable.
 
 ## Runtime Versioning
 
-Blackwell Monitoring Suite uses semantic versioning for public runtime
+Digital Twin Runtime Suite uses semantic versioning for public runtime
 milestones. A minor `0.x.0` release represents a coherent operator-visible
 capability, not an automatic increment for every delivery stage. Patch releases
 such as `0.3.1` are reserved for fixes to an already released milestone.
@@ -172,7 +170,7 @@ Versioning rules:
   defects, and reports consistent version metadata.
 
 Use stable runtime filenames such as
-`blackwell_monitoring_suite.kit` and `blackwell_monitoring_suite.toml`. Keep the
+`digital_twin_runtime_suite.kit` and `digital_twin_runtime_suite.toml`. Keep the
 semantic version in metadata instead of renaming runtime paths at every minor
 release. The current runtime already follows this stable path contract.
 
@@ -262,7 +260,7 @@ implemented behaviour and which parts are explicitly future scope.
 
 ### Delivery Mode
 
-Blackwell Monitoring Suite ships and launches as an Omniverse Kit application.
+Digital Twin Runtime Suite ships and launches as an Omniverse Kit application.
 
 The first screen should be the usable viewer, not a landing page or a generic
 project launcher. The operator should immediately see the RTX viewport, review
@@ -306,7 +304,7 @@ from making future capabilities sound like v0.1 requirements.
 
 | Capability | First Stage | Current Status |
 | :--- | :--- | :--- |
-| Dedicated BMS app launch | Stage 1 | Implemented |
+| Dedicated DTRS app launch | Stage 1 | Implemented |
 | Runtime TOML config loading | Stage 1 | Implemented |
 | Hydrated asset path resolution | Stage 1 | Implemented |
 | Noctua CPU cooler USD load | Stage 1 | Implemented |
@@ -363,19 +361,19 @@ target architecture or future scope, not completed application behaviour.
 
 ## v0.1 vs Later Canonical Stage
 
-Blackwell Monitoring Suite v0.1 is an asset preview slice. Its job is to prove
+Digital Twin Runtime Suite v0.1 is an asset preview slice. Its job is to prove
 that the standalone Kit application can launch, read config, resolve the
 hydrated asset package, open the configured Noctua NH-D9 TR5-SP6 USD asset, and
 show reliable runtime status.
 
 The canonical Case 03 stage is a later milestone. Full server, rack, and data
 hall loading should not be treated as v0.1 scope. The plan keeps those targets
-visible because they define where BMS is going, but they become implementation
+visible because they define where DTRS is going, but they become implementation
 requirements only when the staged roadmap reaches them.
 
 ## Application Name Decision
 
-The application is named **Blackwell Monitoring Suite**.
+The application is named **Digital Twin Runtime Suite**.
 
 This name covers the whole staged path: the first Kit runtime, synthetic
 telemetry, future workload/state switching, server/rack/data hall navigation,
@@ -386,20 +384,20 @@ engineering value.
 
 ## Runtime Implementation Decisions
 
-The first staged build was **Blackwell Monitoring Suite v0.1**. The current
-runtime build is **Blackwell Monitoring Suite v0.4.0**.
+The first staged build was **Digital Twin Runtime Suite v0.1**. The current
+runtime build is **Digital Twin Runtime Suite v0.4.0**.
 
 Fixed names and identifiers:
 
-- Public app title: `Blackwell Monitoring Suite`
+- Public app title: `Digital Twin Runtime Suite`
 - Version: `0.4.0`
-- Kit extension id: `msp.bw.monitoring`
-- Python package root: `blackwell_monitoring_suite`
-- Runtime config: `configs/blackwell_monitoring_suite.toml`
-- Application source root: `src/blackwell_monitoring_suite/`
+- Kit extension id: `msp.dtrs`
+- Python package root: `digital_twin_runtime_suite`
+- Runtime config: `configs/digital_twin_runtime_suite.toml`
+- Application source root: `src/digital_twin_runtime_suite/`
 
 The runtime config uses TOML. This matches Kit's own `.kit` and
-`extension.toml` configuration style and allows comments. BMS runtime code
+`extension.toml` configuration style and allows comments. DTRS runtime code
 must read it from Kit's Python environment when launched through `kit.exe`;
 `case03-env` remains the development/tooling environment, not the runtime
 Python environment for the Kit application.
@@ -407,7 +405,7 @@ Python environment for the Kit application.
 For the current runtime, paths in runtime config are resolved from the
 application source root
 unless a later launch contract explicitly overrides that root. Because the
-source root is `src/blackwell_monitoring_suite/`, the default hydrated asset
+source root is `src/digital_twin_runtime_suite/`, the default hydrated asset
 root is expected to resolve to `../../assets/_external/` from that root.
 
 The first asset catalog entry is:
@@ -418,7 +416,7 @@ The first asset catalog entry is:
 - Kind: `usd_stage`
 
 Heavy USD, VDB, texture, and HDRI payloads stay under `assets/_external/`. They
-must not be copied into `src/blackwell_monitoring_suite/`. The application code
+must not be copied into `src/digital_twin_runtime_suite/`. The application code
 may keep a lightweight asset catalog, but that catalog only records ids, labels,
 relative paths, and metadata.
 
@@ -429,33 +427,33 @@ The v0.1 source tree should not introduce separate `viewport/`, `stage/`, or
 The first extension source should live under the application package tree:
 
 ```text
-src/blackwell_monitoring_suite/ext/msp.bw.monitoring/
+src/digital_twin_runtime_suite/ext/msp.dtrs/
 ```
 
 That folder is treated as a Kit extension folder by pointing Kit at
-`src/blackwell_monitoring_suite/ext` as an extension search path. The extension
+`src/digital_twin_runtime_suite/ext` as an extension search path. The extension
 itself owns its `config/extension.toml`, docs, and Python module files.
 
 A locally generated Kit App Template may remain a local read-only
-reference/build workflow example only. Blackwell Monitoring Suite should be
+reference/build workflow example only. Digital Twin Runtime Suite should be
 developed as its own standalone application code path, with its own app config,
 extension id, runtime config, and launch story.
 
-The dedicated BMS `.kit` application config must add
-`src/blackwell_monitoring_suite/ext` as an extension search path and must enable
-`msp.bw.monitoring`. If the extension imports shared application modules from
-`src/blackwell_monitoring_suite/`, the app config or extension startup code must
+The dedicated DTRS `.kit` application config must add
+`src/digital_twin_runtime_suite/ext` as an extension search path and must enable
+`msp.dtrs`. If the extension imports shared application modules from
+`src/digital_twin_runtime_suite/`, the app config or extension startup code must
 make that package importable in Kit's Python environment.
 
-Blackwell Monitoring Suite v0.1 should launch directly through Kit with its own
+Digital Twin Runtime Suite v0.1 should launch directly through Kit with its own
 application `.kit` file:
 
 ```text
-kit.exe <path-to-blackwell-monitoring-suite-app>.kit
+kit.exe <path-to-digital-twin-runtime-suite-app>.kit
 ```
 
 `repo.bat launch` may remain useful inside a generated Kit App Template during
-development, but the public launch contract should be the standalone BMS app
+development, but the public launch contract should be the standalone DTRS app
 config passed to `kit.exe`, not a generic template-app selection flow.
 
 ---
@@ -501,7 +499,7 @@ stable status, and no distracting authoring clutter.
 
 The default operator flow should be:
 
-1. Launch Blackwell Monitoring Suite.
+1. Launch Digital Twin Runtime Suite.
 2. Load or confirm the configured v0.1 asset.
 3. Inspect the asset in the RTX viewport.
 4. Check load/render/runtime status when the flow needs it.
@@ -575,21 +573,21 @@ diagnostics surface, not in the main operator flow.
 ### Runtime Contract
 
 The current runtime contract is still intentionally small. It only needs enough
-configuration to launch BMS, resolve the hydrated asset package, load the
+configuration to launch DTRS, resolve the hydrated asset package, load the
 configured review stage, configure look-review controls, and connect the
 synthetic telemetry and config-backed motion bindings.
 
 The config file is:
 
 ```text
-configs/blackwell_monitoring_suite.toml
+configs/digital_twin_runtime_suite.toml
 ```
 
 Minimum runtime fields:
 
-- `app.name`: `Blackwell Monitoring Suite`
+- `app.name`: `Digital Twin Runtime Suite`
 - `app.version`: `0.4.0`
-- `paths.app_root`: `src/blackwell_monitoring_suite`
+- `paths.app_root`: `src/digital_twin_runtime_suite`
 - `paths.asset_root`: `../../assets/_external`
 - `assets.default_asset_id`: `blackwell_rig_gb203`
 - `assets.entries.noctua_nh_d9_tr5_sp6.label`: `Noctua NH-D9 TR5-SP6`
@@ -623,8 +621,7 @@ of the v0.1 implementation unless a later stage pulls them in.
 
 ## Staged Delivery Roadmap
 
-The application should be built in small slices that keep Blackwell Monitoring
-Suite runnable after each step. Each stage carries its own completion rule; no
+The application should be built in small slices that keep Digital Twin Runtime Suite runnable after each step. Each stage carries its own completion rule; no
 separate "first slice acceptance" ceremony is needed.
 
 At the end of each stage, update the linked Jira task before starting the next
@@ -640,7 +637,7 @@ Detailed plans for completed runtime stages are preserved in
 
 | Stage | Jira | Status | Detailed plan |
 | :--- | :--- | :--- | :--- |
-| Stage 1 - Asset Preview | `DC-40` | Implemented | [Stage 1 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-1---blackwell-monitoring-suite-v01-asset-preview-slice) |
+| Stage 1 - Asset Preview | `DC-40` | Implemented | [Stage 1 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-1---digital-twin-runtime-suite-v01-asset-preview-slice) |
 | Stage 2 - Look Review | `DC-41` | Implemented | [Stage 2 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-2---look-review-slice) |
 | Stage 3 - Synthetic Telemetry | `DC-42` | Implemented | [Stage 3 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-3---synthetic-telemetry-slice) |
 | Stage 4 - Telemetry Driven Motion | `DC-43` | Implemented | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
@@ -665,7 +662,7 @@ playback.
 Required scope:
 - **Runtime airflow evidence:** Implement playback or visual mapping of baked
   Houdini airflow/thermal simulation data, using direct OpenVDB playback only
-  if it is performant enough for the full BMS scene. If direct density playback
+  if it is performant enough for the full DTRS scene. If direct density playback
   fails the frame-budget target, use a velocity-driven runtime visualisation or
   a streamlines/hybrid route backed by the same Houdini simulation source.
 - **Measured acceptance:** Treat the route as shippable only when the full
@@ -698,7 +695,7 @@ Confirmed cache and USD repairs:
   removes the missing field-type metadata that makes runtime interpretation
   ambiguous.
 - Per-frame `filePath` time samples resolve to all 800 local VDB files.
-  BMS preflight accepts the wrapper and verifies the range, field, type, and
+  DTRS preflight accepts the wrapper and verifies the range, field, type, and
   file samples before attach.
 - A manually specified volume extent was used for the export instead of a full
   frame-range extent scan.  The latter took about two minutes for a single
@@ -718,11 +715,11 @@ Runtime work completed so far:
   layer, leaving the authored USD and VDB assets untouched.
 - Added the Kit dependency `omni.rtx.index_composite` and installed its release
   extension with the official Kit repository tooling.  The extension loads at
-  BMS startup together with `omni.index.usd` and `omni.index.renderer`.
+  DTRS startup together with `omni.index.usd` and `omni.index.renderer`.
 - Replaced the unsupported MDL proxy attempt with the official native NVIDIA
   IndeX composition shape: `nvindex:composite`, `omni:rtx:skip`, native IndeX
   material output, colormap, and compositing settings are authored transiently
-  in the BMS session layer.
+  in the DTRS session layer.
 - Focused Python tests pass locally (`16 passed`) for wrapper preflight and the
   authored session-layer contract.  This is structural validation only, not
   proof that a volume is visible in the GPU viewport.
@@ -735,13 +732,13 @@ Rejected paths and observed failures:
   `volume_density_texture` type `3D` versus VDB type `1D`, then crashed in the
   native rendering path.  This proxy must not be restored.
 - The first native IndeX compositing attempt loads its dependencies but still
-  produces no visible airflow.  The live BMS viewport also changes its selected
+  produces no visible airflow.  The live DTRS viewport also changes its selected
   renderer to `Scientific (IndeX)` rather than staying on the intended RTX
   compositor path.  This is the current blocker, not a solved renderer setup.
 
 Resume point and diagnostic order:
 
-1. Capture and inspect the live BMS session layer immediately after Attach:
+1. Capture and inspect the live DTRS session layer immediately after Attach:
    reference, composed `Volume`, `OpenVDBAsset`, material binding, IndeX
    attributes, and current timeline time must be checked in the running Kit
    process rather than inferred from unit tests.
@@ -749,11 +746,11 @@ Resume point and diagnostic order:
    keep the viewport on RTX while NVIDIA IndeX compositing is enabled.  Do not
    reintroduce `set_hd_engine("index")` or any MDL VDB proxy.
 3. Reproduce the official compositing fixture with one local airflow VDB frame
-   in the same Kit release.  Compare its session/stage opinions with the BMS
+   in the same Kit release.  Compare its session/stage opinions with the DTRS
    authored ones to isolate renderer configuration from wrapper playback.
 4. Once one frame is visible, validate native time-sampled `filePath` playback
    over several distant frames before tuning opacity, colour, sampling distance,
-   or the BMS presentation.
+   or the DTRS presentation.
 5. Treat any GPU crash, black proxy, or no-volume result as a renderer-contract
    finding and preserve the relevant Kit log before changing Houdini exports.
 
@@ -765,7 +762,7 @@ but it is not yet fast enough for showreel capture.
 Verified runtime result:
 
 - The native RTX / NVIDIA IndeX compositing path can render the original Houdini
-  `density` OpenVDB sequence inside the BMS viewport while keeping the server
+  `density` OpenVDB sequence inside the DTRS viewport while keeping the server
   geometry visible and the camera interactive. This proves that the repaired
   wrapper and the session-layer composition contract are viable.
 - The original cache is not a usable playback payload: its 800 source frames
@@ -790,7 +787,7 @@ checkpoint. It is retained as evidence only: the final IndeX fast-path A/B
 failed, so direct `OpenVDBAsset`/RTX-IndeX playback and further VDB resampling
 are closed for Stage 6.
 
-1. The original 800-frame `.vdb` cache remained untouched; the local BMS
+1. The original 800-frame `.vdb` cache remained untouched; the local DTRS
    override was restored to its original wrapper before the test launch.
 2. Houdini `VDB Resample` with `mode = voxelsizeonly`, linear filtering, and
    `voxel size = 0.00255` (2x the original `0.001275`) created a separate
@@ -798,14 +795,14 @@ are closed for Stage 6.
    `1001-1030` at 25 FPS.
 3. A one-frame proof at this resolution produced a valid `.vdb` of 4.7 MiB,
    versus roughly 33 MiB for the source frame. The historical next session
-   validated this 30-frame `.vdb` wrapper in BMS before the route was closed.
+   validated this 30-frame `.vdb` wrapper in DTRS before the route was closed.
 4. No full 400-frame proxy was generated, the master cache was not modified,
    and NanoVDB was not retried through `OpenVDBAsset` before the A/B result.
 
 #### Implementation Checkpoint - 2026-07-20 Long Pit Stop
 
 Status: active investigation. Stage 6 is **not delivered**. Cached airflow is
-visually playable in BMS, but its current animated volume path is not viable
+visually playable in DTRS, but its current animated volume path is not viable
 for showreel capture.
 
 Current measured state:
@@ -822,12 +819,12 @@ Current measured state:
   warning. Renaming the sequence to `1001-1400` and correcting the wrapper's
   `fieldDataType` also allowed time-sampled playback to advance. Neither
   change materially improved animated performance.
-- The BMS GPU profile measured approximately `328.6 ms` for a frame while the
+- The DTRS GPU profile measured approximately `328.6 ms` for a frame while the
   volume is playing, or about 3 FPS. With no active airflow cache, the same
   review scene is about 24 FPS. The volume/RTX-IndeX composition path is
   therefore the dominant cost; the source-frame disk size is not sufficient
   evidence that ordinary VDB sequence playback will meet the capture target.
-- The current BMS IndeX quality settings are `resolutionScale = 25`,
+- The current DTRS IndeX quality settings are `resolutionScale = 25`,
   `renderingSamples = 1`, `filterMode = trilinear`, and
   `samplingDistance = 0.012`. The sampling distance is about 4.7 test-cache
   voxels. The profiler records a total GPU duration only, so it does not yet
@@ -854,7 +851,7 @@ the absence of simulation data and not only the VDB file size. Direct density
 playback through `OpenVDBAsset` and RTX/NVIDIA IndeX is now treated as a final
 fast-path check, not as the route to rescue at any cost.
 
-A no-airflow BMS baseline captured on 2026-07-23 shows the full Blackwell Rig
+A no-airflow DTRS baseline captured on 2026-07-23 shows the full Blackwell Rig
 server review scene running at about 67-69 FPS at 1280 x 720 on the RTX 3080,
 with frame time around 14.5-14.8 ms, approximately 3.1 GiB of GPU memory used,
 and approximately 5.3-5.4 GiB of process memory used. This confirms that the
@@ -864,7 +861,7 @@ path.
 
 Baseline and route order:
 
-1. **Preserve the verified BMS frame budget.** Treat the 67-69 FPS no-airflow
+1. **Preserve the verified DTRS frame budget.** Treat the 67-69 FPS no-airflow
    baseline as the control measurement before changing airflow routes. Record
    the active renderer/settings with the next performance capture, but do not
    spend Stage 6 time on broad baseline tuning unless later changes regress the
@@ -872,7 +869,7 @@ Baseline and route order:
    airflow, restore the baseline before judging any airflow route.
 2. **IndeX fast-path A/B failed on 2026-07-23.** The existing test VDB sequence
    was run with `filterMode = nearest`, `samplingDistance = 0.0255`, 25 percent
-   resolution scale, and one sample. The full BMS scene measured about
+   resolution scale, and one sample. The full DTRS scene measured about
    `2.38-2.44 FPS` (`410 ms` frame time), with no meaningful improvement over
    the prior approximately 3 FPS result. The captured GPU profile identifies a
    single `RTX Rendering` block of about `312 ms`; it confirms that rendering
@@ -888,8 +885,8 @@ Baseline and route order:
    test NPY/NPZ velocity data. The proof must show that the runtime airflow
    follows the Houdini velocity field, reads as movement through the server,
    respects geometry depth/compositing, avoids visible frame-change stalls, and
-   keeps the full BMS scene near the 25 FPS target. The first VTI proof must
-   import a Case 03-owned vector field through BMS with the minimal compatible
+   keeps the full DTRS scene near the 25 FPS target. The first VTI proof must
+   import a Case 03-owned vector field through DTRS with the minimal compatible
    Kit-CAE VTK extensions loaded from the read-only reference checkout, verify
    that its three-component `vel` point data becomes a CAE vector field, and
    only then connect that field to a CAE Flow dataset emitter.
@@ -900,11 +897,11 @@ Baseline and route order:
    the static frame is already expensive or if sequence switching introduces
    visible stalls.
 5. **Hybrid fallback.** If volumetric smoke cannot meet the target, Stage 6
-   should ship interactive velocity-field engineering visualisation in BMS
+   should ship interactive velocity-field engineering visualisation in DTRS
    using streamlines or an equivalent lightweight airflow layer, while keeping
    high-fidelity Houdini density VDB evidence for offline cinematic render.
    This preserves the digital-twin value: Houdini remains the source
-   simulation, and BMS remains the interactive review surface.
+   simulation, and DTRS remains the interactive review surface.
 
 Do not spend more Stage 6 time on:
 
@@ -922,13 +919,13 @@ Do not spend more Stage 6 time on:
 `E:\omniverse_kit_cae` is an external NVIDIA Kit-CAE reference application.
 It may be built, launched, inspected, and used to run unmodified NVIDIA
 examples. It must not become a home for Case 03 scripts, converters, test
-datasets, generated output, or BMS modifications.
+datasets, generated output, or DTRS modifications.
 
 All public Case 03 artifacts for the Flow/CAE capability spike belong in this
 repository: VTI interchange assets, small reproducible test datasets, probe
-scripts, BMS integration code, and the resulting engineering documentation.
+scripts, DTRS integration code, and the resulting engineering documentation.
 The Houdini-side velocity exporter remains private production tooling inside
-the Houdini project: it depends on `hou.VDB` and is neither public BMS code nor
+the Houdini project: it depends on `hou.VDB` and is neither public DTRS code nor
 content for the Kit-CAE checkout. Kit-CAE may be invoked as an external
 runtime/reference; it is not a second authored project tree.
 
@@ -949,22 +946,22 @@ Confirmed evidence:
   than replaying a baked density cache.
 - The real Case 03 asset
   `assets/_external/vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti`
-  now imports through Kit-CAE inside BMS. Its `PointData/vel` array is accepted
-  as a three-component vector field, and BMS creates the official Kit-CAE
+  now imports through Kit-CAE inside DTRS. Its `PointData/vel` array is accepted
+  as a three-component vector field, and DTRS creates the official Kit-CAE
   bounding box, Flow environment, smoke injector, boundary emitter, and Flow
   DataSetEmitter without an attach-time exception.
-- The current Kit-CAE VTK importer copies into the stage root layer. The BMS
+- The current Kit-CAE VTK importer copies into the stage root layer. The DTRS
   probe therefore imports the asset at a top-level prim and keeps its transient
-  Flow objects separate; do not move that import under a session-only BMS
+  Flow objects separate; do not move that import under a session-only DTRS
   parent without replacing the importer behaviour.
-- The first BMS viewport proof was intentionally **not a pass**: Flow was live,
+- The first DTRS viewport proof was intentionally **not a pass**: Flow was live,
   but the VTI bounds and smoke injector are displaced from `/blackwell_rig`.
   The source VTI bounds are `(-0.93585, -0.01265, -2.17330)` to
   `(0.93075, 0.71155, 0.18290)`. Do not compensate by eye with an arbitrary
   scale or translation. Compare the logged VTI, server, and Flow world bounds,
   then author the measured registration transform at the correct boundary.
 - The initial Flow update warns that its DataSetEmitter has no selected fields
-  before BMS assigns the `velocities` target. Verify the post-bind target and
+  before DTRS assigns the `velocities` target. Verify the post-bind target and
   visible velocity response before treating the smoke sphere as evidence that
   `vel` is influencing Flow.
 - The real Houdini velocity source is an axis-aligned Vector3 VDB with
@@ -981,7 +978,7 @@ PRIVATE PRODUCTION
 Houdini .hip -> Vector3 VDB vel -> Houdini-side Python exporter -> VTI
 
 PUBLIC RUNTIME CONTRACT
-BMS-owned VTI -> Kit-CAE VTK importer -> CAE velocity field
+DTRS-owned VTI -> Kit-CAE VTK importer -> CAE velocity field
               -> NVIDIA Flow DataSetEmitter -> live smoke
 ```
 
@@ -992,11 +989,11 @@ origin semantics before treating spatial registration as complete. The public
 repository documents and consumes this interchange asset; it does not expose
 the private `.hip` or Houdini exporter implementation.
 
-Spatial registration ownership: a stable Houdini-to-BMS coordinate mapping is
+Spatial registration ownership: a stable Houdini-to-DTRS coordinate mapping is
 production data and must be baked by the private Houdini VDB -> VTI exporter
-into the VTI origin/direction/spacing representation. BMS consumes that
+into the VTI origin/direction/spacing representation. DTRS consumes that
 registered VTI without a magic per-asset correction. A temporary, documented
-BMS probe override is allowed only to validate the measured mapping before the
+DTRS probe override is allowed only to validate the measured mapping before the
 VTI is regenerated.
 
 Historical proof ladder and decision gates:
@@ -1009,7 +1006,7 @@ Historical proof ladder and decision gates:
    advances the time-sampled `fileNames` field in place from `1014 -> 1015 ->
    1016`; the existing Flow simulation and DataSetEmitter remain live, and the
    proof logs distinct asset hashes, continuous time, and zero resets.
-3. **Sampling cadence proof: next.** Treat source-frame stride and BMS playback
+3. **Sampling cadence proof: next.** Treat source-frame stride and DTRS playback
    hold duration as independent variables. Start with the `Delta 5` fixture
    `1014 -> 1019 -> 1024`, then test `Delta 10` only if the first probe passes.
    Do not infer a final real-time playback rate or 800-frame storage count from
@@ -1044,7 +1041,7 @@ Static proof evidence:
   `0.00255 m` spacing.
 - The DataSetEmitter reaches an internal populated `nanoVdbVelocities` payload;
   `coupleRateVelocity=120` and `operator_ready=True`. Timeline stepping and
-  the Flow/RTX runtime were verified in BMS.
+  the Flow/RTX runtime were verified in DTRS.
 - Native `NATIVE_FUEL` smoke is visible and follows the field with the full
   `/blackwell_rig` visible. The diagnostic smoke-injector mesh is hidden while
   its active Flow emitter remains in the scene.
@@ -1052,20 +1049,20 @@ Static proof evidence:
   RTX 3080. Applying a Flow presentation change briefly falls to about
   `41 FPS`, then returns to the measured steady range.
 - Reference parity is complete: `REFERENCE_FLOW_WORKS=True`,
-  `REFERENCE_IN_BMS_WORKS=True`, and `VTI_REFERENCE_IMPORT_WORKS=True`.
+  `REFERENCE_IN_DTRS_WORKS=True`, and `VTI_REFERENCE_IMPORT_WORKS=True`.
 
 Known compatibility issue - VTI ImageData origin:
 
-The current Kit-CAE/BMS integration imports a VTI with a valid non-zero header
+The current Kit-CAE/DTRS integration imports a VTI with a valid non-zero header
 origin as `ImageDataAPI.origin=(0,0,0)`. Before creating the BoundingBox or
-CAE/Flow objects, BMS authors a session-layer compatibility opinion that
+CAE/Flow objects, DTRS authors a session-layer compatibility opinion that
 restores the authoritative VTI header origin. The source VTI and the authored
 server USD asset are not modified. The current VTI is already in world scale:
 the old runtime `x0.25` and bounding-box-only spatial corrections were removed.
 The resulting check is `dataset_bbox_bounds_match=True`.
 
 The private Houdini VDB-to-VTI exporter remains the production owner of source
-interchange data. BMS consumes the VTI contract and retains only this narrow,
+interchange data. DTRS consumes the VTI contract and retains only this narrow,
 non-destructive compatibility shim until the Kit-CAE behaviour is understood
 or corrected upstream.
 
@@ -1074,13 +1071,13 @@ Closed diagnostic hypotheses:
 - invalid VTI or missing vector field;
 - CAE-to-Flow payload failure;
 - timeline stepping failure;
-- Flow/RTX or BMS runtime incompatibility;
+- Flow/RTX or DTRS runtime incompatibility;
 - spatial origin mismatch; and
 - Flow smoke-emitter failure.
 
 #### Three-Frame Temporal VTI -> Kit-CAE -> Flow Proof - 2026-07-25
 
-**Status: PASSED.** BMS now proves time-varying Houdini velocity data through
+**Status: PASSED.** DTRS now proves time-varying Houdini velocity data through
 one continuous Kit-CAE/Flow runtime chain:
 
 ```text
@@ -1119,7 +1116,7 @@ Remaining Stage 6 proof ladder:
    `1014 -> 1024 -> 1034` (`Delta 10`) under the same runtime contract. Select
    a longer export cadence only after comparing the actual visual and runtime
    evidence from both probes.
-3. **Production decision.** Define the final source-time-to-BMS-time mapping,
+3. **Production decision.** Define the final source-time-to-DTRS-time mapping,
    longer-sequence storage budget, and production visualisation mode only after
    a chosen stride has passed the same full-server evidence gate. Do not export
    the full 800-frame loop before that decision.
@@ -1422,7 +1419,7 @@ Jira: `DC-57`
 Release track: `1.0.0` (released after Stage 17 and the `1.0.0` release gate).
 
 After the Stage 1-16 feature set is available, refine the operator workflow and
-consolidate the final BMS interface. Stage 11 owns the scale-navigation commands
+consolidate the final DTRS interface. Stage 11 owns the scale-navigation commands
 and stable server, rack, and data-hall views; Stage 17 owns their final UI
 placement, interaction design, and presentation polish.
 
@@ -1523,7 +1520,7 @@ showing inside the application.
 - Houdini export automation.
 - Geometry, UV, material, or normal repair.
 - General runtime asset scanner or repair-oriented USD validator beyond the
-  narrow Stage 5 BMS preflight contract.
+  narrow Stage 5 DTRS preflight contract.
 - Built-in media recording or export tools.
 - External web control surface in the current staged build.
 - Embedded web UI inside the Kit window.

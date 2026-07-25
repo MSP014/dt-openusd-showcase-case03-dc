@@ -1,4 +1,4 @@
-from blackwell_monitoring_suite.app.kit_cae_flow_parity import diff_flow_snapshots
+from digital_twin_runtime_suite.app.kit_cae_flow_parity import diff_flow_snapshots
 
 
 def test_flow_parity_diff_separates_dataset_and_flow_differences():
@@ -16,10 +16,10 @@ def test_flow_parity_diff_separates_dataset_and_flow_differences():
         },
         "runtime_diagnostics": {"activeBlocks": 2},
     }
-    bms = {
-        "label": "bms",
+    dtrs = {
+        "label": "dtrs",
         "roles": {
-            "dataset": {"prim_path": "/BMS/dataset", "prim_type": "CaeDataSet"},
+            "dataset": {"prim_path": "/DTRS/dataset", "prim_type": "CaeDataSet"},
             "flow_simulate": {
                 "attributes": {
                     "densityCellSize": {"value": 0.05},
@@ -31,7 +31,7 @@ def test_flow_parity_diff_separates_dataset_and_flow_differences():
         "runtime_diagnostics": {"activeBlocks": 0},
     }
 
-    result = diff_flow_snapshots(reference, bms)
+    result = diff_flow_snapshots(reference, dtrs)
 
     assert any(
         difference["path"] == "flow_simulate.attributes.densityCellSize.value"

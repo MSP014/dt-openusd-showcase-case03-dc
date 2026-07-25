@@ -1,13 +1,13 @@
-# Case 03: Blackwell Monitoring Suite Concept
+# Case 03: Digital Twin Runtime Suite Concept
 
 > **Philosophy:** Reproducible Tech Pack - a staged Houdini/OpenUSD to
 > Omniverse runtime project that demonstrates authored hardware assets,
 > hydrated USD packaging, synthetic telemetry, cached engineering
-> visualization, and interactive review inside Blackwell Monitoring Suite.
+> visualization, and interactive review inside Digital Twin Runtime Suite.
 
 ## 1. Current Truth Boundary
 
-Blackwell Monitoring Suite is the public application name for the Case 03
+Digital Twin Runtime Suite is the public application name for the Case 03
 runtime.
 
 The current implementation path is staged:
@@ -31,7 +31,7 @@ behavior.
 
 ## 2. High-Level Concept
 
-**Project:** Blackwell Monitoring Suite, an Omniverse Kit application for the
+**Project:** Digital Twin Runtime Suite, an Omniverse Kit application for the
 Case 03 Data Center showreel.
 
 **Mission:** demonstrate a controlled review surface for a Blackwell-based data
@@ -112,7 +112,7 @@ preview and reliable runtime status.
 ### Layer 1: Houdini/OpenUSD Asset Factory
 
 Houdini remains responsible for modeling, UVs, materials, normals, LOD cleanup,
-and exported USD composition. Blackwell Monitoring Suite does not repair
+and exported USD composition. Digital Twin Runtime Suite does not repair
 geometry at runtime.
 
 ### Layer 2: Hydrated Asset Package
@@ -128,14 +128,14 @@ Git:
 
 Runtime paths must be relative or explicitly configurable.
 
-### Layer 3: Blackwell Monitoring Suite Runtime
+### Layer 3: Digital Twin Runtime Suite Runtime
 
 The runtime is a standalone Omniverse Kit application:
 
-- app title: `Blackwell Monitoring Suite`;
-- first extension id: `msp.bw.monitoring`;
-- source root: `src/blackwell_monitoring_suite/`;
-- current BMS config: `configs/blackwell_monitoring_suite.toml`;
+- app title: `Digital Twin Runtime Suite`;
+- first extension id: `msp.dtrs`;
+- source root: `src/digital_twin_runtime_suite/`;
+- current DTRS config: `configs/digital_twin_runtime_suite.toml`;
 - first asset id: `noctua_nh_d9_tr5_sp6`;
 - first USD asset path under asset root: `usd/cpu_fan/cpu_fan.usd`.
 
@@ -179,7 +179,7 @@ Future cache layers may include:
 - state-specific visual layers for workload previews.
 
 No runtime stage should claim cached simulation playback until real exported
-cache assets exist and Blackwell Monitoring Suite can load or enable them.
+cache assets exist and Digital Twin Runtime Suite can load or enable them.
 
 ## 9. USD Architecture Boundary
 
@@ -209,5 +209,5 @@ reaches those needs.
 - The CPU cooler USD currently exposes a named fan blade prim at
   `/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`; pivot and rotation
   axis should be checked during Stage 4 implementation.
-- Public documentation should describe the staged Blackwell Monitoring Suite
+- Public documentation should describe the staged Digital Twin Runtime Suite
   direction, not local template paths or workstation-only workflows.
