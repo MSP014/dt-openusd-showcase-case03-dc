@@ -4,15 +4,15 @@ from pathlib import Path
 import pytest
 
 # isort: off
-from blackwell_monitoring_suite.app.telemetry.config import TelemetryConfig
-from blackwell_monitoring_suite.app.telemetry.model import METRIC_UNITS
-from blackwell_monitoring_suite.app.telemetry.model import TELEMETRY_GROUPS
-from blackwell_monitoring_suite.app.telemetry.provider import SnapshotLatch
-from blackwell_monitoring_suite.app.telemetry.provider import SyntheticTelemetryProvider
+from digital_twin_runtime_suite.app.telemetry.config import TelemetryConfig
+from digital_twin_runtime_suite.app.telemetry.model import METRIC_UNITS
+from digital_twin_runtime_suite.app.telemetry.model import TELEMETRY_GROUPS
+from digital_twin_runtime_suite.app.telemetry.provider import SnapshotLatch
+from digital_twin_runtime_suite.app.telemetry.provider import SyntheticTelemetryProvider
 
 # isort: on
 
-CONFIG_PATH = Path("src/blackwell_monitoring_suite/configs/telemetry_provider.toml")
+CONFIG_PATH = Path("src/digital_twin_runtime_suite/configs/telemetry_provider.toml")
 
 
 class AdvancingClock:

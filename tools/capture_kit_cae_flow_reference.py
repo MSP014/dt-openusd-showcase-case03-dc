@@ -10,7 +10,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from blackwell_monitoring_suite.app.kit_cae_flow_parity import (  # noqa: E402
+from digital_twin_runtime_suite.app.kit_cae_flow_parity import (  # noqa: E402
     capture_flow_scene,
     write_flow_snapshot,
 )
@@ -62,7 +62,7 @@ async def capture_after_settle() -> None:
         paths=REFERENCE_PATHS,
     )
     output_path = write_flow_snapshot(snapshot, OUTPUT_PATH)
-    carb.log_warn(f"BMS Kit-CAE parity reference snapshot saved: {output_path}")
+    carb.log_warn(f"DTRS Kit-CAE parity reference snapshot saved: {output_path}")
 
 
 if not REFERENCE_SCRIPT.is_file():

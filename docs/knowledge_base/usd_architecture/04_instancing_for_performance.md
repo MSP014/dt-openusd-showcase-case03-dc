@@ -1,7 +1,7 @@
 # Guideline 04: Instancing for Performance
 
 Instancing is a future-scale optimization for repeated servers, racks, and
-other high-count assets. It is not required for Blackwell Monitoring Suite v0.1.
+other high-count assets. It is not required for Digital Twin Runtime Suite v0.1.
 
 ## 1. Current Baseline
 
@@ -36,7 +36,7 @@ Candidate approaches:
 - primvars on instance points;
 - authored per-instance attributes;
 - material parameters driven by runtime state;
-- external telemetry mapping in Blackwell Monitoring Suite.
+- external telemetry mapping in Digital Twin Runtime Suite.
 
 The exact approach becomes mandatory only when workload, telemetry, or scale
 navigation stages need it.

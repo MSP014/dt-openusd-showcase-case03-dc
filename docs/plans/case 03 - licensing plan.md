@@ -403,7 +403,7 @@ For every future Asset Pack release:
 2. Re-run the rights and third-party-content audit.
 3. Generate a fresh manifest and checksums.
 4. Confirm that the archive contains the matching licence version.
-5. Run the technical hydration and BMS smoke checks.
+5. Run the technical hydration and DTRS smoke checks.
 6. Publish an immutable archive rather than silently replacing an existing
    version.
 7. Record the archive URL, version, hash, licence version, and publication date.

@@ -1,6 +1,6 @@
 # Guideline 06: Custom Attributes and Telemetry
 
-Telemetry is a future Blackwell Monitoring Suite capability. It is not required
+Telemetry is a future Digital Twin Runtime Suite capability. It is not required
 for the v0.1 CPU cooler asset preview.
 
 ## 1. Current Baseline
@@ -40,7 +40,7 @@ When telemetry attributes are authored in Houdini:
   to it.
 
 If a future stage needs placeholder values at export time, author static values
-only. Do not animate these attributes in Houdini for BMS runtime behaviour.
+only. Do not animate these attributes in Houdini for DTRS runtime behaviour.
 
 Example placeholder intent:
 
@@ -70,15 +70,15 @@ state does not flicker frame to frame.
 ## 5. Fan RPM and Visual Rotation
 
 Fans should be exported as static, independently addressable prims with pivots
-centred on their rotation axes. Blackwell Monitoring Suite can then drive
+centred on their rotation axes. Digital Twin Runtime Suite can then drive
 rotation from telemetry while keeping the visual motion readable.
 
 The preferred export shape is a rotating blade or blower mesh under its own
 stable parent `Xform`, with that parent origin placed on the physical rotation
-axis. At runtime BMS validates the mesh topology first: high-valence hub poles
+axis. At runtime DTRS validates the mesh topology first: high-valence hub poles
 define the rotation axis, and the authored parent `Xform` is used directly only
 when that axis passes close to the parent's local origin. If the authored origin
-is missing or off-axis, BMS falls back to a non-destructive Session Layer pivot
+is missing or off-axis, DTRS falls back to a non-destructive Session Layer pivot
 stack around the topology-resolved axis. This keeps corrected Houdini exports
 cheap to animate while preserving compatibility with older component assets.
 
@@ -90,7 +90,7 @@ still preserving the real telemetry value for UI and state logic.
 
 ## 6. Runtime Direction
 
-Blackwell Monitoring Suite should treat telemetry as runtime data, not as a DCC
+Digital Twin Runtime Suite should treat telemetry as runtime data, not as a DCC
 timeline.
 
 The first telemetry target is simple:

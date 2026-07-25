@@ -1,6 +1,6 @@
 import pytest
 
-from blackwell_monitoring_suite.app.qled import (
+from digital_twin_runtime_suite.app.qled import (
     DIGIT_SEGMENTS,
     qled_state_from_temperature,
 )

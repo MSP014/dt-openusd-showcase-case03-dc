@@ -44,7 +44,7 @@ Use Solaris `Configure Primitive` where appropriate:
 
 Do this when the asset hierarchy is stable enough to justify the metadata.
 
-For parts that Blackwell Monitoring Suite will control independently, hierarchy
+For parts that Digital Twin Runtime Suite will control independently, hierarchy
 matters more than labels. Fans, GPU dies, VRAM chips, PSU internals, sensors,
 or other runtime-addressable pieces should not collapse into anonymous merged
 meshes. Give them stable names in Houdini before export so the resulting USD

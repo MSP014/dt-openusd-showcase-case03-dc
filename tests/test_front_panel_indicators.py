@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from blackwell_monitoring_suite.app.front_panel_indicators import (
+from digital_twin_runtime_suite.app.front_panel_indicators import (
     activity_blink_state,
     front_panel_indicator_state,
 )

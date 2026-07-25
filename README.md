@@ -1,4 +1,4 @@
-# Blackwell Monitoring Suite
+# Digital Twin Runtime Suite
 
 > [!WARNING]
 > **Work in Progress:** This project is currently under active development. Some links and assets may be placeholders.
@@ -7,17 +7,17 @@
 
 ## 📋 Project Overview
 
-**Blackwell Monitoring Suite** is the Case 03 runtime and technical showreel
+**Digital Twin Runtime Suite** is the Case 03 runtime and technical showreel
 application for presenting a high-density Blackwell inference data hall through
 hydrated OpenUSD assets, synthetic telemetry, and staged Omniverse runtime
 capabilities.
 
 A **Reproducible Tech Pack** demonstrating a portfolio-grade **L1 Digital Twin** visualisation prototype of an AI Inference Farm.
-The current repository exercises the production path from *Geometry Foundation
-→ Houdini Simulation Cache → USD/OpenVDB Packaging* into a runnable Omniverse
-application with asset review, look-review controls, and config-driven synthetic
-telemetry. Later telemetry-driven motion, simulation playback, and scale
-navigation remain staged runtime work.
+The current repository exercises authored geometry and Houdini velocity-field
+export in a runnable Omniverse application with asset review, look-review
+controls, config-driven synthetic telemetry, and a bounded Kit-CAE/Flow temporal
+proof. Further telemetry-to-airflow state binding and scale navigation remain
+staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -27,26 +27,26 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 >
 > → [📚 Knowledge Base Hub (Index)](./docs/knowledge_base/README.md) · [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
-Unlike traditional linear animation, this ecosystem is structured as a **State Machine**. Runtime telemetry drives interactive visual responses: precomputed airflow caches, streamlines, heatmaps, lighting, and HUD cues can switch by operational state instead of being locked to a fixed shot.
+Unlike traditional linear animation, this ecosystem is structured as a **State Machine**. Runtime telemetry already drives interactive visual responses, while telemetry-to-airflow cache selection, streamlines, heatmaps, lighting, and HUD cues remain staged extensions rather than fixed-shot animation.
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
-> **External telemetry ready by design.** BMS currently ships with a synthetic telemetry provider. Its normalised telemetry model and planned provider boundary allow future source-specific adapters to map systems such as Grafana, Prometheus, MQTT, Kafka, NVML, Redfish, or other monitoring feeds into the same BMS data model. Production connectors for those systems are intentionally outside the current Case 03 scope.
+> **External telemetry ready by design.** DTRS currently ships with a synthetic telemetry provider. Its normalised telemetry model and planned provider boundary allow future source-specific adapters to map systems such as Grafana, Prometheus, MQTT, Kafka, NVML, Redfish, or other monitoring feeds into the same DTRS data model. Production connectors for those systems are intentionally outside the current Case 03 scope.
 
-## Blackwell Monitoring Suite 0.4.0 Runtime Preview
+## Digital Twin Runtime Suite 0.4.0 Runtime Preview
 
 *Omniverse full-server runtime review with live synthetic node telemetry,
 configurable presentation controls, front-panel indicators, QLED temperature
-display, and cached OpenVDB airflow playback.*
+display, and temporal Houdini VTI velocity playback through Kit-CAE and NVIDIA Flow.*
 
 | Telemetry overview | Runtime configuration |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.4.0 - Telemetry overview](docs/img/bms_0.4.0/bms_0.4.0_01.png) | ![Blackwell Monitoring Suite 0.4.0 - Runtime configuration](docs/img/bms_0.4.0/bms_0.4.0_02.png) |
+| ![Digital Twin Runtime Suite 0.4.0 - Telemetry overview](docs/img/dtrs_0.4.0/dtrs_0.4.0_01.png) | ![Digital Twin Runtime Suite 0.4.0 - Runtime configuration](docs/img/dtrs_0.4.0/dtrs_0.4.0_02.png) |
 | *Full-server telemetry hierarchy and synthetic workload state* | *Config-driven camera, lighting, grid, and telemetry provider controls* |
 
 | Server presentation controls | Closed chassis review |
 | :---: | :---: |
-| ![Blackwell Monitoring Suite 0.4.0 - Server presentation controls](docs/img/bms_0.4.0/bms_0.4.0_03.png) | ![Blackwell Monitoring Suite 0.4.0 - Closed chassis review](docs/img/bms_0.4.0/bms_0.4.0_04.png) |
+| ![Digital Twin Runtime Suite 0.4.0 - Server presentation controls](docs/img/dtrs_0.4.0/dtrs_0.4.0_03.png) | ![Digital Twin Runtime Suite 0.4.0 - Closed chassis review](docs/img/dtrs_0.4.0/dtrs_0.4.0_04.png) |
 | *Runtime enclosure visibility and front-panel hinge controls* | *Closed server review with animated hinged front panel and active indicators* |
 
 → [Watch the server assembly preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
@@ -59,9 +59,14 @@ The current simulation pass turns the hero server from a static hardware model i
 
 These Houdini-solved airflow caches are physically inspired, presentation-grade qualitative proxies, not validated CFD results or a certified CFD validation study. They provide the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. The goal is to make intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
 
-The Blackwell Monitoring Suite runtime is intentionally cache/live agnostic: the same visualisation layer can consume precomputed VDB sequences for Demo Mode or externally generated live volumetric/vector-field data for a future Live Mode. In that sense, cached airflow plays the same role as synthetic telemetry: it proves the pipeline now without narrowing the final digital-twin architecture.
+DTRS currently consumes a three-frame, time-sampled Houdini VTI vector-field
+fixture through Kit-CAE and NVIDIA Flow. The structured `PointData/vel` field
+updates native runtime smoke/advection in one continuous Flow simulation, with
+the full server presentation preserved.
 
-A static Houdini velocity-field capability proof now runs in the suite through VTI, Kit-CAE and NVIDIA Flow: the structured `PointData/vel` field drives native runtime smoke/advection while preserving the full server presentation. Temporal field playback and final airflow presentation remain staged follow-up work.
+The Flow consumer is intentionally separated from source selection. This PoC
+proves VTI temporal substitution inside the runtime; it does not yet implement
+VDB cache playback, telemetry-to-cache state binding, or an external live feed.
 
 → [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
@@ -155,16 +160,16 @@ The system follows a strict separation of concerns:
 Houdini is the closed creative environment of this hybrid pipeline. Houdini project files (`.hip`) are **not distributed** — only the exported outputs are.
 
 * **Geometry**: Server Nodes, Racks, and Data Hall layouts modelled procedurally and exported as USD.
-* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, baked to **VDB caches**. Playback and visualisation of these caches is planned for the Blackwell Monitoring Suite runtime layer.
-* **Output**: Optimised USD assets (`.usda`, `.vdb`) prepared for runtime consumption by Blackwell Monitoring Suite.
+* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, exported as resampled VTI vector-field fixtures for the current Kit-CAE/Flow runtime proof. VDB caches remain private source data, not the current DTRS playback contract.
+* **Output**: Optimised USD assets (`.usda`, `.vdb`) prepared for runtime consumption by Digital Twin Runtime Suite.
 
 ### 2. Interactive Digital Twin Frontend (NVIDIA Omniverse)
 
 *The real-time visualisation layer and state machine.*
 
-* **Application**: **Blackwell Monitoring Suite**.
-* **Extension**: `msp.bw.monitoring`.
-* **Logic**: A robust State Machine that listens to the Python Data Provider, dynamically swapping pre-cached USD VariantSets or visual layers (simulation caches, vector streamlines, thermal heatmaps) based on the active operational state.
+* **Application**: **Digital Twin Runtime Suite**.
+* **Extension**: `msp.dtrs`.
+* **Logic**: A State Machine that consumes the Python Data Provider and drives current node presentation controls. Telemetry-to-cache state binding, vector streamlines, and thermal heatmaps remain later staged visual layers.
 * **UI**: Viewport-embedded HUD (`omni.ui.scene` overlay) for hierarchical LOD navigation (Hall → Rack → Node) and manual stress-test overrides.
 
 ---
@@ -218,17 +223,17 @@ To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) a
 
 ### 3. Running the App
 
-Blackwell Monitoring Suite v0.4.0 launches as a dedicated Omniverse Kit
+Digital Twin Runtime Suite v0.4.0 launches as a dedicated Omniverse Kit
 application config. The quickest local launch path is:
 
 ```powershell
-.\src\blackwell_monitoring_suite\start_bms.bat
+.\src\digital_twin_runtime_suite\start_dtrs.bat
 ```
 
-Use `.\src\blackwell_monitoring_suite\start_bms.bat --check` to verify the
+Use `.\src\digital_twin_runtime_suite\start_dtrs.bat --check` to verify the
 resolved Kit paths without launching the app.
 
-The launcher uses `BMS_KIT_RELEASE` or `KIT_RELEASE` when either environment
+The launcher uses `DTRS_KIT_RELEASE` or `KIT_RELEASE` when either environment
 variable is set. If neither is set, it searches the current drive for a built
 Kit App Template release directory.
 
@@ -238,13 +243,13 @@ Template release directory:
 ```powershell
 $kitRelease = "path\to\kit-app-template\_build\windows-x86_64\release"
 & "$kitRelease\kit\kit.exe" `
-  ".\src\blackwell_monitoring_suite\apps\blackwell_monitoring_suite.kit" `
+  ".\src\digital_twin_runtime_suite\apps\digital_twin_runtime_suite.kit" `
   --ext-folder "$kitRelease\exts" `
   --ext-folder "$kitRelease\extscache" `
   --ext-folder "$kitRelease\apps"
 ```
 
-The current runtime reads `configs/blackwell_monitoring_suite.toml`,
+The current runtime reads `configs/digital_twin_runtime_suite.toml`,
 resolves the hydrated asset package under `assets/_external/`, opens the
 configured Noctua NH-D9 TR5-SP6 CPU cooler asset in the RTX viewport, and
 applies the configured look-review lighting baseline.
@@ -252,7 +257,7 @@ applies the configured look-review lighting baseline.
 Stage 2 lighting uses the Config panel in the Kit UI. Its default HDRI is
 `assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr`; exposure,
 intensity, and dome XYZ rotation are runtime controls applied through a
-transient `/BMS_Runtime/Lighting` session-layer setup. The HDRI background can
+transient `/DTRS_Runtime/Lighting` session-layer setup. The HDRI background can
 be hidden from the primary viewport while preserving its lighting contribution.
 
 The current runtime includes the Stage 3 synthetic node telemetry provider and
@@ -282,7 +287,7 @@ and a Session Layer pivot-stack fallback for older exports.
 │   ├── plans/           # Actionable implementation guides
 │   │   └── case 03 - tech debt.md
 │   └── adr/             # Architecture Decision Records (e.g., 007 USD Pipeline)
-├── src/             # Blackwell Monitoring Suite runtime source
+├── src/             # Digital Twin Runtime Suite runtime source
 └── tools/           # Developer scripts (Jira integration, asset validation)
 ```
 
@@ -297,9 +302,9 @@ and a Session Layer pivot-stack fallback for older exports.
 
 ## 📜 Changelog
 
-* **Week of 20 July, 2026:** Advanced Blackwell Monitoring Suite v0.4.0 into an interactive full-server presentation layer with server enclosure visibility controls, hinged front-panel animation, QLED CPU-temperature display, front-panel activity indicators, focused UI-control tests, and refreshed runtime screenshots.
-* **Week of 13 July, 2026:** Completed topology repairs across the Blackwell Rig component set, delivered the Blackwell Monitoring Suite 0.3 full-server review candidate with static USD preflight and 11 config-backed fan bindings, clarified the qualitative airflow visualisation boundary, and defined a staged licensing and distribution plan for the public Asset Pack.
-* **Week of 6 July, 2026:** Delivered Blackwell Monitoring Suite 0.1 through its first three runtime slices, combining Omniverse asset and look review with config-driven synthetic telemetry, validated workload states, hardware-aware power and thermal modelling, focused provider tests, and public runtime evidence.
+* **Week of 20 July, 2026:** Advanced Digital Twin Runtime Suite v0.4.0 into an interactive full-server presentation layer with server enclosure visibility controls, hinged front-panel animation, QLED CPU-temperature display, front-panel activity indicators, focused UI-control tests, and refreshed runtime screenshots.
+* **Week of 13 July, 2026:** Completed topology repairs across the Blackwell Rig component set, delivered the Digital Twin Runtime Suite 0.3 full-server review candidate with static USD preflight and 11 config-backed fan bindings, clarified the qualitative airflow visualisation boundary, and defined a staged licensing and distribution plan for the public Asset Pack.
+* **Week of 6 July, 2026:** Delivered Digital Twin Runtime Suite 0.1 through its first three runtime slices, combining Omniverse asset and look review with config-driven synthetic telemetry, validated workload states, hardware-aware power and thermal modelling, focused provider tests, and public runtime evidence.
 * **Week of 29 June, 2026:** Advanced Case 03 from node-scale airflow proof toward rack-level production planning, added Omniverse MCP helper tooling, clarified the visualisation contract, and migrated the project baseline to Python 3.11.15.
 * **Week of 22 June, 2026:** Added the first Blackwell Rig airflow simulation preview, turning the 4U node into a reviewable airflow volume with chassis intake, rear exhaust, GPU/CPU/PSU massing, cable obstructions, viewport review frames, and a linked video preview. Successfully exported the single-node Blackwell Rig airflow simulation cache to the `..\assets\_external\vdb\server_airflow_vdb` directory and the USD wrapper to the `..\assets\_external\usd\server_airflow_v001` directory. Published the external Asset Pack via Google Drive.
 * **Week of 15 June, 2026:** Closed the Blackwell Rig core hardware phase, advanced node-level Houdini airflow simulation work, and documented a path-portable runtime packaging guardrail for future viewer delivery.

@@ -1,4 +1,4 @@
-from blackwell_monitoring_suite.app.view_controls import (
+from digital_twin_runtime_suite.app.view_controls import (
     bool_model_value,
     build_face_panel_state,
     build_visibility_state,

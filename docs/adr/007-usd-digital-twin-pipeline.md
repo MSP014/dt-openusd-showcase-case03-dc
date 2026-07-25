@@ -5,7 +5,7 @@
 
 ## Context
 
-Case 03 is moving toward **Blackwell Monitoring Suite**, a staged Omniverse Kit
+Case 03 is moving toward **Digital Twin Runtime Suite**, a staged Omniverse Kit
 runtime that consumes hydrated OpenUSD assets from `assets/_external/`.
 
 The earlier architecture described the final digital-twin target as a strict
@@ -16,7 +16,7 @@ state.
 
 The current work starts smaller:
 
-- Blackwell Monitoring Suite v0.1 loads one configured USD asset, the Noctua
+- Digital Twin Runtime Suite v0.1 loads one configured USD asset, the Noctua
   NH-D9 TR5-SP6 CPU cooler.
 - Later stages add lighting, synthetic telemetry, telemetry-driven fan motion,
   full server loading, cached simulation playback, workload preview states, and
@@ -85,8 +85,7 @@ These targets are not v0.1 requirements.
 
 - ADR007 no longer overclaims that the full 160-node digital twin pipeline is
   already implemented.
-- The staged runtime plan becomes the source of truth for what Blackwell
-  Monitoring Suite must implement next.
+- The staged runtime plan becomes the source of truth for what Digital Twin Runtime Suite must implement next.
 - USD architecture documents remain useful, but each one must distinguish
   current requirements from future-scale recommendations.
 - Technical reviewers can see a clear boundary between authored assets,

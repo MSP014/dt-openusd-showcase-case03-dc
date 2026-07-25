@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from blackwell_monitoring_suite.app.motion import (
+from digital_twin_runtime_suite.app.motion import (
     MultiRotationMotionController,
     RotationMotionController,
     TopologyPivotResolver,

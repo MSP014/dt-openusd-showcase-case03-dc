@@ -14,13 +14,13 @@ duplicating cross-stage contracts that still govern active or future work.
 
 ## Completed Stage Plans
 
-### Stage 1 - Blackwell Monitoring Suite v0.1 Asset Preview Slice
+### Stage 1 - Digital Twin Runtime Suite v0.1 Asset Preview Slice
 
 Jira: `DC-40`
 
 Status: implemented locally.
 
-Build the smallest useful app surface: launch Blackwell Monitoring Suite v0.1,
+Build the smallest useful app surface: launch Digital Twin Runtime Suite v0.1,
 show the RTX viewport, load one configured USD asset from the hydrated asset
 package, and show basic load status. The first target asset is the Noctua NH-D9
 TR5-SP6 CPU cooler exported at `assets/_external/usd/cpu_fan/cpu_fan.usd`.
@@ -31,10 +31,10 @@ path.
 
 Implementation notes:
 
-- The app launches through `src/blackwell_monitoring_suite/start_bms.bat` or a
-  direct Kit invocation with the BMS `.kit` file.
-- The runtime config is `configs/blackwell_monitoring_suite.toml`.
-- The extension id is `msp.bw.monitoring`.
+- The app launches through `src/digital_twin_runtime_suite/start_dtrs.bat` or a
+  direct Kit invocation with the DTRS `.kit` file.
+- The runtime config is `configs/digital_twin_runtime_suite.toml`.
+- The extension id is `msp.dtrs`.
 - The current default asset is `usd/cpu_fan/cpu_fan.usd` under the hydrated
   external asset package.
 - Runtime review camera and light helpers are created in the session layer so
@@ -56,7 +56,7 @@ see whether the preset loaded successfully.
 
 Implementation notes:
 
-- The Config panel is docked to the left side of the BMS viewport.
+- The Config panel is docked to the left side of the DTRS viewport.
 - Lighting settings can be applied and saved into the local ignored runtime
   override config.
 - The review key light can be enabled or disabled and has its own intensity
@@ -67,7 +67,7 @@ Implementation notes:
 - HDRI background visibility can be toggled while preserving DomeLight-based
   lighting, using Kit/RTX DomeLight `visibleInPrimaryRay` visibility.
 - Operator validation confirmed that the `Show HDRI` control switches the live
-  BMS viewport between visible HDRI background and hidden HDRI background while
+  DTRS viewport between visible HDRI background and hidden HDRI background while
   keeping the asset lit.
 
 ### Stage 3 - Synthetic Telemetry Slice
@@ -86,7 +86,7 @@ of pressing Play in Houdini or another DCC.
 Stage 3 telemetry scope:
 
 - Implement the first-layer node telemetry subset defined in
-  `docs/knowledge_base/bms_telemetry_contract.md`.
+  `docs/knowledge_base/dtrs_telemetry_contract.md`.
 - Keep the future live-provider superset documented there, but do not implement
   real monitoring feed adapters in Stage 3.
 - Group Stage 3 telemetry visually by operator meaning, not by raw sensor
@@ -94,7 +94,7 @@ Stage 3 telemetry scope:
 
 Stage 3 UI shell decision:
 
-- Keep a single left-docked BMS sidebar so the viewport is only constrained by
+- Keep a single left-docked DTRS sidebar so the viewport is only constrained by
   one stable panel width.
 - Convert the current `Config` panel content into a `Config` tab inside that
   sidebar.
@@ -112,7 +112,7 @@ Left sidebar tab registry:
 | 1 | `Telemetry` | Stage 3 | Primary runtime monitoring surface for synthetic telemetry values. |
 | 2 | `Config` | Stage 2 / Stage 3 | Operator controls for asset loading, lighting, grid, camera, and local runtime settings. |
 
-Future BMS modules should add their sidebar tabs to this registry before
+Future DTRS modules should add their sidebar tabs to this registry before
 implementation so the left-slot navigation remains deliberate as the app grows.
 
 Stage 3 runtime snapshot model:
@@ -145,14 +145,14 @@ Stage 3 data provider boundary:
   should be shaped so it can later move behind a process or container boundary.
 - UI code should consume provider snapshots through a small provider/state API,
   not by reaching into generator internals.
-- The provider should start producing data as soon as BMS starts, before the
+- The provider should start producing data as soon as DTRS starts, before the
   operator manually loads or changes scene content.
 - Containerisation, network transport, credentials, service discovery, and live
   provider adapters remain out of Stage 3 scope.
 
 Stage 3 provider lifecycle:
 
-- Start the synthetic telemetry provider during BMS extension startup, not only
+- Start the synthetic telemetry provider during DTRS extension startup, not only
   after the operator loads the asset.
 - Keep the provider running while the application is open so the `Telemetry`
   tab has data immediately and remains independent from asset reloads.
@@ -181,17 +181,17 @@ Stage 3 implementation map:
 
 | Path | Purpose |
 | :--- | :--- |
-| `src/blackwell_monitoring_suite/app/telemetry/__init__.py` | Public package boundary for telemetry provider code. |
-| `src/blackwell_monitoring_suite/app/telemetry/model.py` | `TelemetrySnapshot`, metric value model, workload/health constants, and Stage 3 metric ids. |
-| `src/blackwell_monitoring_suite/app/telemetry/config.py` | Load and merge `telemetry_provider.toml` with `telemetry_provider.local.toml`. |
-| `src/blackwell_monitoring_suite/app/telemetry/provider.py` | Synthetic provider, fixed provider tick, interpolation, jitter, freeze-independent latest snapshot state. |
-| `src/blackwell_monitoring_suite/configs/telemetry_provider.toml` | Packaged read-only base targets, ranges, jitter, default mode, and allowed refresh intervals. |
+| `src/digital_twin_runtime_suite/app/telemetry/__init__.py` | Public package boundary for telemetry provider code. |
+| `src/digital_twin_runtime_suite/app/telemetry/model.py` | `TelemetrySnapshot`, metric value model, workload/health constants, and Stage 3 metric ids. |
+| `src/digital_twin_runtime_suite/app/telemetry/config.py` | Load and merge `telemetry_provider.toml` with `telemetry_provider.local.toml`. |
+| `src/digital_twin_runtime_suite/app/telemetry/provider.py` | Synthetic provider, fixed provider tick, interpolation, jitter, freeze-independent latest snapshot state. |
+| `src/digital_twin_runtime_suite/configs/telemetry_provider.toml` | Packaged read-only base targets, ranges, jitter, default mode, and allowed refresh intervals. |
 | `tests/test_telemetry_config.py` | Pure-Python tests for provider config loading, override merge, defaults, and invalid values. |
 | `tests/test_telemetry_provider.py` | Pure-Python tests for provider snapshots, cadence semantics, mode changes, freeze/resume display behaviour, deterministic seeded output, and range clamping. |
 
 Stage 3 extension integration:
 
-- `src/blackwell_monitoring_suite/ext/msp.bw.monitoring/msp/bw/monitoring/extension.py`
+- `src/digital_twin_runtime_suite/ext/msp.dtrs/msp/dtrs/extension.py`
   remains the Kit extension entry point for this slice.
 - Add provider startup/shutdown ownership to `on_startup` and `on_shutdown`,
   storing task/subscription handles as explicit extension fields.
@@ -203,7 +203,7 @@ Stage 3 extension integration:
   mode selector, refresh interval selector, and `Freeze` / `Resume`.
 - Keep UI refresh separate from provider tick: the Telemetry tab samples the
   latest snapshot at the selected UI refresh interval.
-- Keep `src/blackwell_monitoring_suite/app/commands.py` focused on Kit/USD
+- Keep `src/digital_twin_runtime_suite/app/commands.py` focused on Kit/USD
   runtime commands; do not place synthetic telemetry generator logic there.
 - Keep the telemetry provider independent from asset loading. Loading an asset
   may later subscribe scene behaviour to telemetry, but asset load must not own
@@ -255,11 +255,11 @@ Stage 3 telemetry provider config:
   cannot create contradictory GPU totals, thermal ordering, memory capacity,
   or node power balance.
 - Add a separate telemetry provider config file owned by the telemetry/data
-  provider module. Do not store telemetry targets in the existing BMS local
+  provider module. Do not store telemetry targets in the existing DTRS local
   operator override config used for lighting, grid, camera, and look-review
   settings.
 - The `Config` tab may expose telemetry provider settings, but persistence must
-  go through the provider config path/API, not through the current BMS
+  go through the provider config path/API, not through the current DTRS
   `.local.toml` override.
 - Use a read-only packaged base file plus a writable local override, for
   example `telemetry_provider.toml` merged with
@@ -268,7 +268,7 @@ Stage 3 telemetry provider config:
   such as tuned targets or jitter/range changes.
 - The provider config file layout should let the telemetry module move later
   into a separate process or container with its own config and without breaking
-  the BMS data flow.
+  the DTRS data flow.
 - The config should define global telemetry defaults such as default workload
   mode, default refresh interval, and allowed refresh intervals.
 - The config should define per-mode targets for `Idle`, `Nominal`, `Surge`, and
@@ -282,14 +282,14 @@ Stage 3 telemetry provider config:
 
 Temporary workload mode control:
 
-- Until the BMS shell has a dedicated global mode selector, the first control in
+- Until the DTRS shell has a dedicated global mode selector, the first control in
   the `Telemetry` tab should select the global workload mode:
   `Idle`, `Nominal`, `Surge`, or `Critical`.
 - This selector is a temporary UI placement decision. The selected mode is still
-  global BMS runtime state, not telemetry-tab-local state.
+  global DTRS runtime state, not telemetry-tab-local state.
 - Stage 3 uses the selected mode to drive synthetic telemetry values.
 - Later stages may move the same mode selector into a more global app-level
-  control area when scene behaviour, fan motion, overlays, LEDs, or other BMS
+  control area when scene behaviour, fan motion, overlays, LEDs, or other DTRS
   modules need the same state.
 - The Telemetry tab should include a `Freeze` toggle. When active, the provider
   keeps the current snapshot visible and pauses displayed updates so the
@@ -335,7 +335,7 @@ Stage 3 explicit non-goals:
 
 Stage 3 manual validation:
 
-- Max can launch BMS and switch the left sidebar to the `Telemetry` tab.
+- Max can launch DTRS and switch the left sidebar to the `Telemetry` tab.
 - Telemetry values are visible and update without pressing Play in Houdini, Kit
   timeline, or any other DCC timeline.
 - Changing the workload mode changes the telemetry targets and values move
@@ -346,7 +346,7 @@ Stage 3 manual validation:
 
 Operator validation on 2026-07-09 confirmed all Stage 3 manual acceptance
 items, including mode transitions, independent runtime updates, freeze/resume,
-tab switching, config persistence, intermittent throttling, and clean BMS
+tab switching, config persistence, intermittent throttling, and clean DTRS
 restart/shutdown behaviour.
 
 First-layer node telemetry groups:
@@ -366,7 +366,7 @@ First-layer node telemetry groups:
 | Limits | `throttling_active` | Shows intermittent Critical-mode throttling episodes driven by CPU, GPU hotspot, and PSU load pressure. |
 
 Deferred rack/facility telemetry fields and the extended live-provider contract
-remain in `docs/knowledge_base/bms_telemetry_contract.md`. Stage 3 deliberately
+remain in `docs/knowledge_base/dtrs_telemetry_contract.md`. Stage 3 deliberately
 expanded the node slice to cover the installed GPUs, cooling fans, PSU/PDU
 balance, and ConnectX-7 NIC, but it does not expose rack or facility telemetry.
 
@@ -390,7 +390,7 @@ live telemetry signal.
 Scope:
 
 - create a small generic rotation-motion controller owned by
-  `msp.bw.monitoring`;
+  `msp.dtrs`;
 - update it once per Kit frame from `app.next_update_async()`, not only at the
   slower telemetry UI refresh interval;
 - use `SyntheticTelemetryProvider.latest_snapshot.metrics["cpu_fan_rpm"]` as
@@ -441,8 +441,8 @@ Scalability and level of detail:
   it runs on load or asset reload and then caches the pivot/axis per prim path;
 - a full server may animate all meaningful visible rotating parts: CPU fan,
   front intake fans, rear exhaust fans, GPU blowers, and the PSU fan;
-- server-level fan and blower assets should follow the BMS motion contract
-  documented in `src/blackwell_monitoring_suite/README.md`: stable rotating
+- server-level fan and blower assets should follow the DTRS motion contract
+  documented in `src/digital_twin_runtime_suite/README.md`: stable rotating
   parent `Xform` first, topology-validated axis discovery, Session Layer pivot
   stack only as fallback;
 - rack and data-hall views should not animate hidden server internals. At those
@@ -551,7 +551,7 @@ Canonical server-stage contract:
 - The stable path under the hydrated asset root is
   `usd/Blackwell_Rig_server_assembly.usd`.
 - The stage preserves the Houdini-exported `metersPerUnit = 1.0` and
-  `upAxis = "Y"`; BMS does not convert or repair units or orientation.
+  `upAxis = "Y"`; DTRS does not convert or repair units or orientation.
 - Existing Houdini references compose the component entry points, and Stage 5
   loads the complete server assembly eagerly. Payload-based selective loading
   is outside Stage 5 and remains a later rack/data-hall decision.
@@ -585,7 +585,7 @@ runtime is Omniverse/Kit, where the same materials load and render
 successfully. Material authoring cleanup remains deferred to later runtime
 material-state stages.
 
-The full assembly passed a clean-start RTX visual load in BMS on 2026-07-19:
+The full assembly passed a clean-start RTX visual load in DTRS on 2026-07-19:
 `Blackwell_Rig_server_assembly.usd` opened with `LOAD_ALL` in 0.96 seconds,
 framed correctly, and displayed the complete server without unresolved asset,
 texture, or material-load errors. Visual inspection from multiple exterior
@@ -596,7 +596,7 @@ non-blocking Stage 5 exception: RTX ignores the degenerate motherboard helper
 mesh named `connect_rj_45_cable_here`, which produces no visible defect. Helper
 mesh cleanup remains deferred.
 
-For the fan-motion review pass, BMS applies a reversible session-layer chassis
+For the fan-motion review pass, DTRS applies a reversible session-layer chassis
 presentation override: `open_chassis = true` hides the full `top` and `side`
 cover subtrees in both the `render` and `proxy` branches. This leaves the
 Houdini-authored server assembly complete and untouched; the same runtime
@@ -610,7 +610,7 @@ infrastructure it needs belong to Stage 7; Stage 5 remains a deliberately
 static review presentation while server fan motion is proved.
 
 Stage 5 fan motion reuses the
-[Stage 4 BMS motion contract](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice)
+[Stage 4 DTRS motion contract](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice)
 rather than inventing per-part exceptions: CPU cooler fans, front intake fans,
 rear exhaust fans, GPU blowers, and the PSU fan each expose a stable rotating
 parent `Xform` whose local origin lies on the rotation axis, with
@@ -653,4 +653,4 @@ viewport, all supported fan motion matches telemetry speed, and the scene can
 be reviewed without manual USD edits.
 
 Stage 5 was accepted on 2026-07-19 and `DC-44` was moved to Done. The delivery
-commit is `d4331db` (`Deliver Stage 5 full-server BMS review`).
+commit is `d4331db` (`Deliver Stage 5 full-server DTRS review`).

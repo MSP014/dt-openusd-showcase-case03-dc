@@ -8,8 +8,8 @@
 - **Severity:** Low (Upstream Compatibility / Regression Risk)
 - **Description:**
   - A VTI with a valid non-zero header origin currently imports into the
-    Kit-CAE/BMS stage with `ImageDataAPI.origin=(0,0,0)`.
-  - BMS restores the authoritative VTI header origin through a session-layer
+    Kit-CAE/DTRS stage with `ImageDataAPI.origin=(0,0,0)`.
+  - DTRS restores the authoritative VTI header origin through a session-layer
     opinion before creating dataset bounding-box and Flow objects. The source
     VTI and authored USD asset remain unmodified.
 - **Why Deferred:**
@@ -17,11 +17,11 @@
     VTI-to-Flow proof. Patching the upstream importer during active Stage 6
     delivery would turn a bounded integration repair into unrelated R&D.
 - **Action Plan:**
-  - [ ] Build a minimal VTI-only reproducer outside BMS.
+  - [ ] Build a minimal VTI-only reproducer outside DTRS.
   - [ ] Determine whether origin loss occurs in the importer, USD authoring, or
         composition.
   - [ ] Check the behaviour against a newer Kit-CAE version when available.
-  - [ ] Remove the BMS session-layer shim if upstream behaviour is fixed.
+  - [ ] Remove the DTRS session-layer shim if upstream behaviour is fixed.
   - [ ] Retain a regression check that VTI header origin equals composed
         `ImageDataAPI.origin`.
 
@@ -31,10 +31,10 @@
 - **Severity:** Low (Runtime Cleanup / Scope Control)
 - **Description:**
   - Stage 6 established that direct `OpenVDBAsset` playback through RTX/NVIDIA
-    IndeX is not viable for the interactive BMS target. The final fast-path
-    test remained near 2-3 FPS, while the same BMS scene without airflow holds
+    IndeX is not viable for the interactive DTRS target. The final fast-path
+    test remained near 2-3 FPS, while the same DTRS scene without airflow holds
     67-69 FPS.
-  - The current BMS app still contains the IndeX dependency, VDB cache
+  - The current DTRS app still contains the IndeX dependency, VDB cache
     configuration, cache controls, and session-layer authoring code so the
     failed route remains reproducible while the Flow or hybrid replacement is
     being proven.
@@ -45,18 +45,18 @@
     part of this cleanup.
 - **Action Plan:**
   - [ ] Accept a replacement interactive airflow route.
-  - [ ] Remove `omni.rtx.index_composite` from the BMS app dependencies.
+  - [ ] Remove `omni.rtx.index_composite` from the DTRS app dependencies.
   - [ ] Remove the direct VDB cache config, UI controls, controller code, and
         focused tests.
   - [ ] Retain the measured result in the Stage 6 plan and keep the offline
         Houdini density VDB evidence intact.
 
-### [RUNTIME] Backfill UI Control Contract Tests for Existing BMS Controls
+### [RUNTIME] Backfill UI Control Contract Tests for Existing DTRS Controls
 
 - **Status:** Open
 - **Severity:** Medium (Test Coverage / UI Regression Risk)
 - **Description:**
-  - New stateful BMS UI controls should be covered by focused behavioural tests
+  - New stateful DTRS UI controls should be covered by focused behavioural tests
     before manual Kit validation is treated as sufficient.
   - The expected contract is one happy-path test plus representative edge cases
     for controls that change application state, trigger runtime commands,
@@ -75,7 +75,7 @@
   - Some controls need small test seams before they can be covered without
     launching Kit.
 - **Action Plan:**
-  - [ ] Inventory existing BMS interactive controls by side effect.
+  - [ ] Inventory existing DTRS interactive controls by side effect.
   - [ ] Add behavioural contract tests for asset load controls.
   - [ ] Add behavioural contract tests for lighting controls.
   - [ ] Add behavioural contract tests for grid and camera controls.
@@ -84,12 +84,12 @@
         freeze controls.
   - [ ] Keep visual-only Kit checks separate from fast unit tests.
 
-### [RUNTIME] Backfill Unit Tests for Existing BMS Runtime Modules
+### [RUNTIME] Backfill Unit Tests for Existing DTRS Runtime Modules
 
 - **Status:** Open
 - **Severity:** Medium (Test Coverage / Runtime Stability)
 - **Description:**
-  - Stage 1 and Stage 2 established the first working BMS runtime surface:
+  - Stage 1 and Stage 2 established the first working DTRS runtime surface:
     configured asset loading, review lighting, HDRI visibility, grid controls,
     camera persistence, local override config, and docked OmniUI controls.
   - Those modules were validated manually in Kit, but they do not yet have the
@@ -99,12 +99,12 @@
     state, and future scene behaviours start sharing the same app surface.
 - **Context:**
   - Stage 3 should add tests for the new synthetic data provider immediately.
-  - Backfilling tests for older BMS runtime modules is useful, but doing all of
+  - Backfilling tests for older DTRS runtime modules is useful, but doing all of
     it inside Stage 3 would expand the slice beyond synthetic telemetry.
 - **Why Deferred:**
   - The immediate Stage 3 delivery should stay focused on the telemetry provider
     boundary and Telemetry tab.
-  - Existing BMS features need careful test seams because some behaviours depend
+  - Existing DTRS features need careful test seams because some behaviours depend
     on Kit, USD stage state, local config files, or manual viewport interaction.
 - **Action Plan:**
   - [ ] Identify testable pure-Python seams in `RuntimeConfig` and
@@ -128,7 +128,7 @@
     not implemented.
 - **Context:**
   - The active Stage 3 scope remains the first-layer node telemetry subset
-    documented in `docs/knowledge_base/bms_telemetry_contract.md`.
+    documented in `docs/knowledge_base/dtrs_telemetry_contract.md`.
   - The current Case 03 node uses a consumer/workstation PSU, so PSU contribution
     is represented as `psu_load_estimate_w` in Stage 3. Server-class PSU
     measurements such as input/output power, status, temperature, or PSU fan RPM
@@ -143,7 +143,7 @@
     vendor integrations.
 - **Future Implementation Plan:**
   - [ ] Define an explicit provider interface or `Protocol` that returns the
-        same normalised `TelemetrySnapshot`. BMS consumers must not know the
+        same normalised `TelemetrySnapshot`. DTRS consumers must not know the
         source of the data.
   - [ ] Keep `SyntheticTelemetryProvider` as one complete implementation of
         that contract for autonomous Case 03 demonstration and simulation.
@@ -153,18 +153,18 @@
         `TelemetrySnapshot` and leave the visualisation layer unchanged.
   - [ ] Select the provider through configuration and a factory, rather than
         hard-wiring `SyntheticTelemetryProvider(...)` in the extension.
-  - [ ] Make source adapters responsible for source metric-name mapping to BMS
+  - [ ] Make source adapters responsible for source metric-name mapping to DTRS
         metric IDs, unit normalisation, receive and source timestamps, topology
         mapping, missing or malformed data, stale data, and quality semantics:
         `measured`, `estimated`, `derived`, `synthetic`, `stale`, `unavailable`.
         Source-specific naming must not leak into UI or visualisation code.
   - [ ] Add contract tests proving `SyntheticTelemetryProvider` and the
         reference provider both return `TelemetrySnapshot`, and that the same
-        BMS consumer works with both.
+        DTRS consumer works with both.
 
 ## 2. Resolved Technical Debt
 
-### [DOCS] Reconcile USD Architecture Docs with Current BMS Direction
+### [DOCS] Reconcile USD Architecture Docs with Current DTRS Direction
 
 - **Status:** Resolved
 - **Severity:** Medium (Documentation / Architecture Drift)
@@ -172,7 +172,7 @@
   - ADR007 and `docs/knowledge_base/usd_architecture/` previously described
     the long-term 160-node digital twin target as if it were already a strict
     current implementation contract.
-  - That conflicted with the staged Blackwell Monitoring Suite plan, where
+  - That conflicted with the staged Digital Twin Runtime Suite plan, where
     v0.1 starts with a single configured CPU cooler asset preview before
     telemetry, full server loading, cached simulation, workload states, and
     scale navigation.
@@ -190,8 +190,7 @@
 - **Closure Log (2026.07.06):**
   - Rewrote ADR007 as a current-baseline plus long-term-target architecture
     decision.
-  - Updated `docs/knowledge_base/main_concept.md` around Blackwell Monitoring
-    Suite, v0.1 asset preview, staged runtime growth, and explicit truth
+  - Updated `docs/knowledge_base/main_concept.md` around Digital Twin Runtime Suite, v0.1 asset preview, staged runtime growth, and explicit truth
     boundaries.
   - Updated all files under `docs/knowledge_base/usd_architecture/` so they
     distinguish current asset/runtime requirements from future-scale

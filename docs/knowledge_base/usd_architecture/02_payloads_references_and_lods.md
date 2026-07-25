@@ -3,7 +3,7 @@
 This guideline separates the current staged runtime baseline from the future
 large-scale data center target.
 
-Blackwell Monitoring Suite v0.1 only needs to load one configured asset from
+Digital Twin Runtime Suite v0.1 only needs to load one configured asset from
 the hydrated asset package. Payload-heavy rack composition and LOD switching
 become mandatory only when the runtime reaches server, rack, and data hall
 scale.
@@ -41,7 +41,7 @@ When LODs are reintroduced, use a stable project convention:
 3. Purpose metadata (`render`, `proxy`, `guide`) should be placed on geometry
    leaf prims, not on root component Xforms.
 4. Each LOD variant must be validated in Omniverse before it is exposed in
-   Blackwell Monitoring Suite.
+   Digital Twin Runtime Suite.
 
 ## 5. Future Omniverse Workflow
 
