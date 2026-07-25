@@ -160,8 +160,9 @@ source for the showreel. The goal is to prove the interaction model:
 - telemetry values update while the app is running;
 - fan RPM, temperatures, power draw, LEDs, heatmaps, and airflow visuals can be
   driven from data instead of a DCC timeline;
-- a future live provider can replace the demo provider without changing the
-  presentation layer.
+- future source-specific adapters can be validated against the same normalised
+  telemetry model without exposing source-specific schemas to the presentation
+  layer.
 
 This is a direction for Stage 3 and later, not v0.1.
 

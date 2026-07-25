@@ -65,6 +65,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._airflow_status_label = None
         self._airflow_attenuation_combo = None
         self._airflow_alpha_combo = None
+        self._show_flow_debug_overlays_model = None
         self._lighting_task = None
         self._camera_sync_task = None
         self._telemetry_task = None
@@ -233,6 +234,10 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._rotation_y_model = ui.SimpleFloatModel(lighting.rotation.y)
         self._rotation_z_model = ui.SimpleFloatModel(lighting.rotation.z)
         self._grid_enabled_model = ui.SimpleBoolModel(config.grid.enabled)
+        self._show_flow_debug_overlays_model = ui.SimpleBoolModel(False)
+        self._show_flow_debug_overlays_model.add_value_changed_fn(
+            lambda _model: self._schedule_apply_flow_debug_overlays()
+        )
         self._grid_step_model = ui.SimpleFloatModel(config.grid.step)
         self._grid_width_model = ui.SimpleFloatModel(config.grid.width)
         self._camera_position_x_model = ui.SimpleFloatModel(0.0)
@@ -483,11 +488,15 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
             width=ui.Percent(100),
         )
         with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Show debug overlays", width=SERVER_VIEW_LABEL_WIDTH)
+            ui.CheckBox(model=self._show_flow_debug_overlays_model)
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label("Attenuation", width=SERVER_VIEW_LABEL_WIDTH)
             self._airflow_attenuation_combo = ui.ComboBox(
-                0,
+                2,
                 "3",
                 "6",
+                "8",
                 "10",
                 "15",
                 width=ui.Fraction(1),
@@ -495,7 +504,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label("Smoke opacity", width=SERVER_VIEW_LABEL_WIDTH)
             self._airflow_alpha_combo = ui.ComboBox(
-                0,
+                1,
                 "Native",
                 "Medium",
                 "Strong",
@@ -1248,6 +1257,9 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
     def _schedule_apply_airflow_presentation(self) -> None:
         self._airflow_task = asyncio.ensure_future(self._apply_airflow_presentation())
 
+    def _schedule_apply_flow_debug_overlays(self) -> None:
+        self._airflow_task = asyncio.ensure_future(self._apply_flow_debug_overlays())
+
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
             self._apply_chassis_visibility_controls()
@@ -1490,7 +1502,7 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         self._set_airflow_status(result.message)
 
     async def _apply_airflow_presentation(self) -> None:
-        attenuation_values = (3.0, 6.0, 10.0, 15.0)
+        attenuation_values = (3.0, 6.0, 8.0, 10.0, 15.0)
         alpha_presets = ("native", "medium", "strong")
         attenuation_model = self._combo_index_model(self._airflow_attenuation_combo)
         alpha_model = self._combo_index_model(self._airflow_alpha_combo)
@@ -1508,6 +1520,15 @@ class BlackwellMonitoringExtension(omni.ext.IExt):
         result = await self._controller.apply_kit_cae_flow_presentation_in_kit(
             attenuation_values[attenuation_index],
             alpha_presets[alpha_index],
+        )
+        self._set_airflow_status(result.message)
+
+    async def _apply_flow_debug_overlays(self) -> None:
+        if not self._show_flow_debug_overlays_model:
+            self._set_airflow_status("Flow debug overlay control is unavailable.")
+            return
+        result = self._controller.set_kit_cae_debug_overlays_visible_in_kit(
+            self._show_flow_debug_overlays_model.get_value_as_bool()
         )
         self._set_airflow_status(result.message)
 

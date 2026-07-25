@@ -28,6 +28,7 @@ SIMULATION_CACHE_OVERRIDE_KEYS = (
     "rendering_samples",
     "filter_mode",
     "velocity_vti_path",
+    "velocity_vti_sequence_paths",
     "velocity_field_name",
 )
 
@@ -187,6 +188,7 @@ class SimulationCacheConfig:
     rendering_samples: int = 1
     filter_mode: str = "nearest"
     velocity_vti_path: str = ""
+    velocity_vti_sequence_paths: tuple[str, ...] = ()
     velocity_field_name: str = "vel"
 
 
@@ -321,6 +323,15 @@ class RuntimeConfig:
         """Return the resolved Houdini-generated VTI velocity field."""
 
         return (self.asset_root / self.simulation_cache.velocity_vti_path).resolve()
+
+    @property
+    def velocity_vti_sequence_paths(self) -> tuple[Path, ...]:
+        """Return the configured VTI temporal probe, or its single static frame."""
+
+        paths = self.simulation_cache.velocity_vti_sequence_paths or (
+            self.simulation_cache.velocity_vti_path,
+        )
+        return tuple((self.asset_root / path).resolve() for path in paths)
 
     @property
     def local_config_path(self) -> Path:
@@ -774,6 +785,12 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     runtime_mode = str(data.get("runtime_mode", "index")).strip().lower()
     wrapper_path = str(data.get("wrapper_path", "")).strip()
     velocity_vti_path = str(data.get("velocity_vti_path", "")).strip()
+    raw_velocity_vti_sequence_paths = data.get("velocity_vti_sequence_paths", [])
+    if not isinstance(raw_velocity_vti_sequence_paths, list):
+        raise ValueError("simulation_cache.velocity_vti_sequence_paths must be a list.")
+    velocity_vti_sequence_paths = tuple(
+        str(path).strip() for path in raw_velocity_vti_sequence_paths
+    )
     velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
     if runtime_mode not in {"index", "kit_cae"}:
         raise ValueError("simulation_cache.runtime_mode must be 'index' or 'kit_cae'.")
@@ -783,6 +800,21 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         raise ValueError(
             "simulation_cache.velocity_vti_path is required for the Kit-CAE route."
         )
+    if any(not path for path in velocity_vti_sequence_paths):
+        raise ValueError(
+            "simulation_cache.velocity_vti_sequence_paths must not contain empty paths."
+        )
+    if velocity_vti_sequence_paths:
+        if len(velocity_vti_sequence_paths) != 3:
+            raise ValueError(
+                "simulation_cache.velocity_vti_sequence_paths must contain exactly "
+                "three frames for the Stage 6 temporal probe."
+            )
+        if velocity_vti_sequence_paths[0] != velocity_vti_path:
+            raise ValueError(
+                "simulation_cache.velocity_vti_path must be the first temporal "
+                "probe frame."
+            )
 
     root_prim_path = str(data.get("root_prim_path", "/sim")).strip()
     volume_prim_path = str(
@@ -827,6 +859,7 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         rendering_samples=rendering_samples,
         filter_mode=filter_mode,
         velocity_vti_path=velocity_vti_path,
+        velocity_vti_sequence_paths=velocity_vti_sequence_paths,
         velocity_field_name=velocity_field_name,
     )
 

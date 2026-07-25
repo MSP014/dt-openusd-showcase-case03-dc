@@ -9,10 +9,12 @@ The contract has two layers:
   the current BMS roadmap should implement first;
 - the **future live provider superset**, which describes how a real monitoring
   feed could map data from HWiNFO-like tools, NVML, Redfish, IPMI, PMBus,
-  smart PDUs, Grafana, MQTT, Kafka, or another monitoring system into BMS.
+  smart PDUs, Grafana, Prometheus, MQTT, Kafka, or another monitoring system
+  into BMS.
 
-The synthetic provider proves the runtime interaction model. A live provider
-may replace it later without changing the visualisation layer.
+The current runtime implements the synthetic provider only. It proves the
+runtime interaction model while this contract defines the normalised target for
+future external-source work.
 
 ## Provider Boundary
 
@@ -35,6 +37,44 @@ Every provider snapshot should preserve the following semantics:
 
 Providers may omit fields they cannot truthfully supply. Missing data is better
 than pretending an estimate is a measured sensor value.
+
+## External Provider Integration Boundary
+
+The BMS telemetry contract is defined now; a source adapter and any production
+connector are future implementation work. BMS does not require an external
+source to use canonical BMS metric IDs. The adapter is responsible for
+translating its source schema into `TelemetrySnapshot` before BMS consumes it.
+
+```text
+Grafana / Prometheus / Kafka / MQTT / NVML / etc.
+                     |
+               source adapter
+                     |
+mapping + unit normalisation + timestamp / quality / topology
+                     |
+             TelemetrySnapshot
+                     |
+                    BMS
+```
+
+For example, this is an illustrative mapping, not a Grafana implementation:
+
+```text
+External source:
+gpu_temperature{gpu="0"} = 71.4
+
+Adapter output:
+gpu_1_temp_c =
+  value: 71.4
+  unit: C
+  quality: measured
+```
+
+Production connectors are not included in the current release. They require
+source-specific decisions about credentials, authentication, polling or
+streaming, reconnects, deployment topology, security, retry behaviour, and
+vendor APIs. Those concerns belong at the adapter boundary, not in BMS runtime
+or visualisation code.
 
 ## Stage 3 Synthetic Subset
 

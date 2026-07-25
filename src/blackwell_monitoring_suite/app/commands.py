@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -71,6 +72,18 @@ class SimulationCacheResult:
 
 
 @dataclass(frozen=True)
+class FlowPerformanceSample:
+    """One Stage 6 observation from Kit's built-in viewport statistics."""
+
+    captured_at: float
+    fps: float | None
+    frame_time_ms: float | None
+    gpu_memory_used_gib: float | None
+    process_memory_used_gib: float | None
+    temporal_source: str | None
+
+
+@dataclass(frozen=True)
 class FacePanelApplyResult:
     """Result of preparing or applying the runtime front-panel hinge."""
 
@@ -91,6 +104,15 @@ class RuntimeController:
         "medium": (0.6, 0.6, 1.0),
         "strong": (0.85, 0.85, 1.0),
     }
+    KIT_CAE_FLOW_DEFAULT_ATTENUATION = 8.0
+    KIT_CAE_FLOW_DEFAULT_ALPHA_PRESET = "medium"
+    FLOW_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
+    FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
+    KIT_CAE_FLOW_TRACER_RGB = (
+        (0.015, 0.08, 0.30),
+        (0.0, 0.72, 0.88),
+        (0.82, 1.0, 1.0),
+    )
     QLED_MATERIAL_PATHS = {
         "normal": "/BMS_Runtime/Looks/QLEDOnNormal",
         "warning": "/BMS_Runtime/Looks/QLEDOnWarning",
@@ -110,6 +132,15 @@ class RuntimeController:
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
         self._flow_airflow_simulate_path: str | None = None
+        self._flow_temporal_asset_hashes: dict[Path, str] = {}
+        self._flow_temporal_records: list[dict[str, object]] = []
+        self._flow_temporal_failure: dict[str, str] | None = None
+        self._flow_temporal_end_time_code: float | None = None
+        self._flow_temporal_sample_time_codes: tuple[float, ...] = ()
+        self._flow_performance_task: asyncio.Task | None = None
+        self._flow_performance_session_id = 0
+        self._flow_performance_attached_at: float | None = None
+        self._flow_performance_samples: list[FlowPerformanceSample] = []
         self._front_panel_indicator_state_key: (
             tuple[int, bool, bool, bool, bool] | None
         ) = None
@@ -117,10 +148,18 @@ class RuntimeController:
     def reload_config(self) -> RuntimeConfig:
         """Reload and return the current runtime config."""
 
+        self._stop_flow_performance_sampler()
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
+        self._flow_temporal_asset_hashes = {}
+        self._flow_temporal_records = []
+        self._flow_temporal_failure = None
+        self._flow_temporal_end_time_code = None
+        self._flow_temporal_sample_time_codes = ()
+        self._flow_performance_attached_at = None
+        self._flow_performance_samples = []
         self._front_panel_indicator_state_key = None
         return self.config
 
@@ -745,17 +784,24 @@ class RuntimeController:
     ) -> SimulationCacheResult:
         """Import one Houdini VTI velocity field and drive a Kit-CAE Flow probe."""
 
+        import carb
+
         cache = self.config.simulation_cache
-        velocity_path = self.config.velocity_vti_path
-        if not velocity_path.is_file():
-            return SimulationCacheResult(
-                False,
-                f"Kit-CAE airflow VTI is missing: {velocity_path}",
+        velocity_paths = self.config.velocity_vti_sequence_paths
+        velocity_path = velocity_paths[0]
+        missing_velocity_paths = [path for path in velocity_paths if not path.is_file()]
+        if missing_velocity_paths:
+            message = "Kit-CAE airflow VTI is missing: " + ", ".join(
+                str(path) for path in missing_velocity_paths
             )
+            carb.log_error(
+                "BMS Flow temporal expanded diagnostics: "
+                f"reason=asset missing or unreadable, assets={missing_velocity_paths}"
+            )
+            return SimulationCacheResult(False, message)
         if status_callback:
             status_callback("Importing Houdini velocity VTI through Kit-CAE")
 
-        import carb
         import omni.kit.app
         import omni.timeline
         import omni.usd
@@ -764,7 +810,7 @@ class RuntimeController:
         from omni.cae.schema import cae
         from omni.cae.schema import viz as cae_viz
         from omni.cae.schema import vtk as cae_vtk
-        from pxr import Gf, Usd, UsdGeom
+        from pxr import Gf, Sdf, Usd, UsdGeom
 
         extension_manager = omni.kit.app.get_app().get_extension_manager()
         required_extensions = (
@@ -789,6 +835,13 @@ class RuntimeController:
         if not stage:
             return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
 
+        self._stop_flow_performance_sampler()
+        self._log_flow_performance_event(
+            carb,
+            event="PRE_ATTACH",
+            sample=self._capture_flow_performance_sample(),
+        )
+
         # Kit-CAE's current VTK importer copies its result into the root layer.
         # The import destination itself must be top-level: Sdf.CopySpec does not
         # create its parent specs in that layer.
@@ -803,19 +856,40 @@ class RuntimeController:
         dataset_emitter_path = f"{runtime_root}/DataSetEmitter"
         app = omni.kit.app.get_app()
         previous_target = stage.GetEditTarget()
-        stage.SetEditTarget(stage.GetSessionLayer())
+        session_layer = stage.GetSessionLayer()
+        session_layer.timeCodesPerSecond = float(stage.GetTimeCodesPerSecond())
+        stage.SetEditTarget(session_layer)
         try:
             if stage.GetPrimAtPath(runtime_root).IsValid():
                 stage.RemovePrim(runtime_root)
             await import_to_stage(str(velocity_path), import_root)
             await app.next_update_async()
 
-            metadata = self._read_kit_cae_vti_metadata(
-                velocity_path,
+            metadata, grid_match = self._validate_kit_cae_temporal_vti_contract(
+                velocity_paths,
                 cache.velocity_field_name,
             )
             dataset_prim = stage.GetPrimAtPath(dataset_path)
             field_prim = stage.GetPrimAtPath(field_path)
+            self._flow_temporal_sample_time_codes = (
+                self._author_kit_cae_temporal_velocity_samples(
+                    field_prim,
+                    velocity_paths,
+                    stage.GetTimeCodesPerSecond(),
+                    cae_vtk,
+                    Sdf,
+                    Usd,
+                )
+            )
+            self._flow_temporal_end_time_code = (
+                self._flow_temporal_sample_time_codes[-1]
+                + (
+                    self._flow_temporal_sample_time_codes[-1]
+                    - self._flow_temporal_sample_time_codes[-2]
+                )
+                if len(self._flow_temporal_sample_time_codes) > 1
+                else None
+            )
             origin_after_import = self._read_kit_cae_vti_origin_opinion(
                 dataset_prim,
                 cae_vtk,
@@ -848,6 +922,11 @@ class RuntimeController:
                 imported_grid["world_bounds"],
                 Gf,
                 Usd,
+                UsdGeom,
+            )
+            self._set_kit_cae_spatial_sanity_wireframes_visibility(
+                stage,
+                False,
                 UsdGeom,
             )
             await app.next_update_async()
@@ -906,10 +985,6 @@ class RuntimeController:
             emitter_operator.CreateEnabledAttr().Set(False)
             velocity_selector = cae_viz.FieldSelectionAPI(emitter_prim, "velocities")
             velocity_selector.CreateTargetRel().SetTargets([field_path])
-            dav_origin_trace = await self._trace_kit_cae_dav_velocity_dataset(
-                emitter_prim,
-                Usd,
-            )
             emitter_operator.CreateEnabledAttr().Set(True)
             operator_readiness = await self._wait_for_kit_cae_dataset_emitter_ready(
                 app,
@@ -922,6 +997,13 @@ class RuntimeController:
             timeline = omni.timeline.get_timeline_interface()
             timeline.pause()
             timeline.set_current_time(0.0)
+            self._flow_airflow_simulate_path = f"{flow_environment_path}/flowSimulate"
+            presentation_result = await self.apply_kit_cae_flow_presentation_in_kit(
+                self.KIT_CAE_FLOW_DEFAULT_ATTENUATION,
+                self.KIT_CAE_FLOW_DEFAULT_ALPHA_PRESET,
+            )
+            if not presentation_result.success:
+                raise RuntimeError(presentation_result.message)
             await self._pulse_kit_cae_flow_clear(app, flow_environment_path)
             self._clear_kit_cae_server_visibility_session_opinion(
                 stage,
@@ -929,47 +1011,126 @@ class RuntimeController:
             )
 
             await app.next_update_async()
-            timeline.play()
+            if self._flow_temporal_end_time_code is not None:
+                timeline.play(0.0, self._flow_temporal_end_time_code, True)
+            else:
+                timeline.play()
             timeline_time_before = float(timeline.get_current_time())
             for _ in range(12):
                 await app.next_update_async()
             timeline_time_after = float(timeline.get_current_time())
-            self._log_kit_cae_render_probe(
-                stage,
-                flow_environment_path,
-                "NATIVE_FUEL",
-                carb,
+            origin_match = self._kit_cae_vectors_match(
+                metadata["vti_header_origin"],
+                origin_after_bms_composition["origin"],
             )
-            self._log_kit_cae_origin_trace(
-                metadata,
-                origin_after_import,
-                origin_after_bms_composition,
-                dav_origin_trace,
-                carb,
+            payload_attribute = emitter_prim.GetAttribute("nanoVdbVelocities")
+            payload = (
+                payload_attribute.Get()
+                if payload_attribute and payload_attribute.IsValid()
+                else None
             )
-            self._log_kit_cae_flow_full_diagnostics(
-                stage,
-                velocity_path,
-                metadata,
-                imported_grid,
-                dataset_path,
-                flow_environment_path,
-                smoke_injector_path,
-                boundary_emitter_path,
-                dataset_emitter_path,
-                bbox_path,
-                field_path,
-                velocity_selector,
-                timeline,
-                timeline_time_before,
-                timeline_time_after,
-                operator_readiness,
-                "NATIVE_FUEL",
-                Usd,
-                UsdGeom,
-                carb,
+            payload_count = len(payload) if payload is not None else 0
+            velocity_scale = emitter_prim.GetAttribute("velocityScale").Get()
+            couple_rate_velocity = emitter_prim.GetAttribute("coupleRateVelocity").Get()
+            timeline_advancing = timeline_time_after > timeline_time_before
+            evidence_valid = (
+                operator_readiness["ready"]
+                and not operator_readiness["timed_out"]
+                and origin_match
+                and grid_match
+                and timeline_advancing
+                and payload_count > 0
+                and float(couple_rate_velocity or 0.0) > 0.0
             )
-            parity_snapshot_path = self._write_kit_cae_flow_parity_snapshot(
+            self._flow_temporal_records = []
+            self._flow_temporal_failure = None
+            if evidence_valid:
+                self._log_kit_cae_flow_attached(
+                    carb,
+                    temporal_frames=len(velocity_paths),
+                    metadata=metadata,
+                    origin_match=origin_match,
+                    grid_match=grid_match,
+                    operator_ready=bool(operator_readiness["ready"]),
+                    flow_environment_path=flow_environment_path,
+                    dataset_emitter_path=dataset_emitter_path,
+                )
+                self._log_kit_cae_temporal_frame(
+                    carb,
+                    sequence_index=0,
+                    temporal_frames=len(velocity_paths),
+                    asset=velocity_path,
+                    previous_frame=None,
+                    transition="INITIAL",
+                    operator_ready=bool(operator_readiness["ready"]),
+                    operator_wait_ms=float(operator_readiness["seconds"]) * 1000.0,
+                    nano_vdb_velocities_uint_count=payload_count,
+                    velocity_scale=velocity_scale,
+                    couple_rate_velocity=couple_rate_velocity,
+                    timeline_time_before=timeline_time_before,
+                    timeline_time_after=timeline_time_after,
+                    timeline_advancing=timeline_advancing,
+                    flow_reset=False,
+                    origin_match=origin_match,
+                    grid_match=grid_match,
+                )
+                temporal_proof_passed = await self._monitor_kit_cae_temporal_proof(
+                    app=app,
+                    carb=carb,
+                    stage=stage,
+                    timeline=timeline,
+                    velocity_paths=velocity_paths,
+                    field_prim=field_prim,
+                    dataset_emitter=emitter_prim,
+                    flow_environment_path=flow_environment_path,
+                    dataset_emitter_path=dataset_emitter_path,
+                    origin_match=origin_match,
+                    grid_match=grid_match,
+                    cae_vtk=cae_vtk,
+                    Usd=Usd,
+                )
+            else:
+                temporal_proof_passed = False
+                dav_origin_trace = await self._trace_kit_cae_dav_velocity_dataset(
+                    emitter_prim,
+                    Usd,
+                )
+                self._log_kit_cae_render_probe(
+                    stage,
+                    flow_environment_path,
+                    "NATIVE_FUEL",
+                    carb,
+                )
+                self._log_kit_cae_origin_trace(
+                    metadata,
+                    origin_after_import,
+                    origin_after_bms_composition,
+                    dav_origin_trace,
+                    carb,
+                )
+                self._log_kit_cae_flow_full_diagnostics(
+                    stage,
+                    velocity_path,
+                    metadata,
+                    imported_grid,
+                    dataset_path,
+                    flow_environment_path,
+                    smoke_injector_path,
+                    boundary_emitter_path,
+                    dataset_emitter_path,
+                    bbox_path,
+                    field_path,
+                    velocity_selector,
+                    timeline,
+                    timeline_time_before,
+                    timeline_time_after,
+                    operator_readiness,
+                    "NATIVE_FUEL",
+                    Usd,
+                    UsdGeom,
+                    carb,
+                )
+            self._write_kit_cae_flow_parity_snapshot(
                 stage,
                 dataset_path=dataset_path,
                 field_path=field_path,
@@ -979,9 +1140,13 @@ class RuntimeController:
                 boundary_emitter_path=boundary_emitter_path,
                 dataset_emitter_path=dataset_emitter_path,
             )
-            carb.log_warn(f"BMS Kit-CAE parity snapshot saved: {parity_snapshot_path}")
         except Exception as error:
             carb.log_error(f"BMS Kit-CAE Flow probe failed: {error}")
+            self._flow_airflow_simulate_path = None
+            self._flow_temporal_end_time_code = None
+            self._flow_temporal_sample_time_codes = ()
+            self._flow_temporal_records = []
+            self._flow_temporal_failure = None
             if stage.GetPrimAtPath(runtime_root).IsValid():
                 stage.RemovePrim(runtime_root)
             if stage.GetPrimAtPath(import_root).IsValid():
@@ -993,9 +1158,16 @@ class RuntimeController:
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = f"{flow_environment_path}/flowSimulate"
+        self._start_flow_performance_sampler()
+        if not temporal_proof_passed:
+            return SimulationCacheResult(
+                False,
+                "Kit-CAE Flow remains attached, but the temporal proof failed; "
+                "expanded diagnostics were logged.",
+            )
         return SimulationCacheResult(
             True,
-            "Kit-CAE Flow is running: "
+            "Kit-CAE Flow temporal proof passed: "
             f"PointData/{cache.velocity_field_name} Vector3 drives live smoke.",
         )
 
@@ -1011,7 +1183,6 @@ class RuntimeController:
                 False, "Attach the airflow cache before tuning Flow."
             )
 
-        import carb
         import omni.kit.app
         import omni.usd
         from pxr import Gf, UsdGeom
@@ -1045,27 +1216,6 @@ class RuntimeController:
         for _ in range(3):
             await app.next_update_async()
 
-        server_prim = stage.GetPrimAtPath(RuntimeController.KIT_CAE_SERVER_ROOT)
-        injector_mesh = stage.GetPrimAtPath(smoke_injector_path)
-        server_visible = (
-            UsdGeom.Imageable(server_prim).ComputeVisibility()
-            != UsdGeom.Tokens.invisible
-            if server_prim and server_prim.IsValid()
-            else None
-        )
-        injector_mesh_visible = (
-            UsdGeom.Imageable(injector_mesh).ComputeVisibility()
-            != UsdGeom.Tokens.invisible
-            if injector_mesh and injector_mesh.IsValid()
-            else None
-        )
-        carb.log_warn(
-            "BMS Kit-CAE Flow presentation: "
-            f"attenuation={attenuation:g}, alpha_preset={alpha_preset}, "
-            f"rgba_alphas={alpha_values}, server_visible={server_visible}, "
-            f"smoke_injector_mesh_visible={injector_mesh_visible}"
-        )
-
         return SimulationCacheResult(
             True,
             "Flow presentation applied: "
@@ -1079,7 +1229,11 @@ class RuntimeController:
         if self._flow_airflow_simulate_path:
             import omni.timeline
 
-            omni.timeline.get_timeline_interface().play()
+            timeline = omni.timeline.get_timeline_interface()
+            if self._flow_temporal_end_time_code is not None:
+                timeline.play(0.0, self._flow_temporal_end_time_code, True)
+            else:
+                timeline.play()
             return SimulationCacheResult(True, "Kit-CAE velocity-driven Flow started.")
 
         if not self._simulation_cache_contract:
@@ -1258,8 +1412,12 @@ class RuntimeController:
     def detach_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Remove only the transient cache opinions from the session layer."""
 
+        import carb
         import omni.timeline
         import omni.usd
+
+        self._stop_flow_performance_sampler()
+        self._log_flow_performance_summary(carb)
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
@@ -1279,6 +1437,12 @@ class RuntimeController:
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
+        self._flow_temporal_records = []
+        self._flow_temporal_failure = None
+        self._flow_temporal_end_time_code = None
+        self._flow_temporal_sample_time_codes = ()
+        self._flow_performance_attached_at = None
+        self._flow_performance_samples = []
         return SimulationCacheResult(
             True,
             "Airflow cache detached from the session layer.",
@@ -1378,6 +1542,1179 @@ class RuntimeController:
         if not framed:
             return "; viewport frame skipped"
         return f"; viewport framed; {lighting_result.message}"
+
+    @staticmethod
+    def _kit_cae_vectors_match(expected, actual, tolerance: float = 1e-6) -> bool:
+        """Compare three-component grid values without exposing diagnostic internals."""
+
+        if expected is None or actual is None:
+            return False
+        try:
+            return len(expected) == len(actual) == 3 and all(
+                abs(float(expected[index]) - float(actual[index])) <= tolerance
+                for index in range(3)
+            )
+        except (TypeError, ValueError):
+            return False
+
+    @classmethod
+    def _validate_kit_cae_temporal_vti_contract(
+        cls,
+        velocity_paths: tuple[Path, ...],
+        field_name: str,
+    ) -> tuple[dict[str, object], bool]:
+        """Require each Stage 6 temporal fixture to share the imported grid contract."""
+
+        metadata_by_path = [
+            (path, cls._read_kit_cae_vti_metadata(path, field_name))
+            for path in velocity_paths
+        ]
+        primary_path, primary_metadata = metadata_by_path[0]
+        for path, metadata in metadata_by_path[1:]:
+            for key in ("dimensions", "spacing", "vti_header_origin"):
+                if metadata[key] != primary_metadata[key]:
+                    raise RuntimeError(
+                        "Temporal VTI grid contract mismatch: "
+                        f"{path.name} {key} differs from {primary_path.name}."
+                    )
+        return primary_metadata, True
+
+    def _kit_cae_vti_asset_hash(self, asset: Path) -> str:
+        """Return a cached SHA-256 identity for temporal proof evidence."""
+
+        cached = self._flow_temporal_asset_hashes.get(asset)
+        if cached:
+            return cached
+        digest = hashlib.sha256()
+        with asset.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        value = digest.hexdigest()
+        self._flow_temporal_asset_hashes[asset] = value
+        return value
+
+    @staticmethod
+    def _kit_cae_vti_source_frame(asset: Path) -> str:
+        """Extract the Houdini frame suffix for compact temporal evidence."""
+
+        match = re.search(r"(\d+)$", asset.stem)
+        return match.group(1) if match else asset.stem
+
+    @staticmethod
+    def _flow_log_value(value) -> object:
+        """Keep compact Flow evidence stable for scalar Kit attribute values."""
+
+        try:
+            return round(float(value), 3)
+        except (TypeError, ValueError):
+            return value
+
+    @staticmethod
+    def _format_flow_log_block(
+        title: str,
+        sections: tuple[tuple[str, tuple[tuple[str, object], ...]], ...],
+    ) -> str:
+        """Format bounded Flow proof evidence as one grep-friendly log block."""
+
+        rule = "=" * 63
+        lines = [f"=== BMS FLOW / {title} {rule}"]
+        for heading, fields in sections:
+            if heading:
+                lines.extend(("", f"{heading}:"))
+            lines.extend(f"  {label:<24}{value}" for label, value in fields)
+        lines.extend(("", rule))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_flow_performance_value(
+        value: float | None,
+        *,
+        suffix: str = "",
+    ) -> str:
+        """Format optional Stage 6 performance values without inventing data."""
+
+        return "unavailable" if value is None else f"{value:.1f}{suffix}"
+
+    @staticmethod
+    def _flow_performance_statistics(
+        samples: list[FlowPerformanceSample],
+    ) -> dict[str, float | None]:
+        """Reduce viewport observations for a log interval or Attach lifetime."""
+
+        fps_values = [sample.fps for sample in samples if sample.fps is not None]
+        frame_times = [
+            sample.frame_time_ms
+            for sample in samples
+            if sample.frame_time_ms is not None
+        ]
+        return {
+            "fps_average": sum(fps_values) / len(fps_values) if fps_values else None,
+            "fps_minimum": min(fps_values) if fps_values else None,
+            "fps_maximum": max(fps_values) if fps_values else None,
+            "frame_time_average": (
+                sum(frame_times) / len(frame_times) if frame_times else None
+            ),
+        }
+
+    def _capture_flow_performance_sample(self) -> FlowPerformanceSample:
+        """Read the same viewport FPS and memory sources used by Kit's HUD."""
+
+        captured_at = time.monotonic()
+        fps = None
+        frame_time_ms = None
+        gpu_memory_used_gib = None
+        process_memory_used_gib = None
+        try:
+            import omni.hydra.engine.stats as engine_stats
+            import omni.kit.viewport.utility as viewport_utility
+            from omni.gpu_foundation_factory import get_memory_info
+
+            viewport = viewport_utility.get_active_viewport()
+            frame_info = viewport.frame_info if viewport else {}
+            if viewport:
+                subframe_count = frame_info.get("subframe_count", 1) or 1
+                effective_fps = float(viewport.fps) * float(subframe_count)
+                if effective_fps > 0.0:
+                    fps = effective_fps
+                    frame_time_ms = 1000.0 / effective_fps
+
+            device_mask = frame_info.get("device_mask")
+            device_info = engine_stats.get_device_info()
+            enabled_devices = [
+                device
+                for index, device in enumerate(device_info)
+                if device_mask is None or device_mask & (1 << index)
+            ]
+            selected_device = (enabled_devices or device_info or [None])[0]
+            if selected_device:
+                gpu_memory_used_gib = float(selected_device["usage"]) / (1024**3)
+
+            host_info = get_memory_info(rss=True)
+            process_memory_used_gib = float(host_info["rss_memory"]) / (1024**3)
+        except Exception:
+            # Performance instrumentation must never make Flow Attach fail.
+            fps = frame_time_ms = gpu_memory_used_gib = process_memory_used_gib = None
+
+        return FlowPerformanceSample(
+            captured_at=captured_at,
+            fps=fps,
+            frame_time_ms=frame_time_ms,
+            gpu_memory_used_gib=gpu_memory_used_gib,
+            process_memory_used_gib=process_memory_used_gib,
+            temporal_source=self._kit_cae_current_temporal_source_name(),
+        )
+
+    def _kit_cae_current_temporal_source_name(self) -> str | None:
+        """Read the composed source active at the current Kit timeline time."""
+
+        if not self._flow_airflow_simulate_path:
+            return None
+        try:
+            import omni.timeline
+            import omni.usd
+            from omni.cae.schema import vtk as cae_vtk
+            from pxr import Usd
+
+            stage = omni.usd.get_context().get_stage()
+            if not stage:
+                return None
+            field_path = (
+                "/BMS_HoudiniVelocity/PointData/"
+                f"{self.config.simulation_cache.velocity_field_name}"
+            )
+            field_prim = stage.GetPrimAtPath(field_path)
+            if not field_prim or not field_prim.IsValid():
+                return None
+            timeline_seconds = float(
+                omni.timeline.get_timeline_interface().get_current_time()
+            )
+            asset = self._kit_cae_selected_velocity_asset(
+                field_prim,
+                timeline_seconds * float(stage.GetTimeCodesPerSecond()),
+                cae_vtk,
+                Usd,
+            )
+            return asset.name if asset else None
+        except Exception:
+            # The temporal source is evidence only; an unavailable read is non-fatal.
+            return None
+
+    def _log_flow_performance_event(
+        self,
+        carb,
+        *,
+        event: str,
+        sample: FlowPerformanceSample,
+    ) -> None:
+        """Record the baseline or settled Flow performance from Kit's HUD data."""
+
+        fields = [
+            ("Event:", event),
+            ("FPS:", self._format_flow_performance_value(sample.fps)),
+            (
+                "Frame time:",
+                self._format_flow_performance_value(
+                    sample.frame_time_ms,
+                    suffix=" ms",
+                ),
+            ),
+        ]
+        if event == "FLOW_ATTACHED":
+            fields.extend(
+                (
+                    (
+                        "GPU memory used:",
+                        self._format_flow_performance_value(
+                            sample.gpu_memory_used_gib,
+                            suffix=" GiB",
+                        ),
+                    ),
+                    (
+                        "Process memory:",
+                        self._format_flow_performance_value(
+                            sample.process_memory_used_gib,
+                            suffix=" GiB",
+                        ),
+                    ),
+                    ("Temporal source:", sample.temporal_source or "unavailable"),
+                    ("Flow attached:", True),
+                )
+            )
+        carb.log_warn(
+            self._format_flow_log_block("PERFORMANCE", (("", tuple(fields)),))
+        )
+
+    def _start_flow_performance_sampler(self) -> None:
+        """Start one low-frequency Stage 6 sampler after Flow is live and settled."""
+
+        self._stop_flow_performance_sampler()
+        self._flow_performance_session_id += 1
+        session_id = self._flow_performance_session_id
+        self._flow_performance_attached_at = time.monotonic()
+        initial_sample = self._capture_flow_performance_sample()
+        self._flow_performance_samples = [initial_sample]
+
+        import carb
+
+        self._log_flow_performance_event(
+            carb,
+            event="FLOW_ATTACHED",
+            sample=initial_sample,
+        )
+        self._flow_performance_task = asyncio.ensure_future(
+            self._run_flow_performance_sampler(session_id)
+        )
+
+    def _stop_flow_performance_sampler(self) -> None:
+        """Cancel a prior Stage 6 sampler before reload, detach, or reattach."""
+
+        self._flow_performance_session_id += 1
+        task = self._flow_performance_task
+        self._flow_performance_task = None
+        if task and not task.done():
+            task.cancel()
+
+    async def _run_flow_performance_sampler(self, session_id: int) -> None:
+        """Collect HUD observations at low frequency and log ten-second intervals."""
+
+        import carb
+
+        attached_at = self._flow_performance_attached_at
+        if attached_at is None:
+            return
+        next_log_at = attached_at + self.FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS
+        interval_start = attached_at
+        try:
+            while (
+                session_id == self._flow_performance_session_id
+                and self._flow_airflow_simulate_path
+            ):
+                await asyncio.sleep(self.FLOW_PERFORMANCE_SAMPLE_INTERVAL_SECONDS)
+                if session_id != self._flow_performance_session_id:
+                    return
+                sample = self._capture_flow_performance_sample()
+                self._flow_performance_samples.append(sample)
+                if sample.captured_at >= next_log_at:
+                    interval_samples = [
+                        item
+                        for item in self._flow_performance_samples
+                        if item.captured_at >= interval_start
+                    ]
+                    self._log_flow_performance_interval(carb, interval_samples)
+                    interval_start = sample.captured_at
+                    next_log_at = (
+                        sample.captured_at + self.FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS
+                    )
+        except asyncio.CancelledError:
+            return
+
+    def _log_flow_performance_interval(
+        self,
+        carb,
+        samples: list[FlowPerformanceSample],
+    ) -> None:
+        """Emit rolling ten-second Stage 6 evidence while Flow remains attached."""
+
+        if not samples or self._flow_performance_attached_at is None:
+            return
+        latest_sample = samples[-1]
+        statistics = self._flow_performance_statistics(samples)
+        elapsed = latest_sample.captured_at - self._flow_performance_attached_at
+        carb.log_warn(
+            self._format_flow_log_block(
+                "PERFORMANCE",
+                (
+                    (
+                        "",
+                        (("Elapsed since Attach:", f"{elapsed:.1f} s"),),
+                    ),
+                    (
+                        "FPS",
+                        (
+                            (
+                                "Average:",
+                                self._format_flow_performance_value(
+                                    statistics["fps_average"]
+                                ),
+                            ),
+                            (
+                                "Minimum:",
+                                self._format_flow_performance_value(
+                                    statistics["fps_minimum"]
+                                ),
+                            ),
+                            (
+                                "Maximum:",
+                                self._format_flow_performance_value(
+                                    statistics["fps_maximum"]
+                                ),
+                            ),
+                        ),
+                    ),
+                    (
+                        "Frame time",
+                        (
+                            (
+                                "Average:",
+                                self._format_flow_performance_value(
+                                    statistics["frame_time_average"],
+                                    suffix=" ms",
+                                ),
+                            ),
+                        ),
+                    ),
+                    (
+                        "Memory",
+                        (
+                            (
+                                "GPU memory used:",
+                                self._format_flow_performance_value(
+                                    latest_sample.gpu_memory_used_gib,
+                                    suffix=" GiB",
+                                ),
+                            ),
+                            (
+                                "Process memory:",
+                                self._format_flow_performance_value(
+                                    latest_sample.process_memory_used_gib,
+                                    suffix=" GiB",
+                                ),
+                            ),
+                        ),
+                    ),
+                    (
+                        "Flow",
+                        (
+                            (
+                                "Temporal source:",
+                                latest_sample.temporal_source or "unavailable",
+                            ),
+                            ("Flow attached:", bool(self._flow_airflow_simulate_path)),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def _log_flow_performance_summary(self, carb) -> None:
+        """Write the final Attach-lifetime result before clearing sampler state."""
+
+        if (
+            not self._flow_performance_samples
+            or self._flow_performance_attached_at is None
+        ):
+            return
+        statistics = self._flow_performance_statistics(self._flow_performance_samples)
+        duration = time.monotonic() - self._flow_performance_attached_at
+        gpu_samples = [
+            sample.gpu_memory_used_gib
+            for sample in self._flow_performance_samples
+            if sample.gpu_memory_used_gib is not None
+        ]
+        flow_resets = sum(
+            1 for record in self._flow_temporal_records if record["flow_reset"]
+        )
+        summary_fields = [
+            ("Flow resets:", flow_resets),
+        ]
+        if gpu_samples:
+            summary_fields.append(("Peak GPU memory:", f"{max(gpu_samples):.1f} GiB"))
+        carb.log_warn(
+            self._format_flow_log_block(
+                "PERFORMANCE SUMMARY",
+                (
+                    (
+                        "",
+                        (("Attached duration:", f"{duration:.1f} s"),),
+                    ),
+                    (
+                        "FPS",
+                        (
+                            (
+                                "Average:",
+                                self._format_flow_performance_value(
+                                    statistics["fps_average"]
+                                ),
+                            ),
+                            (
+                                "Minimum:",
+                                self._format_flow_performance_value(
+                                    statistics["fps_minimum"]
+                                ),
+                            ),
+                            (
+                                "Maximum:",
+                                self._format_flow_performance_value(
+                                    statistics["fps_maximum"]
+                                ),
+                            ),
+                        ),
+                    ),
+                    ("Flow", tuple(summary_fields)),
+                ),
+            )
+        )
+
+    def _log_kit_cae_flow_attached(
+        self,
+        carb,
+        *,
+        temporal_frames: int,
+        metadata: dict[str, object],
+        origin_match: bool,
+        grid_match: bool,
+        operator_ready: bool,
+        flow_environment_path: str,
+        dataset_emitter_path: str,
+    ) -> None:
+        """Emit one normal-path setup summary for the Flow temporal proof."""
+
+        dimensions = " x ".join(str(value) for value in metadata["dimensions"])
+        carb.log_warn(
+            self._format_flow_log_block(
+                "ATTACH",
+                (
+                    (
+                        "",
+                        (
+                            ("Route:", "VTI_KIT_CAE_FLOW"),
+                            ("Temporal frames:", temporal_frames),
+                            ("Grid:", dimensions),
+                        ),
+                    ),
+                    (
+                        "Spatial",
+                        (
+                            ("origin_match:", origin_match),
+                            ("grid_match:", grid_match),
+                        ),
+                    ),
+                    (
+                        "Flow",
+                        (
+                            ("operator_ready:", operator_ready),
+                            ("Environment:", flow_environment_path),
+                            ("Dataset emitter:", dataset_emitter_path),
+                        ),
+                    ),
+                    (
+                        "Presentation",
+                        (
+                            ("Look:", "airflow"),
+                            (
+                                "Attenuation:",
+                                f"{self.KIT_CAE_FLOW_DEFAULT_ATTENUATION:g}",
+                            ),
+                            (
+                                "Opacity:",
+                                self.KIT_CAE_FLOW_DEFAULT_ALPHA_PRESET.title(),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def _log_kit_cae_temporal_frame(
+        self,
+        carb,
+        *,
+        sequence_index: int,
+        temporal_frames: int,
+        asset: Path,
+        previous_frame: str | None,
+        transition: str,
+        operator_ready: bool,
+        operator_wait_ms: float,
+        nano_vdb_velocities_uint_count: int,
+        velocity_scale,
+        couple_rate_velocity,
+        timeline_time_before: float,
+        timeline_time_after: float,
+        timeline_advancing: bool,
+        flow_reset: bool,
+        origin_match: bool,
+        grid_match: bool,
+    ) -> None:
+        """Record one actual source activation without recreating Flow diagnostics."""
+
+        source_frame = self._kit_cae_vti_source_frame(asset)
+        asset_hash = self._kit_cae_vti_asset_hash(asset)[:12]
+        record = {
+            "sequence_index": sequence_index,
+            "source_frame": source_frame,
+            "asset": asset.name,
+            "asset_hash": asset_hash,
+            "previous_frame": previous_frame,
+            "transition": transition,
+            "operator_ready": operator_ready,
+            "operator_wait_ms": round(operator_wait_ms),
+            "nano_vdb_velocities_uint_count": nano_vdb_velocities_uint_count,
+            "velocity_scale": self._flow_log_value(velocity_scale),
+            "couple_rate_velocity": self._flow_log_value(couple_rate_velocity),
+            "timeline_time_before": round(timeline_time_before, 3),
+            "timeline_time_after": round(timeline_time_after, 3),
+            "timeline_advancing": timeline_advancing,
+            "flow_reset": flow_reset,
+            "origin_match": origin_match,
+            "grid_match": grid_match,
+        }
+        self._flow_temporal_records.append(record)
+        carb.log_warn(
+            self._format_flow_log_block(
+                f"TEMPORAL FRAME {sequence_index + 1}/{temporal_frames}",
+                (
+                    (
+                        "Source",
+                        (
+                            ("source_frame:", source_frame),
+                            ("Asset:", asset.name),
+                            ("SHA-256:", asset_hash),
+                            ("previous_frame:", previous_frame),
+                            ("Transition:", transition),
+                        ),
+                    ),
+                    (
+                        "CAE -> Flow",
+                        (
+                            ("operator_ready:", operator_ready),
+                            ("Operator wait:", f"{round(operator_wait_ms)} ms"),
+                            ("NanoVDB uint count:", nano_vdb_velocities_uint_count),
+                            ("Velocity scale:", record["velocity_scale"]),
+                            ("Couple rate:", record["couple_rate_velocity"]),
+                        ),
+                    ),
+                    (
+                        "Timeline",
+                        (
+                            ("Before:", f"{timeline_time_before:.2f} s"),
+                            ("After:", f"{timeline_time_after:.2f} s"),
+                            ("Advancing:", timeline_advancing),
+                            ("flow_reset:", flow_reset),
+                        ),
+                    ),
+                    (
+                        "Invariants",
+                        (
+                            ("origin_match:", origin_match),
+                            ("grid_match:", grid_match),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def _log_kit_cae_temporal_proof(self, carb) -> bool:
+        """Emit the Stage 6 three-frame result only when all evidence is present."""
+
+        records = self._flow_temporal_records
+        frames = [str(record["source_frame"]) for record in records]
+        hashes = {record["asset_hash"] for record in records}
+        transitions = [record["transition"] for record in records[1:]]
+        operator_ready_all = all(bool(record["operator_ready"]) for record in records)
+        origin_match_all = all(bool(record["origin_match"]) for record in records)
+        grid_match_all = all(bool(record["grid_match"]) for record in records)
+        timeline_continuous = all(
+            bool(record["timeline_advancing"]) for record in records
+        )
+        flow_resets = sum(bool(record["flow_reset"]) for record in records)
+        passed = (
+            len(records) == 3
+            and len(set(frames)) == 3
+            and len(hashes) == 3
+            and transitions == ["SWAP", "SWAP"]
+            and operator_ready_all
+            and origin_match_all
+            and grid_match_all
+            and timeline_continuous
+            and flow_resets == 0
+        )
+        sections = (
+            (
+                "",
+                (
+                    ("Frames observed:", " -> ".join(frames) or "none"),
+                    ("Unique assets:", len(set(record["asset"] for record in records))),
+                    ("Unique hashes:", len(hashes)),
+                    (
+                        "Successful transitions:",
+                        sum(transition == "SWAP" for transition in transitions),
+                    ),
+                ),
+            ),
+            (
+                "Invariants",
+                (
+                    ("operator_ready_all:", operator_ready_all),
+                    ("origin_match_all:", origin_match_all),
+                    ("grid_match_all:", grid_match_all),
+                    ("timeline_continuous:", timeline_continuous),
+                    ("Flow resets:", flow_resets),
+                ),
+            ),
+        )
+        if not passed:
+            mismatch = next(
+                (
+                    record
+                    for record in records
+                    if record["source_frame"]
+                    != self._kit_cae_vti_source_frame(
+                        self.config.velocity_vti_sequence_paths[
+                            int(record["sequence_index"])
+                        ]
+                    )
+                ),
+                None,
+            )
+            failure = self._flow_temporal_failure or {}
+            expected_source = (
+                self.config.velocity_vti_sequence_paths[
+                    int(mismatch["sequence_index"])
+                ].name
+                if mismatch is not None
+                else failure.get("expected_asset", "unavailable")
+            )
+            resolved_source = (
+                str(mismatch["asset"])
+                if mismatch is not None
+                else failure.get("resolved_asset", "unavailable")
+            )
+            reason = (
+                "source_asset_match=False"
+                if mismatch is not None
+                else failure.get("reason", "temporal evidence invariant failed")
+            )
+            sections += (
+                (
+                    "Failure",
+                    (
+                        ("Reason:", reason),
+                        ("Expected source:", expected_source),
+                        ("Resolved source:", resolved_source),
+                    ),
+                ),
+            )
+        sections += (("", (("RESULT:", "PASS" if passed else "FAIL"),)),)
+        message = self._format_flow_log_block("TEMPORAL PROOF", sections)
+        if passed:
+            carb.log_warn(message)
+        else:
+            carb.log_error(message)
+        return passed
+
+    @staticmethod
+    def _author_kit_cae_temporal_velocity_samples(
+        field_prim,
+        velocity_paths: tuple[Path, ...],
+        time_codes_per_second: float,
+        cae_vtk,
+        Sdf,
+        Usd,
+    ) -> tuple[float, ...]:
+        """Map the bounded Stage 6 probe to time samples on one VTK field."""
+
+        file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+        if not file_names_attr or not file_names_attr.IsValid():
+            raise RuntimeError("Kit-CAE velocity field is missing fileNames.")
+        if time_codes_per_second <= 0:
+            raise RuntimeError("Stage timeCodesPerSecond must be positive.")
+        time_codes = tuple(
+            float(index) * float(time_codes_per_second)
+            for index in range(len(velocity_paths))
+        )
+        for time_code, velocity_path in zip(time_codes, velocity_paths):
+            file_names_attr.Set(
+                [Sdf.AssetPath(velocity_path.as_posix())],
+                Usd.TimeCode(time_code),
+            )
+        return time_codes
+
+    @staticmethod
+    def _kit_cae_file_names_value_at_time(field_prim, time_code, cae_vtk, Usd):
+        """Read the VTK source assets selected at one USD time code."""
+
+        file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+        return file_names_attr.Get(Usd.TimeCode(time_code))
+
+    @staticmethod
+    def _kit_cae_file_names_value_repr(value) -> list[str]:
+        """Serialize a composed USD asset array for temporal evidence."""
+
+        return [
+            asset.resolvedPath or asset.path or str(asset) for asset in (value or [])
+        ]
+
+    @classmethod
+    def _kit_cae_file_names_time_samples(cls, field_prim, cae_vtk, Usd) -> list[str]:
+        """Format authored VTI source samples for compact time-domain evidence."""
+
+        file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+        return [
+            f"{time_code}:"
+            + "|".join(
+                cls._kit_cae_file_names_value_repr(
+                    cls._kit_cae_file_names_value_at_time(
+                        field_prim,
+                        time_code,
+                        cae_vtk,
+                        Usd,
+                    )
+                )
+            )
+            for time_code in file_names_attr.GetTimeSamples()
+        ]
+
+    @classmethod
+    def _kit_cae_file_names_property_stack(
+        cls, field_prim, cae_vtk
+    ) -> list[dict[str, object]]:
+        """Expose only the composed fileNames opinions needed to debug time samples."""
+
+        file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+        stack = []
+        for spec in file_names_attr.GetPropertyStack():
+            try:
+                time_samples = spec.GetInfo("timeSamples") or {}
+            except Exception:
+                time_samples = {}
+            stack.append(
+                {
+                    "layer": spec.layer.identifier,
+                    "time_codes_per_second": spec.layer.timeCodesPerSecond,
+                    "default": cls._kit_cae_file_names_value_repr(spec.default),
+                    "authored_time_samples": {
+                        str(time_code): cls._kit_cae_file_names_value_repr(value)
+                        for time_code, value in time_samples.items()
+                    },
+                }
+            )
+        return stack
+
+    @classmethod
+    def _log_kit_cae_temporal_time_mapping(
+        cls,
+        carb,
+        *,
+        field_prim,
+        timeline_time_seconds: float,
+        stage_time_codes_per_second: float,
+        resolved_stage_time_code: float,
+        cae_vtk,
+        Usd,
+    ) -> None:
+        """Log actual composed fileNames values before source-match evaluation."""
+
+        file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+
+        def names_at(time_code) -> str:
+            values = cls._kit_cae_file_names_value_repr(
+                cls._kit_cae_file_names_value_at_time(
+                    field_prim,
+                    time_code,
+                    cae_vtk,
+                    Usd,
+                )
+            )
+            return " | ".join(Path(value).name for value in values) or "none"
+
+        property_stack = cls._kit_cae_file_names_property_stack(
+            field_prim,
+            cae_vtk,
+        )
+        authoring_layer_tcps = (
+            property_stack[0]["time_codes_per_second"]
+            if property_stack
+            else "unavailable"
+        )
+        message = cls._format_flow_log_block(
+            "TEMPORAL MAPPING",
+            (
+                (
+                    "Field",
+                    (
+                        ("Prim:", field_prim.GetPath()),
+                        ("Attribute:", file_names_attr.GetPath()),
+                    ),
+                ),
+                (
+                    "Time domain",
+                    (
+                        ("Stage TCPS:", stage_time_codes_per_second),
+                        ("Authoring layer TCPS:", authoring_layer_tcps),
+                        ("Timeline:", f"{timeline_time_seconds:.3f} s"),
+                        ("Resolved timeCode:", f"{resolved_stage_time_code:.3f}"),
+                    ),
+                ),
+                (
+                    "Composed samples",
+                    (
+                        ("TC 0.000:", names_at(0.0)),
+                        ("TC 50.000:", names_at(50.0)),
+                        ("TC 100.000:", names_at(100.0)),
+                    ),
+                ),
+                (
+                    "Resolved",
+                    (
+                        (
+                            f"TC {resolved_stage_time_code:.3f}:",
+                            names_at(resolved_stage_time_code),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        property_lines = ["", "Property stack:"]
+        for index, entry in enumerate(property_stack):
+            samples = entry["authored_time_samples"]
+            sample_text = (
+                ", ".join(
+                    f"{time_code} -> "
+                    f"{' | '.join(Path(value).name for value in values)}"
+                    for time_code, values in samples.items()
+                )
+                or "none"
+            )
+            default_text = (
+                " | ".join(Path(value).name for value in entry["default"]) or "[]"
+            )
+            property_lines.extend(
+                (
+                    "",
+                    f"  Layer {index}:",
+                    f"    Path: {entry['layer']}",
+                    f"    TCPS: {entry['time_codes_per_second']}",
+                    f"    Default: {default_text}",
+                    f"    Samples: {sample_text}",
+                )
+            )
+        message = (
+            message.rsplit("\n", 1)[0]
+            + "\n"
+            + "\n".join(property_lines)
+            + "\n"
+            + "=" * 63
+        )
+        carb.log_warn(message)
+
+    @classmethod
+    def _kit_cae_selected_velocity_asset(
+        cls, field_prim, time_code, cae_vtk, Usd
+    ) -> Path | None:
+        """Resolve the source VTI selected by the current USD time code."""
+
+        file_names = cls._kit_cae_file_names_value_at_time(
+            field_prim,
+            time_code,
+            cae_vtk,
+            Usd,
+        )
+        if not file_names or len(file_names) != 1:
+            return None
+        asset_path = file_names[0]
+        resolved = asset_path.resolvedPath or asset_path.path
+        return Path(resolved).resolve() if resolved else None
+
+    async def _monitor_kit_cae_temporal_proof(
+        self,
+        *,
+        app,
+        carb,
+        stage,
+        timeline,
+        velocity_paths: tuple[Path, ...],
+        field_prim,
+        dataset_emitter,
+        flow_environment_path: str,
+        dataset_emitter_path: str,
+        origin_match: bool,
+        grid_match: bool,
+        cae_vtk,
+        Usd,
+    ) -> bool:
+        """Observe two real source swaps while the existing Flow simulation runs."""
+
+        if len(velocity_paths) < 2 or not self._flow_temporal_sample_time_codes:
+            return self._log_kit_cae_temporal_proof(carb)
+
+        time_codes_per_second = float(stage.GetTimeCodesPerSecond())
+        for sequence_index, expected_asset in enumerate(velocity_paths[1:], start=1):
+            expected_time_code = self._flow_temporal_sample_time_codes[sequence_index]
+            deadline = time.monotonic() + 8.0
+            timeline_time_before = float(timeline.get_current_time())
+            while (
+                float(timeline.get_current_time()) * time_codes_per_second
+                < expected_time_code
+                and time.monotonic() < deadline
+            ):
+                await app.next_update_async()
+            if (
+                float(timeline.get_current_time()) * time_codes_per_second
+                < expected_time_code
+            ):
+                self._log_kit_cae_temporal_failure_details(
+                    carb,
+                    reason=f"timeline did not reach source frame {expected_asset.name}",
+                    timeline=timeline,
+                    field_prim=field_prim,
+                    dataset_emitter=dataset_emitter,
+                    cae_vtk=cae_vtk,
+                    Usd=Usd,
+                    time_codes_per_second=time_codes_per_second,
+                    expected_asset=expected_asset,
+                )
+                self._log_kit_cae_temporal_proof(carb)
+                return False
+
+            timeline_time_after = float(timeline.get_current_time())
+            resolved_stage_time_code = timeline_time_after * time_codes_per_second
+            self._log_kit_cae_temporal_time_mapping(
+                carb,
+                field_prim=field_prim,
+                timeline_time_seconds=timeline_time_after,
+                stage_time_codes_per_second=time_codes_per_second,
+                resolved_stage_time_code=resolved_stage_time_code,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+            )
+            active_asset = self._kit_cae_selected_velocity_asset(
+                field_prim,
+                resolved_stage_time_code,
+                cae_vtk,
+                Usd,
+            )
+            source_asset_match = active_asset == expected_asset
+            operator_readiness = await self._wait_for_kit_cae_dataset_emitter_ready(
+                app,
+                dataset_emitter,
+            )
+            payload_attribute = dataset_emitter.GetAttribute("nanoVdbVelocities")
+            payload = (
+                payload_attribute.Get()
+                if payload_attribute and payload_attribute.IsValid()
+                else None
+            )
+            payload_count = len(payload) if payload is not None else 0
+            velocity_scale = dataset_emitter.GetAttribute("velocityScale").Get()
+            couple_rate_velocity = dataset_emitter.GetAttribute(
+                "coupleRateVelocity"
+            ).Get()
+            flow_simulate = stage.GetPrimAtPath(f"{flow_environment_path}/flowSimulate")
+            flow_reset = not (
+                self._flow_airflow_simulate_path
+                == f"{flow_environment_path}/flowSimulate"
+                and flow_simulate
+                and flow_simulate.IsValid()
+                and dataset_emitter
+                and dataset_emitter.IsValid()
+                and str(dataset_emitter.GetPath()) == dataset_emitter_path
+            )
+            timeline_advancing = timeline_time_after > timeline_time_before
+            frame_evidence_valid = (
+                source_asset_match
+                and bool(operator_readiness["ready"])
+                and not bool(operator_readiness["timed_out"])
+                and payload_count > 0
+                and float(couple_rate_velocity or 0.0) > 0.0
+                and timeline_advancing
+                and not flow_reset
+                and origin_match
+                and grid_match
+            )
+            self._log_kit_cae_temporal_frame(
+                carb,
+                sequence_index=sequence_index,
+                temporal_frames=len(velocity_paths),
+                asset=active_asset or expected_asset,
+                previous_frame=self._kit_cae_vti_source_frame(
+                    velocity_paths[sequence_index - 1]
+                ),
+                transition="SWAP",
+                operator_ready=bool(operator_readiness["ready"]),
+                operator_wait_ms=float(operator_readiness["seconds"]) * 1000.0,
+                nano_vdb_velocities_uint_count=payload_count,
+                velocity_scale=velocity_scale,
+                couple_rate_velocity=couple_rate_velocity,
+                timeline_time_before=timeline_time_before,
+                timeline_time_after=timeline_time_after,
+                timeline_advancing=timeline_advancing,
+                flow_reset=flow_reset,
+                origin_match=origin_match,
+                grid_match=grid_match,
+            )
+            if not frame_evidence_valid:
+                self._log_kit_cae_temporal_failure_details(
+                    carb,
+                    reason=(
+                        "source_asset_match="
+                        f"{source_asset_match}, operator_ready="
+                        f"{operator_readiness['ready']}, flow_reset={flow_reset}"
+                    ),
+                    timeline=timeline,
+                    field_prim=field_prim,
+                    dataset_emitter=dataset_emitter,
+                    cae_vtk=cae_vtk,
+                    Usd=Usd,
+                    time_codes_per_second=time_codes_per_second,
+                    expected_asset=expected_asset,
+                    flow_reset=flow_reset,
+                )
+                self._log_kit_cae_temporal_proof(carb)
+                return False
+
+        return self._log_kit_cae_temporal_proof(carb)
+
+    def _log_kit_cae_temporal_failure_details(
+        self,
+        carb,
+        *,
+        reason: str,
+        timeline,
+        field_prim,
+        dataset_emitter,
+        cae_vtk,
+        Usd,
+        time_codes_per_second: float,
+        expected_asset: Path | None = None,
+        flow_reset: bool = False,
+    ) -> None:
+        """Emit expanded evidence only when one temporal proof invariant fails."""
+
+        current_time_code = float(timeline.get_current_time()) * time_codes_per_second
+        selected_asset = self._kit_cae_selected_velocity_asset(
+            field_prim,
+            current_time_code,
+            cae_vtk,
+            Usd,
+        )
+        self._flow_temporal_failure = {
+            "reason": reason,
+            "expected_asset": expected_asset.name if expected_asset else "unavailable",
+            "resolved_asset": selected_asset.name if selected_asset else "unavailable",
+        }
+        payload_attribute = dataset_emitter.GetAttribute("nanoVdbVelocities")
+        payload = (
+            payload_attribute.Get()
+            if payload_attribute and payload_attribute.IsValid()
+            else None
+        )
+        velocity_scale = dataset_emitter.GetAttribute("velocityScale").Get()
+        couple_rate_velocity = dataset_emitter.GetAttribute("coupleRateVelocity").Get()
+        operator_ready = (
+            payload is not None
+            and len(payload) > 0
+            and float(couple_rate_velocity or 0.0) > 0.0
+        )
+        carb.log_error(
+            self._format_flow_log_block(
+                "FAILURE DIAGNOSTICS",
+                (
+                    (
+                        "Failure",
+                        (("Reason:", reason),),
+                    ),
+                    (
+                        "Expected",
+                        (
+                            (
+                                "Frame:",
+                                (
+                                    self._kit_cae_vti_source_frame(expected_asset)
+                                    if expected_asset
+                                    else "unavailable"
+                                ),
+                            ),
+                            (
+                                "Asset:",
+                                (
+                                    expected_asset.name
+                                    if expected_asset
+                                    else "unavailable"
+                                ),
+                            ),
+                        ),
+                    ),
+                    (
+                        "Observed",
+                        (
+                            (
+                                "Frame:",
+                                (
+                                    self._kit_cae_vti_source_frame(selected_asset)
+                                    if selected_asset
+                                    else "unavailable"
+                                ),
+                            ),
+                            (
+                                "Asset:",
+                                (
+                                    selected_asset.name
+                                    if selected_asset
+                                    else "unavailable"
+                                ),
+                            ),
+                        ),
+                    ),
+                    (
+                        "Flow state",
+                        (
+                            ("operator_ready:", operator_ready),
+                            (
+                                "NanoVDB count:",
+                                len(payload) if payload is not None else 0,
+                            ),
+                            ("Velocity scale:", self._flow_log_value(velocity_scale)),
+                            (
+                                "Couple rate:",
+                                self._flow_log_value(couple_rate_velocity),
+                            ),
+                            ("flow_reset:", flow_reset),
+                        ),
+                    ),
+                ),
+            )
+        )
 
     @staticmethod
     def _read_kit_cae_vti_metadata(
@@ -1616,8 +2953,8 @@ class RuntimeController:
         attenuation_attr.Set(float(attenuation))
         rgba_points_attr.Set(
             [
-                Gf.Vec4f(point[0], point[1], point[2], alpha_values[index])
-                for index, point in enumerate(rgba_points)
+                Gf.Vec4f(*cls.KIT_CAE_FLOW_TRACER_RGB[index], alpha_values[index])
+                for index in range(len(alpha_values))
             ]
         )
         cls._hide_kit_cae_smoke_injector_mesh(
@@ -1626,6 +2963,53 @@ class RuntimeController:
             UsdGeom,
         )
         return alpha_values
+
+    def set_kit_cae_debug_overlays_visible_in_kit(
+        self,
+        visible: bool,
+    ) -> SimulationCacheResult:
+        """Show or hide the optional Flow spatial-sanity wireframes."""
+
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return SimulationCacheResult(
+                False, "Debug overlays skipped: no open stage."
+            )
+        if not self._set_kit_cae_spatial_sanity_wireframes_visibility(
+            stage,
+            visible,
+            UsdGeom,
+        ):
+            return SimulationCacheResult(
+                False,
+                "Attach the airflow cache before changing debug overlays.",
+            )
+        return SimulationCacheResult(
+            True,
+            f"Flow debug overlays {'shown' if visible else 'hidden'}.",
+        )
+
+    @staticmethod
+    def _set_kit_cae_spatial_sanity_wireframes_visibility(
+        stage,
+        visible: bool,
+        UsdGeom,
+    ) -> bool:
+        overlay_prims = (
+            stage.GetPrimAtPath("/BMS_KitCAE/SpatialSanity"),
+            stage.GetPrimAtPath("/BMS_KitCAE/BoundingBox"),
+        )
+        valid_prims = [prim for prim in overlay_prims if prim and prim.IsValid()]
+        if not valid_prims:
+            return False
+        for prim in valid_prims:
+            UsdGeom.Imageable(prim).CreateVisibilityAttr().Set(
+                UsdGeom.Tokens.inherited if visible else UsdGeom.Tokens.invisible
+            )
+        return True
 
     @staticmethod
     def _hide_kit_cae_smoke_injector_mesh(
@@ -2221,7 +3605,10 @@ class RuntimeController:
         )
         root_path = "/BMS_KitCAE/SpatialSanity"
         stage.RemovePrim(root_path)
-        UsdGeom.Xform.Define(stage, root_path)
+        root = UsdGeom.Xform.Define(stage, root_path)
+        UsdGeom.Imageable(root.GetPrim()).CreateVisibilityAttr().Set(
+            UsdGeom.Tokens.invisible
+        )
 
         def author_wireframe(
             name: str,

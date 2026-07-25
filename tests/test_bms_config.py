@@ -43,6 +43,16 @@ def test_v02_runtime_config_resolves_default_asset():
     assert config.simulation_cache.velocity_vti_path == (
         "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti"
     )
+    assert tuple(path.name for path in config.velocity_vti_sequence_paths) == (
+        "server_airflow_velocity_1014.vti",
+        "server_airflow_velocity_1015.vti",
+        "server_airflow_velocity_1016.vti",
+    )
+    assert config.simulation_cache.velocity_vti_sequence_paths == (
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1015.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1016.vti",
+    )
     assert config.simulation_cache.velocity_field_name == "vel"
 
 
