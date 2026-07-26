@@ -250,28 +250,13 @@ sampling_distance = 0.0255
 resolution_scale = 25
 rendering_samples = 1
 filter_mode = "nearest"
-velocity_vti_path = "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti"
-velocity_vti_sequence_paths = [
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1051.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1101.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1151.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1201.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1251.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1301.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1351.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1401.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1451.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1501.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1551.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1601.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1651.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1701.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1751.vti",
-]
 velocity_field_name = "vel"
 temporal_debug_logging = false
 
+[simulation_cache.airflow_dataset]
+root = "airflow_datasets"
+scope = "server"
+state = "load_normal"
 [simulation_cache.smoke_tuning]
 density = 0.5
 brightness = 1.0
@@ -281,7 +266,18 @@ damping = 0.0
 fade = 0.0
 sharpness = 0.9
 vorticity = 0.6
+velocity_scale_multiplier = 1.0
+time_scale = 1.0
 raymarch_quality = 0.75
+base_color = [0.58, 0.64, 0.69]
+
+[simulation_cache.emitter_layout]
+emitters_per_row = 7
+rows = 1
+depth = 1.0
+size = 0.75
+horizontal_margin = 0.04
+vertical_margin = 0.02
 
 [simulation_cache.intake_tracers]
 count = 7
@@ -289,4 +285,3 @@ radius = 0.01
 front_offset = 0.008
 smoke_target = 0.5
 smoke_couple_rate = 30.0
-smoke_cloud_base_color = [0.58, 0.64, 0.69]

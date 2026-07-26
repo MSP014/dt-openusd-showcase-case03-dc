@@ -53,6 +53,26 @@ Heavy USD, VDB, texture, and HDRI payloads remain under `assets/_external/`.
 Application modules may reference those files through relative config paths, but
 they must not copy those assets into this source tree.
 
+## Runtime Architecture
+
+| Location | Responsibility |
+| --- | --- |
+| `ext/msp.dtrs/msp/dtrs/extension.py` | OmniUI sidebar, user interaction, and asynchronous command scheduling. |
+| `app/commands.py` | Stable `RuntimeController` facade used by the extension. |
+| `app/config.py` | Project configuration plus local operator override merge and persistence. |
+| `app/airflow_dataset.py` | Manifest-driven external airflow dataset discovery, VTI sequence validation, and derived timing. |
+| `app/flow/runtime.py` | Flow Attach/Detach lifecycle, playback commands, session state, smoke/layout apply orchestration, and re-attach safety. |
+| `app/flow/smoke.py` | Smoke-only tracer emitters, Cloud rendering, smoke tuning, transport controls, and procedural emitter layout math. |
+| `app/flow/temporal.py` | VTI time-code authoring, temporal source switching, loop proof, and temporal evidence. |
+| `app/flow/performance.py` | Viewport FPS and memory sampling with periodic Flow performance reports. |
+| `app/flow/diagnostics.py` | Kit-CAE spatial/field validation, optional overlays, origin diagnostics, and detailed Flow probes. |
+| `app/flow/validation.py` | VTI metadata parsing and focused Kit-CAE readiness helpers. |
+
+The external airflow data contract lives below `assets/_external/airflow_datasets/`.
+Each dataset directory carries a `manifest.toml`; DTRS selects it by manifest
+`scope` and `state`, discovers its colocated VTI files numerically, and derives
+the runtime cadence from the source FPS and frame step.
+
 The Stage 2 look-review baseline uses
 `assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr` by default
 and applies it through a transient `/DTRS_Runtime/Lighting` session-layer dome

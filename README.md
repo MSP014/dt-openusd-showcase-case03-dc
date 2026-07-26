@@ -21,7 +21,7 @@ staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
-> **Why GB203, not the flagship?** The **RTX PRO 4500** delivers **17.9 TFLOPS per $1,000** — the best efficiency ratio at this tier. Across a 16-rack cluster, this translates to **$1.58M saved** versus the RTX PRO 5000 72GB, with no compromise on the architecture: the 4U chassis accepts a drop-in upgrade the moment VRAM requirements scale. *(The RTX PRO 6000's 600W TDP requires a different node class entirely.)*
+> **Why GB203, not the flagship?** The project uses an internal scenario analysis: **17.9 TFLOPS per $1,000** and **$1.58M saved** across a 16-rack cluster versus the RTX PRO 5000 72GB. These are design-time planning estimates, not vendor pricing or a current market quote. The 4U chassis preserves a bounded three-GPU plus ConnectX-7 layout for the current DTRS reference node.
 >
 > **Why 3 GPUs, not 4?** The node requires a 400G ConnectX-7 NIC for RDMA. On the 7-slot WRX90E motherboard, three dual-slot GPUs + one NIC perfectly maxes out the physical PCIe layout without bottlenecking the network card.
 >
@@ -36,18 +36,18 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 ## Digital Twin Runtime Suite 0.4.0 Runtime Preview
 
 *Omniverse full-server runtime review with live synthetic node telemetry,
-configurable presentation controls, front-panel indicators, QLED temperature
-display, and temporal Houdini VTI velocity playback through Kit-CAE and NVIDIA Flow.*
+persistent enclosure and airflow controls, and manifest-driven Houdini VTI
+velocity playback through Kit-CAE and NVIDIA Flow.*
 
-| Telemetry overview | Runtime configuration |
+| Airflow controls | Attached airflow review |
 | :---: | :---: |
-| ![Digital Twin Runtime Suite 0.4.0 - Telemetry overview](docs/img/dtrs_0.4.0/dtrs_0.4.0_01.png) | ![Digital Twin Runtime Suite 0.4.0 - Runtime configuration](docs/img/dtrs_0.4.0/dtrs_0.4.0_02.png) |
-| *Full-server telemetry hierarchy and synthetic workload state* | *Config-driven camera, lighting, grid, and telemetry provider controls* |
+| ![Digital Twin Runtime Suite 0.4.0 - Airflow controls](docs/img/dtrs_0.4.0/dtrs_0.4.0_01.png) | ![Digital Twin Runtime Suite 0.4.0 - Attached airflow review](docs/img/dtrs_0.4.0/dtrs_0.4.0_02.png) |
+| *View tab with persistent enclosure, airflow-cache, smoke-tuning, colour, and transport controls* | *Manifest-selected `server / load_normal` velocity field driving volumetric smoke through the open server* |
 
-| Server presentation controls | Closed chassis review |
+| Runtime configuration | Telemetry overview |
 | :---: | :---: |
-| ![Digital Twin Runtime Suite 0.4.0 - Server presentation controls](docs/img/dtrs_0.4.0/dtrs_0.4.0_03.png) | ![Digital Twin Runtime Suite 0.4.0 - Closed chassis review](docs/img/dtrs_0.4.0/dtrs_0.4.0_04.png) |
-| *Runtime enclosure visibility and front-panel hinge controls* | *Closed server review with animated hinged front panel and active indicators* |
+| ![Digital Twin Runtime Suite 0.4.0 - Runtime configuration](docs/img/dtrs_0.4.0/dtrs_0.4.0_03.png) | ![Digital Twin Runtime Suite 0.4.0 - Telemetry overview](docs/img/dtrs_0.4.0/dtrs_0.4.0_04.png) |
+| *Config tab with runtime asset, lighting, grid, camera, and telemetry-provider controls* | *Full-server telemetry hierarchy with a live synthetic Nominal workload state* |
 
 → [Watch the server assembly preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
@@ -55,9 +55,9 @@ display, and temporal Houdini VTI velocity playback through Kit-CAE and NVIDIA F
 
 The Digital Twin Runtime Suite is developed and validated on an NVIDIA GeForce RTX 3080 12GB and is designed primarily as an **interactive technical visualisation**, rather than an offline cinematic renderer.
 
-At the current development stage, the server-level scene runs at approximately **30-40 FPS with volumetric airflow visualisation enabled**. Higher-fidelity RTX rendering modes are available within Omniverse, but were intentionally not used as the runtime baseline because their additional GPU cost would compromise interactive inspection of telemetry, animated components and volumetric flow.
+Higher-fidelity RTX rendering modes are available within Omniverse, but were intentionally not used as the runtime baseline because their additional GPU cost would compromise interactive inspection of telemetry, animated components and volumetric flow.
 
-The current rendering configuration therefore prioritises **runtime responsiveness, simulation readability and functional interaction** over maximum photorealistic fidelity.
+The current rendering configuration therefore prioritises **runtime responsiveness, simulation readability and functional interaction** over maximum image fidelity.
 
 Performance figures are hardware- and scene-dependent and will continue to be profiled as the application evolves.
 
@@ -69,15 +69,15 @@ The current simulation pass turns the hero server from a static hardware model i
 
 These Houdini-solved airflow caches are physically inspired, presentation-grade qualitative proxies, not validated CFD results or a certified CFD validation study. They provide the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. The goal is to make intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
 
-DTRS is configured for a sixteen-frame sparse, time-sampled Houdini VTI
-vector-field fixture through Kit-CAE and NVIDIA Flow. The Stage 6 loop proof
-uses the structured `PointData/vel` field to update native runtime
-smoke/advection in one continuous Flow simulation, with the full server
-presentation preserved.
+DTRS discovers the external VTI dataset from its manifest and maps its samples
+to Kit-CAE and NVIDIA Flow at the source-defined cadence. The current
+`server / load_normal` fixture contains 80 samples at 5 Hz; its structured
+`PointData/vel` field updates native runtime smoke/advection in one continuous
+Flow simulation while preserving the full server presentation.
 
 The Flow consumer is intentionally separated from source selection. This PoC
 proves VTI temporal substitution inside the runtime; it does not yet implement
-VDB cache playback, telemetry-to-cache state binding, or an external live feed.
+telemetry-to-cache state binding or an external live feed.
 
 → [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
@@ -156,7 +156,7 @@ The streamline visualisation pass exposes the velocity-field behaviour more dire
 | **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
 | **The Silent Heat (Node)** | **Thermal Behaviour Visualisation:** Represents estimated waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
 | **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
-| **Hybrid Visualisation** | Seamless switching between **Photorealistic** (Marketing) and **X-Ray / Flow Visualisation** (Engineering) modes. |
+| **Hybrid Visualisation** | Planned switching between the standard runtime presentation and an Engineering X-Ray / Flow view. The X-Ray mode is not implemented yet. |
 
 ---
 
@@ -171,8 +171,8 @@ The system follows a strict separation of concerns:
 Houdini is the closed creative environment of this hybrid pipeline. Houdini project files (`.hip`) are **not distributed** — only the exported outputs are.
 
 * **Geometry**: Server Nodes, Racks, and Data Hall layouts modelled procedurally and exported as USD.
-* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, exported as resampled VTI vector-field fixtures for the current Kit-CAE/Flow runtime proof. VDB caches remain private source data, not the current DTRS playback contract.
-* **Output**: Optimised USD assets (`.usda`, `.vdb`) prepared for runtime consumption by Digital Twin Runtime Suite.
+* **Simulation**: Houdini-based volumetric airflow and thermal-behaviour approximation, exported as resampled VTI vector-field fixtures for the current Kit-CAE/Flow runtime.
+* **Output**: Optimised USD assets and temporal VTI velocity datasets prepared for Digital Twin Runtime Suite.
 
 ### 2. Interactive Digital Twin Frontend (NVIDIA Omniverse)
 
@@ -181,7 +181,7 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 * **Application**: **Digital Twin Runtime Suite**.
 * **Extension**: `msp.dtrs`.
 * **Logic**: A State Machine that consumes the Python Data Provider and drives current node presentation controls. Telemetry-to-cache state binding, vector streamlines, and thermal heatmaps remain later staged visual layers.
-* **UI**: Viewport-embedded HUD (`omni.ui.scene` overlay) for hierarchical LOD navigation (Hall → Rack → Node) and manual stress-test overrides.
+* **UI**: OmniUI sidebar with `Telemetry`, `View`, and `Config` tabs, plus runtime status and performance overlays. Hierarchical Hall/Rack/Node navigation and a viewport HUD remain future work.
 
 ---
 
@@ -206,7 +206,9 @@ operational state keeps the server active.
 
 ### 1. Environment Setup
 
-The project relies on a specific Conda environment (`case03-env`) to ensure reproducibility.
+The `case03-env` Conda environment supports current Case 03 tooling and
+pure-Python validation. It is not required to launch Digital Twin Runtime Suite,
+which runs inside Omniverse Kit's Python environment.
 
 ```bash
 # Create and activate environment
@@ -217,20 +219,42 @@ conda activate case03-env
 pip install -r requirements.txt
 ```
 
-### 2. Asset Hydration
+### 2. External Data Hydration
 
-To keep the repository lightweight, heavy binary assets (Textures, VDB Caches) are stored externally.
+Large binary dependencies are distributed separately from the Git repository.
 
-1. **Download** the Asset Pack: [Google Drive folder](https://drive.google.com/drive/folders/1qV2-NQr9HLf-maKPOiB4z9TwodqvK_sh?usp=sharing)
-2. **Extract** contents to: `assets/_external/`
-3. **Verify** structure:
+Two external packages are used:
 
-    ```text
-    assets/_external/
-    ├── usd/      # Heavy USD Crates
-    ├── tex/      # 4K/8K Textures
-    └── vdb/      # Simulation Caches
-    ```
+1. **Production Asset Pack — Google Drive**
+   - USD assets
+   - textures
+   - HDRI environments
+
+2. **Airflow Runtime Dataset — Hugging Face**
+   - manifest-driven temporal VTI velocity fields
+   - current dataset: `server / load_normal`
+   - 80 samples at 5 Hz
+
+1. Download and extract the Production Asset Pack directly into
+   `assets/_external/`, preserving its `usd/`, `tex/`, and `hdri/` directories.
+2. Download the Airflow Runtime Dataset and place its `airflow_datasets/`
+   directory directly under `assets/_external/` without renaming its internal
+   folders.
+
+After hydrating both sources, the expected structure is:
+
+```text
+assets/_external/
+├── airflow_datasets/
+├── hdri/
+├── tex/
+└── usd/
+```
+
+- [Production Asset Pack on Google Drive](https://drive.google.com/drive/folders/1qV2-NQr9HLf-maKPOiB4z9TwodqvK_sh?usp=sharing)
+- [Airflow Runtime Dataset on Hugging Face](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow)
+
+
 
 ### 3. Running the App
 
@@ -253,32 +277,35 @@ Template release directory:
 
 ```powershell
 $kitRelease = "path\to\kit-app-template\_build\windows-x86_64\release"
+$kitCaeRelease = "path\to\kit-cae\_build\windows-x86_64\release"
 & "$kitRelease\kit\kit.exe" `
   ".\src\digital_twin_runtime_suite\apps\digital_twin_runtime_suite.kit" `
   --ext-folder "$kitRelease\exts" `
   --ext-folder "$kitRelease\extscache" `
-  --ext-folder "$kitRelease\apps"
+  --ext-folder "$kitRelease\apps" `
+  --ext-folder "$kitCaeRelease\exts"
 ```
 
 The current runtime reads `configs/digital_twin_runtime_suite.toml`,
 resolves the hydrated asset package under `assets/_external/`, opens the
-configured Noctua NH-D9 TR5-SP6 CPU cooler asset in the RTX viewport, and
-applies the configured look-review lighting baseline.
+configured Blackwell Rig GB203 server assembly in the RTX viewport, and
+applies its configured presentation, lighting, telemetry, and airflow runtime
+settings.
 
-Stage 2 lighting uses the Config panel in the Kit UI. Its default HDRI is
+Lighting uses the Config panel in the Kit UI. Its default HDRI is
 `assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr`; exposure,
 intensity, and dome XYZ rotation are runtime controls applied through a
 transient `/DTRS_Runtime/Lighting` session-layer setup. The HDRI background can
 be hidden from the primary viewport while preserving its lighting contribution.
 
-The current runtime includes the Stage 3 synthetic node telemetry provider and
-Stage 4 telemetry-driven CPU fan motion. Telemetry updates independently from
-the Kit timeline, exposes latest-snapshot thermal, power, cooling, and limit
-values, and supports manual workload targets plus display freeze/resume. The
-Config tab can tune provider cadence and per-mode metric targets through a
-separate local telemetry override. The CPU fan motion uses topology-validated
-axis discovery, an authored `Xform` fast path when the exported pivot is valid,
-and a Session Layer pivot-stack fallback for older exports.
+The current runtime includes the synthetic node telemetry provider, telemetry-
+driven fan motion across the complete server, persistent enclosure presentation,
+and the Kit-CAE/Flow airflow review path. Telemetry updates independently
+from the Kit timeline, exposes latest-snapshot thermal, power, cooling, and
+limit values, and supports manual workload targets plus display freeze/resume.
+The Config tab can tune provider cadence and per-mode metric targets through a
+separate local telemetry override. The View tab owns the enclosure, airflow,
+smoke, transport, and emitter-layout controls.
 
 ---
 

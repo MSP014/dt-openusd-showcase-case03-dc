@@ -459,11 +459,150 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 width=ui.Fraction(1),
             )
 
+    def _build_smoke_color_controls(
+        self,
+        base_color: tuple[float, float, float],
+    ) -> None:
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
+
+        hue, saturation, value = rgb_to_hsv(base_color)
+        self._updating_smoke_color_controls = False
+        self._smoke_color_input_source = "hex"
+        self._smoke_color_hex_model = ui.SimpleStringModel(rgb_to_hex(base_color))
+        self._smoke_color_hue_model = ui.SimpleFloatModel(hue)
+        self._smoke_color_saturation_model = ui.SimpleFloatModel(saturation)
+        self._smoke_color_value_model = ui.SimpleFloatModel(value)
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Color", width=SERVER_VIEW_LABEL_WIDTH)
+            ui.StringField(
+                model=self._smoke_color_hex_model,
+                width=ui.Fraction(1),
+            )
+            self._smoke_color_preview_frame = ui.Frame(width=32, height=20)
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("HSV", width=SERVER_VIEW_LABEL_WIDTH)
+            ui.Label("H", width=12)
+            ui.FloatField(model=self._smoke_color_hue_model, width=ui.Fraction(1))
+            ui.Label("S", width=12)
+            ui.FloatField(
+                model=self._smoke_color_saturation_model,
+                width=ui.Fraction(1),
+            )
+            ui.Label("V", width=12)
+            ui.FloatField(model=self._smoke_color_value_model, width=ui.Fraction(1))
+        self._smoke_color_hex_model.add_value_changed_fn(
+            self._on_smoke_color_hex_changed
+        )
+        for model in (
+            self._smoke_color_hue_model,
+            self._smoke_color_saturation_model,
+            self._smoke_color_value_model,
+        ):
+            model.add_value_changed_fn(self._on_smoke_color_hsv_changed)
+        self._set_pending_smoke_color(base_color)
+
+    def _set_pending_smoke_color(
+        self,
+        base_color: tuple[float, float, float],
+    ) -> None:
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
+
+        self._updating_smoke_color_controls = True
+        try:
+            hue, saturation, value = rgb_to_hsv(base_color)
+            self._smoke_color_hex_model.set_value(rgb_to_hex(base_color))
+            self._smoke_color_hue_model.set_value(hue)
+            self._smoke_color_saturation_model.set_value(saturation)
+            self._smoke_color_value_model.set_value(value)
+        finally:
+            self._updating_smoke_color_controls = False
+        self._refresh_smoke_color_preview(base_color)
+
+    def _refresh_smoke_color_preview(
+        self,
+        base_color: tuple[float, float, float],
+    ) -> None:
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_omniui_color
+
+        with self._smoke_color_preview_frame:
+            ui.Rectangle(
+                style={"background_color": rgb_to_omniui_color(base_color)},
+                width=ui.Percent(100),
+                height=ui.Percent(100),
+            )
+
+    def _on_smoke_color_hex_changed(self, _model) -> None:
+        if self._updating_smoke_color_controls:
+            return
+        from digital_twin_runtime_suite.app.view_controls import (
+            hex_to_rgb,
+            string_model_value,
+        )
+
+        self._smoke_color_input_source = "hex"
+        try:
+            color = hex_to_rgb(string_model_value(self._smoke_color_hex_model))
+        except ValueError:
+            return
+        self._set_pending_smoke_color(color)
+
+    def _on_smoke_color_hsv_changed(self, _model) -> None:
+        if self._updating_smoke_color_controls:
+            return
+        from digital_twin_runtime_suite.app.view_controls import (
+            build_smoke_base_color_from_models,
+        )
+
+        self._smoke_color_input_source = "hsv"
+        try:
+            color = build_smoke_base_color_from_models(
+                source="hsv",
+                hex_model=self._smoke_color_hex_model,
+                hue_model=self._smoke_color_hue_model,
+                saturation_model=self._smoke_color_saturation_model,
+                value_model=self._smoke_color_value_model,
+            )
+        except ValueError:
+            return
+        self._set_pending_smoke_color(color)
+
+    def _build_emitter_layout_row(
+        self,
+        label: str,
+        field_name: str,
+        value: float | int,
+    ) -> None:
+        from digital_twin_runtime_suite.app.config import EMITTER_LAYOUT_VALUE_OPTIONS
+        from digital_twin_runtime_suite.app.view_controls import (
+            emitter_layout_option_index,
+        )
+
+        choices = EMITTER_LAYOUT_VALUE_OPTIONS[field_name]
+        labels = (
+            (
+                ("Minimum" if choice == 0 else f"{choice:.0%}")
+                if field_name == "size"
+                else (
+                    f"{choice:.0%}"
+                    if field_name in {"depth", "horizontal_margin", "vertical_margin"}
+                    else f"{choice:g}"
+                )
+            )
+            for choice in choices
+        )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
+            self._emitter_layout_combos[field_name] = ui.ComboBox(
+                emitter_layout_option_index(field_name, value),
+                *labels,
+                width=ui.Fraction(1),
+            )
+
     def _build_airflow_cache_controls(self) -> None:
         cache = self._controller.config.simulation_cache
         wrapper_name = (
-            Path(cache.velocity_vti_path).name
-            if cache.runtime_mode == "kit_cae" and cache.velocity_vti_path
+            f"{cache.airflow_dataset.scope} / {cache.airflow_dataset.state}"
+            if cache.runtime_mode == "kit_cae"
             else (
                 Path(cache.wrapper_path).name
                 if cache.wrapper_path
@@ -503,12 +642,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 clicked_fn=self._reset_airflow,
                 width=ui.Fraction(1),
             )
-        ui.Button(
-            "Capture GPU profile",
-            clicked_fn=self._capture_airflow_gpu_profile,
-            height=26,
-            width=ui.Percent(100),
-        )
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Button(
                 "Set Overview",
@@ -554,6 +687,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             "shadow_density",
             smoke_tuning.shadow_density,
         )
+        self._build_smoke_color_controls(smoke_tuning.base_color)
         ui.Label("Dynamics", height=18)
         self._build_smoke_tuning_row("Damping", "damping", smoke_tuning.damping)
         self._build_smoke_tuning_row("Fade", "fade", smoke_tuning.fade)
@@ -562,6 +696,16 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             "Vorticity",
             "vorticity",
             smoke_tuning.vorticity,
+        )
+        self._build_smoke_tuning_row(
+            "Velocity scale ×",
+            "velocity_scale_multiplier",
+            smoke_tuning.velocity_scale_multiplier,
+        )
+        self._build_smoke_tuning_row(
+            "Time scale",
+            "time_scale",
+            smoke_tuning.time_scale,
         )
         ui.Label("Quality", height=18)
         self._build_smoke_tuning_row(
@@ -572,6 +716,45 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         ui.Button(
             "Apply Smoke Settings",
             clicked_fn=self._schedule_apply_smoke_tuning,
+            height=26,
+            width=ui.Percent(100),
+        )
+        self._emitter_layout_combos = {}
+        emitter_layout = cache.emitter_layout
+        ui.Label("Emitter Layout", height=22)
+        self._build_emitter_layout_row(
+            "Emitters per row",
+            "emitters_per_row",
+            emitter_layout.emitters_per_row,
+        )
+        self._build_emitter_layout_row(
+            "Emitter rows",
+            "rows",
+            emitter_layout.rows,
+        )
+        self._build_emitter_layout_row(
+            "Depth position",
+            "depth",
+            emitter_layout.depth,
+        )
+        self._build_emitter_layout_row(
+            "Emitter size",
+            "size",
+            emitter_layout.size,
+        )
+        self._build_emitter_layout_row(
+            "Horizontal margin",
+            "horizontal_margin",
+            emitter_layout.horizontal_margin,
+        )
+        self._build_emitter_layout_row(
+            "Vertical margin",
+            "vertical_margin",
+            emitter_layout.vertical_margin,
+        )
+        ui.Button(
+            "Apply Emitter Layout",
+            clicked_fn=self._schedule_apply_emitter_layout,
             height=26,
             width=ui.Percent(100),
         )
@@ -1325,6 +1508,12 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._airflow_task = asyncio.ensure_future(self._apply_smoke_tuning())
 
+    def _schedule_apply_emitter_layout(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(self._apply_emitter_layout())
+
     def _schedule_apply_flow_debug_overlays(self) -> None:
         if self._airflow_task and not self._airflow_task.done():
             self._set_airflow_status("Airflow operation is already in progress.")
@@ -1365,10 +1554,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_airflow_status("Airflow operation is already in progress.")
             return
         result = self._controller.reset_simulation_cache_in_kit()
-        self._set_airflow_status(result.message)
-
-    def _capture_airflow_gpu_profile(self) -> None:
-        result = self._controller.capture_gpu_profile_in_kit()
         self._set_airflow_status(result.message)
 
     def _schedule_apply_camera(self) -> None:
@@ -1602,6 +1787,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     async def _apply_smoke_tuning(self) -> None:
         from digital_twin_runtime_suite.app.view_controls import (
+            build_smoke_base_color_from_models,
             build_smoke_tuning_from_models,
         )
 
@@ -1613,11 +1799,41 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_airflow_status("Smoke Tuning controls are unavailable.")
             return
         try:
-            tuning = build_smoke_tuning_from_models(index_models)
+            base_color = build_smoke_base_color_from_models(
+                source=self._smoke_color_input_source,
+                hex_model=self._smoke_color_hex_model,
+                hue_model=self._smoke_color_hue_model,
+                saturation_model=self._smoke_color_saturation_model,
+                value_model=self._smoke_color_value_model,
+            )
+            tuning = build_smoke_tuning_from_models(
+                index_models,
+                base_color=base_color,
+            )
         except ValueError as error:
             self._set_airflow_status(f"Smoke Tuning selection is invalid: {error}")
             return
         result = self._controller.apply_kit_cae_smoke_tuning_in_kit(tuning)
+        self._set_airflow_status(result.message)
+
+    async def _apply_emitter_layout(self) -> None:
+        from digital_twin_runtime_suite.app.view_controls import (
+            build_emitter_layout_from_models,
+        )
+
+        index_models = {
+            field_name: self._combo_index_model(combo)
+            for field_name, combo in self._emitter_layout_combos.items()
+        }
+        if any(model is None for model in index_models.values()):
+            self._set_airflow_status("Emitter Layout controls are unavailable.")
+            return
+        try:
+            layout = build_emitter_layout_from_models(index_models)
+        except ValueError as error:
+            self._set_airflow_status(f"Emitter Layout selection is invalid: {error}")
+            return
+        result = await self._controller.apply_kit_cae_emitter_layout_in_kit(layout)
         self._set_airflow_status(result.message)
 
     async def _apply_flow_debug_overlays(self) -> None:
@@ -1643,6 +1859,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_airflow_status(f"{name} camera bookmark applied.")
 
     async def _apply_chassis_visibility_controls(self) -> None:
+        from digital_twin_runtime_suite.app.config import (
+            chassis_presentation_with_operator_state,
+        )
         from digital_twin_runtime_suite.app.view_controls import (
             build_face_panel_state,
             build_visibility_state,
@@ -1656,22 +1875,48 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._chassis_visibility_models,
             group_ids,
         )
-        await self._controller.apply_chassis_visibility_state_in_kit(
-            visibility_by_group,
-            status_callback=self._set_status,
-        )
         face_panel_state = build_face_panel_state(self._face_panel_open_model)
-        if (
-            face_panel_state is not None
-            and self._controller.config.chassis_presentation.face_panel.enabled
-        ):
-            applied = await self._controller.apply_face_panel_state_in_kit(
+        try:
+            chassis_presentation_with_operator_state(
+                self._controller.config.chassis_presentation,
+                visibility_by_group,
+                face_panel_state,
+            )
+        except ValueError as error:
+            self._set_status(f"Server enclosure settings are invalid: {error}")
+            return
+
+        visibility_applied = True
+        if group_ids:
+            visibility_applied = (
+                await self._controller.apply_chassis_visibility_state_in_kit(
+                    visibility_by_group,
+                    status_callback=self._set_status,
+                )
+            )
+        face_panel_applied = True
+        if face_panel_state is not None:
+            face_panel_applied = await self._controller.apply_face_panel_state_in_kit(
                 face_panel_state,
                 status_callback=self._set_status,
             )
-            if applied:
-                self._face_panel_open_state = face_panel_state
-                self._set_face_panel_action_label(face_panel_state)
+        if not visibility_applied or not face_panel_applied:
+            self._set_status("Server enclosure changes were not saved.")
+            return
+        try:
+            self._controller.save_chassis_presentation_override(
+                visibility_by_group,
+                face_panel_state,
+            )
+        except (OSError, ValueError) as error:
+            self._set_status(
+                f"Server enclosure applied but could not be saved: {error}"
+            )
+            return
+        if face_panel_state is not None:
+            self._face_panel_open_state = face_panel_state
+            self._set_face_panel_action_label(face_panel_state)
+        self._set_status("Server enclosure settings applied and saved.")
 
     async def _apply_lighting(self) -> None:
         lighting = self._build_lighting_config_from_controls()
