@@ -2,10 +2,26 @@
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+LOGGER = logging.getLogger(__name__)
+
+
+SMOKE_TUNING_VALUE_OPTIONS: dict[str, tuple[float, ...]] = {
+    "density": (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0),
+    "brightness": (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0),
+    "ambient": (0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0),
+    "shadow_density": (0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0),
+    "damping": (0.0, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 1.0),
+    "fade": (0.0, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.65),
+    "sharpness": (0.0, 0.001, 0.125, 0.25, 0.5, 0.625, 0.75, 0.9, 1.0),
+    "vorticity": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0),
+    "raymarch_quality": (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0),
+}
 
 LIGHTING_OVERRIDE_KEYS = (
     "default_hdri_path",
@@ -30,8 +46,6 @@ SIMULATION_CACHE_OVERRIDE_KEYS = (
     "velocity_vti_path",
     "velocity_vti_sequence_paths",
     "velocity_field_name",
-    "flow_vorticity_enabled",
-    "flow_vorticity_force_scale",
 )
 
 
@@ -184,11 +198,22 @@ class IntakeTracerConfig:
     front_offset: float = 0.008
     smoke_target: float = 0.5
     smoke_couple_rate: float = 30.0
-    smoke_damping: float = 0.0
-    smoke_fade: float = 0.01
-    smoke_cloud_density_multiplier: float = 1.0
     smoke_cloud_base_color: tuple[float, float, float] = (0.58, 0.64, 0.69)
-    smoke_second_order_blend_factor: float = 0.5
+
+
+@dataclass(frozen=True)
+class SmokeTuningConfig:
+    """Operator-facing NVIDIA Flow settings for the smoke volume."""
+
+    density: float = 0.5
+    brightness: float = 1.0
+    ambient: float = 1.0
+    shadow_density: float = 1.0
+    damping: float = 0.0
+    fade: float = 0.0
+    sharpness: float = 0.9
+    vorticity: float = 0.6
+    raymarch_quality: float = 0.75
 
 
 @dataclass(frozen=True)
@@ -209,8 +234,7 @@ class SimulationCacheConfig:
     velocity_vti_sequence_paths: tuple[str, ...] = ()
     velocity_field_name: str = "vel"
     temporal_debug_logging: bool = False
-    flow_vorticity_enabled: bool = False
-    flow_vorticity_force_scale: float = 0.1
+    smoke_tuning: SmokeTuningConfig = SmokeTuningConfig()
     intake_tracers: IntakeTracerConfig = IntakeTracerConfig()
 
 
@@ -246,9 +270,17 @@ class RuntimeConfig:
         if apply_local_overrides:
             local_path = cls.local_config_path_for(resolved_config)
             if local_path.exists():
-                with local_path.open("rb") as local_file:
-                    local_data = tomllib.load(local_file)
-                _merge_runtime_override(data, local_data)
+                try:
+                    with local_path.open("rb") as local_file:
+                        local_data = tomllib.load(local_file)
+                except tomllib.TOMLDecodeError as error:
+                    LOGGER.warning(
+                        "Ignoring malformed local DTRS override %s: %s",
+                        local_path,
+                        error,
+                    )
+                else:
+                    _merge_runtime_override(data, local_data)
 
         repo_root = resolved_config.parent.parent
         paths = data["paths"]
@@ -373,6 +405,7 @@ def format_runtime_override(
     lighting: LightingConfig,
     camera: CameraConfig | None = None,
     grid: GridConfig | None = None,
+    smoke_tuning: SmokeTuningConfig | None = None,
 ) -> str:
     """Serialize local operator overrides as minimal TOML."""
 
@@ -416,6 +449,20 @@ def format_runtime_override(
             f"enabled = {_toml_bool(grid.enabled)}\n"
             f"step = {grid.step:.6g}\n"
             f"width = {grid.width:.6g}\n"
+        )
+    if smoke_tuning:
+        text += (
+            "\n"
+            "[simulation_cache.smoke_tuning]\n"
+            f"density = {smoke_tuning.density:.6g}\n"
+            f"brightness = {smoke_tuning.brightness:.6g}\n"
+            f"ambient = {smoke_tuning.ambient:.6g}\n"
+            f"shadow_density = {smoke_tuning.shadow_density:.6g}\n"
+            f"damping = {smoke_tuning.damping:.6g}\n"
+            f"fade = {smoke_tuning.fade:.6g}\n"
+            f"sharpness = {smoke_tuning.sharpness:.6g}\n"
+            f"vorticity = {smoke_tuning.vorticity:.6g}\n"
+            f"raymarch_quality = {smoke_tuning.raymarch_quality:.6g}\n"
         )
     return text
 
@@ -470,10 +517,27 @@ def _merge_runtime_override(
 
     local_simulation_cache = local_data.get("simulation_cache")
     if isinstance(local_simulation_cache, dict):
-        simulation_cache = dict(data.get("simulation_cache", {}))
+        base_simulation_cache = data.get("simulation_cache")
+        simulation_cache = (
+            dict(base_simulation_cache)
+            if isinstance(base_simulation_cache, dict)
+            else {
+                "enabled": any(
+                    key in local_simulation_cache
+                    for key in SIMULATION_CACHE_OVERRIDE_KEYS
+                )
+            }
+        )
         for key in SIMULATION_CACHE_OVERRIDE_KEYS:
             if key in local_simulation_cache:
                 simulation_cache[key] = local_simulation_cache[key]
+        local_smoke_tuning = local_simulation_cache.get("smoke_tuning")
+        if isinstance(local_smoke_tuning, dict):
+            smoke_tuning = dict(simulation_cache.get("smoke_tuning", {}))
+            for key in SMOKE_TUNING_VALUE_OPTIONS:
+                if key in local_smoke_tuning:
+                    smoke_tuning[key] = local_smoke_tuning[key]
+            simulation_cache["smoke_tuning"] = smoke_tuning
         data["simulation_cache"] = simulation_cache
 
 
@@ -799,6 +863,49 @@ def _parse_fan_motion_bindings(data: Any) -> tuple[FanMotionBindingConfig, ...]:
     return tuple(bindings)
 
 
+def validate_smoke_tuning(tuning: SmokeTuningConfig) -> None:
+    """Raise when a requested operator value is outside the supported menu."""
+
+    for field_name, supported_values in SMOKE_TUNING_VALUE_OPTIONS.items():
+        value = getattr(tuning, field_name)
+        if value not in supported_values:
+            allowed = ", ".join(f"{item:g}" for item in supported_values)
+            raise ValueError(f"smoke_tuning.{field_name} must be one of: {allowed}.")
+
+
+def _parse_smoke_tuning_config(data: Any) -> SmokeTuningConfig:
+    defaults = SmokeTuningConfig()
+    if not isinstance(data, dict):
+        return defaults
+
+    values: dict[str, float] = {}
+    for field_name, supported_values in SMOKE_TUNING_VALUE_OPTIONS.items():
+        default = getattr(defaults, field_name)
+        raw_value = data.get(field_name, default)
+        try:
+            if isinstance(raw_value, bool):
+                raise ValueError
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            LOGGER.warning(
+                "Unsupported smoke_tuning.%s=%r; using installed Flow default %s.",
+                field_name,
+                raw_value,
+                default,
+            )
+            value = default
+        if value not in supported_values:
+            LOGGER.warning(
+                "Unsupported smoke_tuning.%s=%r; using installed Flow default %s.",
+                field_name,
+                raw_value,
+                default,
+            )
+            value = default
+        values[field_name] = value
+    return SmokeTuningConfig(**values)
+
+
 def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     if not isinstance(data, dict):
         return SimulationCacheConfig()
@@ -815,8 +922,7 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     )
     velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
     temporal_debug_logging = bool(data.get("temporal_debug_logging", False))
-    flow_vorticity_enabled = bool(data.get("flow_vorticity_enabled", False))
-    flow_vorticity_force_scale = float(data.get("flow_vorticity_force_scale", 0.1))
+    smoke_tuning = _parse_smoke_tuning_config(data.get("smoke_tuning"))
     raw_intake_tracers = data.get("intake_tracers", {})
     if not isinstance(raw_intake_tracers, dict):
         raise ValueError("simulation_cache.intake_tracers must be a table.")
@@ -826,18 +932,10 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         front_offset=float(raw_intake_tracers.get("front_offset", 0.008)),
         smoke_target=float(raw_intake_tracers.get("smoke_target", 0.5)),
         smoke_couple_rate=float(raw_intake_tracers.get("smoke_couple_rate", 30.0)),
-        smoke_damping=float(raw_intake_tracers.get("smoke_damping", 0.0)),
-        smoke_fade=float(raw_intake_tracers.get("smoke_fade", 0.01)),
-        smoke_cloud_density_multiplier=float(
-            raw_intake_tracers.get("smoke_cloud_density_multiplier", 1.0)
-        ),
         smoke_cloud_base_color=_parse_rgb(
             raw_intake_tracers.get("smoke_cloud_base_color"),
             (0.58, 0.64, 0.69),
             "simulation_cache.intake_tracers.smoke_cloud_base_color",
-        ),
-        smoke_second_order_blend_factor=float(
-            raw_intake_tracers.get("smoke_second_order_blend_factor", 0.5)
         ),
     )
     if runtime_mode not in {"index", "kit_cae"}:
@@ -885,10 +983,6 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         raise ValueError("simulation_cache.field_name must not be empty.")
     if not velocity_field_name:
         raise ValueError("simulation_cache.velocity_field_name must not be empty.")
-    if flow_vorticity_force_scale < 0:
-        raise ValueError(
-            "simulation_cache.flow_vorticity_force_scale must not be negative."
-        )
     if intake_tracers.count != 7:
         raise ValueError("simulation_cache.intake_tracers.count must be 7.")
     if intake_tracers.radius <= 0:
@@ -904,24 +998,6 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     if intake_tracers.smoke_couple_rate <= 0:
         raise ValueError(
             "simulation_cache.intake_tracers.smoke_couple_rate must be positive."
-        )
-    if not 0 <= intake_tracers.smoke_damping <= 1:
-        raise ValueError(
-            "simulation_cache.intake_tracers.smoke_damping must be in 0..1."
-        )
-    if intake_tracers.smoke_fade < 0:
-        raise ValueError(
-            "simulation_cache.intake_tracers.smoke_fade must not be negative."
-        )
-    if intake_tracers.smoke_cloud_density_multiplier <= 0:
-        raise ValueError(
-            "simulation_cache.intake_tracers.smoke_cloud_density_multiplier "
-            "must be positive."
-        )
-    if not 0 <= intake_tracers.smoke_second_order_blend_factor <= 0.5:
-        raise ValueError(
-            "simulation_cache.intake_tracers.smoke_second_order_blend_factor "
-            "must be in 0..0.5."
         )
     if sampling_distance <= 0:
         raise ValueError("simulation_cache.sampling_distance must be positive.")
@@ -948,8 +1024,7 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         velocity_vti_sequence_paths=velocity_vti_sequence_paths,
         velocity_field_name=velocity_field_name,
         temporal_debug_logging=temporal_debug_logging,
-        flow_vorticity_enabled=flow_vorticity_enabled,
-        flow_vorticity_force_scale=flow_vorticity_force_scale,
+        smoke_tuning=smoke_tuning,
         intake_tracers=intake_tracers,
     )
 

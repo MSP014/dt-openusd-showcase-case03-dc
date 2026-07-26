@@ -9,7 +9,7 @@ from digital_twin_runtime_suite.app.commands import (
     FlowPerformanceSample,
     RuntimeController,
 )
-from digital_twin_runtime_suite.app.config import RuntimeConfig
+from digital_twin_runtime_suite.app.config import RuntimeConfig, SmokeTuningConfig
 from digital_twin_runtime_suite.app.simulation_cache import (
     run_simulation_cache_preflight,
 )
@@ -301,7 +301,7 @@ def test_kit_cae_front_intake_tracer_positions_follow_p120_bounds():
     assert all(round(float(position[2]), 6) == 0.028 for position in positions)
 
 
-def test_kit_cae_smoke_only_tracer_setup_disables_combustion_and_masks_vorticity():
+def test_kit_cae_smoke_only_tracer_setup_applies_cloud_tuning_without_reset():
     from pxr import Sdf, Usd, UsdGeom
 
     config = RuntimeConfig.load(
@@ -318,6 +318,7 @@ def test_kit_cae_smoke_only_tracer_setup_disables_combustion_and_masks_vorticity
 
     environment = define_prim("/DTRS_KitCAE/FlowSimulation")
     simulate = define_prim(f"{environment.GetPath()}/flowSimulate")
+    define_attribute(simulate, "forceClear", Sdf.ValueTypeNames.Bool, False)
     advection = define_prim(f"{simulate.GetPath()}/advection")
     smoke = define_prim(f"{advection.GetPath()}/smoke")
     vorticity = define_prim(f"{simulate.GetPath()}/vorticity")
@@ -337,6 +338,18 @@ def test_kit_cae_smoke_only_tracer_setup_disables_combustion_and_masks_vorticity
     define_attribute(ray_march_cloud, "enableCloudMode", Sdf.ValueTypeNames.Bool, False)
     define_attribute(
         ray_march_cloud, "densityMultiplier", Sdf.ValueTypeNames.Float, 0.0
+    )
+    define_attribute(
+        ray_march_cloud, "volumeColorMultiplier", Sdf.ValueTypeNames.Float, 0.0
+    )
+    define_attribute(
+        ray_march_cloud, "ambientMultiplier", Sdf.ValueTypeNames.Float, 0.0
+    )
+    define_attribute(
+        ray_march_cloud,
+        "attenuationMultiplier",
+        Sdf.ValueTypeNames.Float3,
+        (0.0, 0.0, 0.0),
     )
     define_attribute(
         ray_march_cloud,
@@ -359,20 +372,25 @@ def test_kit_cae_smoke_only_tracer_setup_disables_combustion_and_masks_vorticity
         "constantMask",
     ):
         define_attribute(vorticity, attribute_name, Sdf.ValueTypeNames.Float, 0.0)
+    define_attribute(ray_march, "stepSizeScale", Sdf.ValueTypeNames.Float, 0.0)
 
     RuntimeController._configure_kit_cae_smoke_only_tracer_flow(
         stage,
         str(environment.GetPath()),
         config.simulation_cache.intake_tracers,
-        vorticity_enabled=False,
-        vorticity_force_scale=config.simulation_cache.flow_vorticity_force_scale,
+        config.simulation_cache.smoke_tuning,
     )
 
     assert debug_volume.GetAttribute("enableSpeedAsTemperature").Get() is False
     assert debug_volume.GetAttribute("enableVelocityAsDensity").Get() is False
     assert ray_march.GetAttribute("enableRawMode").Get() is False
     assert ray_march_cloud.GetAttribute("enableCloudMode").Get() is True
-    assert ray_march_cloud.GetAttribute("densityMultiplier").Get() == 1.0
+    assert ray_march_cloud.GetAttribute("densityMultiplier").Get() == 0.5
+    assert ray_march_cloud.GetAttribute("volumeColorMultiplier").Get() == 1.0
+    assert ray_march_cloud.GetAttribute("ambientMultiplier").Get() == 1.0
+    assert tuple(
+        ray_march_cloud.GetAttribute("attenuationMultiplier").Get()
+    ) == pytest.approx((1.0, 1.0, 1.0))
     assert tuple(
         ray_march_cloud.GetAttribute("volumeBaseColor").Get()
     ) == pytest.approx((0.58, 0.64, 0.69))
@@ -380,46 +398,46 @@ def test_kit_cae_smoke_only_tracer_setup_disables_combustion_and_masks_vorticity
     assert advection.GetAttribute("buoyancyPerSmoke").Get() == 0.0
     assert advection.GetAttribute("buoyancyPerTemp").Get() == 0.0
     assert smoke.GetAttribute("damping").Get() == 0.0
-    assert smoke.GetAttribute("fade").Get() == pytest.approx(0.01)
-    assert smoke.GetAttribute("secondOrderBlendFactor").Get() == 0.5
-    assert vorticity.GetAttribute("enabled").Get() is False
-    assert vorticity.GetAttribute("forceScale").Get() == pytest.approx(0.1)
+    assert smoke.GetAttribute("fade").Get() == pytest.approx(0.0)
+    assert smoke.GetAttribute("secondOrderBlendFactor").Get() == pytest.approx(0.9)
+    assert vorticity.GetAttribute("enabled").Get() is True
+    assert vorticity.GetAttribute("forceScale").Get() == pytest.approx(0.6)
+    assert ray_march.GetAttribute("stepSizeScale").Get() == pytest.approx(0.75)
     assert vorticity.GetAttribute("smokeMask").Get() == 1.0
     assert vorticity.GetAttribute("velocityMask").Get() == 0.0
     assert vorticity.GetAttribute("velocityLinearMask").Get() == 0.0
     assert vorticity.GetAttribute("constantMask").Get() == 0.0
+    custom_tuning = SmokeTuningConfig(
+        density=1.5,
+        brightness=1.25,
+        ambient=0.75,
+        shadow_density=1.5,
+        damping=0.005,
+        fade=0.01,
+        sharpness=0.5,
+        vorticity=0.0,
+        raymarch_quality=0.75,
+    )
 
-
-def test_kit_cae_flow_vorticity_toggle_changes_only_enabled_without_reset():
-    from pxr import Sdf, Usd, UsdGeom
-
-    stage = Usd.Stage.CreateInMemory()
-    simulate = UsdGeom.Xform.Define(
+    RuntimeController._author_kit_cae_smoke_tuning(
         stage,
-        "/DTRS_KitCAE/FlowSimulation/flowSimulate",
-    ).GetPrim()
-    force_clear = simulate.CreateAttribute("forceClear", Sdf.ValueTypeNames.Bool)
-    force_clear.Set(False)
-    vorticity = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowSimulate/vorticity",
-    ).GetPrim()
-    enabled = vorticity.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool)
-    enabled.Set(False)
-    force_scale = vorticity.CreateAttribute("forceScale", Sdf.ValueTypeNames.Float)
-    force_scale.Set(0.1)
+        str(environment.GetPath()),
+        custom_tuning,
+    )
 
-    assert RuntimeController._set_kit_cae_flow_vorticity_enabled(stage, True)
-    assert enabled.Get() is True
-    assert force_clear.Get() is False
-
-    assert RuntimeController._set_kit_cae_flow_vorticity_enabled(stage, False)
-    assert enabled.Get() is False
-    assert force_clear.Get() is False
-
-    assert RuntimeController._set_kit_cae_flow_vorticity_force_scale(stage, 0.6)
-    assert force_scale.Get() == pytest.approx(0.6)
-    assert force_clear.Get() is False
+    assert ray_march_cloud.GetAttribute("densityMultiplier").Get() == 1.5
+    assert ray_march_cloud.GetAttribute("volumeColorMultiplier").Get() == 1.25
+    assert ray_march_cloud.GetAttribute("ambientMultiplier").Get() == 0.75
+    assert tuple(
+        ray_march_cloud.GetAttribute("attenuationMultiplier").Get()
+    ) == pytest.approx((1.5, 1.5, 1.5))
+    assert smoke.GetAttribute("damping").Get() == pytest.approx(0.005)
+    assert smoke.GetAttribute("fade").Get() == pytest.approx(0.01)
+    assert smoke.GetAttribute("secondOrderBlendFactor").Get() == pytest.approx(0.5)
+    assert vorticity.GetAttribute("enabled").Get() is False
+    assert vorticity.GetAttribute("forceScale").Get() == 0.0
+    assert ray_march.GetAttribute("stepSizeScale").Get() == pytest.approx(0.75)
+    assert simulate.GetAttribute("forceClear").Get() is False
 
 
 def test_kit_cae_temporal_velocity_samples_author_sixteen_sparse_vti_frames(tmp_path):
@@ -578,76 +596,5 @@ def test_kit_cae_vti_origin_compatibility_opinion_uses_session_layer():
     assert origin_attr.GetPropertyStack()[0].layer == stage.GetSessionLayer()
 
 
-def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
-    from pxr import Gf, Sdf, Usd, UsdGeom
-
-    stage = Usd.Stage.CreateInMemory()
-    environment = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/FlowSimulation")
-    UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowOffscreen",
-    )
-    UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowRender",
-    )
-    ray_march = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowRender/rayMarch",
-    )
-    ray_march.GetPrim().CreateAttribute(
-        "attenuation",
-        Sdf.ValueTypeNames.Float,
-    ).Set(3.0)
-    colormap = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowOffscreen/colormap",
-    )
-    colormap.GetPrim().CreateAttribute(
-        "rgbaPoints",
-        Sdf.ValueTypeNames.Float4Array,
-    ).Set(
-        [
-            Gf.Vec4f(0.2, 0.3, 0.8, 0.3),
-            Gf.Vec4f(1.0, 1.0, 0.0, 0.3),
-            Gf.Vec4f(0.7, 0.01, 0.14, 1.0),
-        ]
-    )
-    tracer_root = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/AirflowTracerEmitters")
-    injector = UsdGeom.Mesh.Define(
-        stage,
-        "/DTRS_KitCAE/AirflowTracerEmitters/intake_01",
-    )
-    emitter = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/AirflowTracerEmitters/intake_01/EmitterSphere",
-    )
-    stage.SetEditTarget(stage.GetSessionLayer())
-
-    alphas = RuntimeController._author_kit_cae_flow_presentation(
-        stage,
-        str(environment.GetPath()),
-        str(tracer_root.GetPath()),
-        10.0,
-        "medium",
-        Gf,
-        UsdGeom,
-    )
-
-    rgba_points = colormap.GetPrim().GetAttribute("rgbaPoints").Get()
-    assert alphas == (0.6, 0.6, 1.0)
-    assert ray_march.GetPrim().GetAttribute("attenuation").Get() == 10.0
-    assert [round(point[3], 2) for point in rgba_points] == [0.6, 0.6, 1.0]
-    assert [
-        tuple(round(float(point[index]), 3) for index in range(3))
-        for point in rgba_points
-    ] == [
-        (0.015, 0.08, 0.3),
-        (0.0, 0.72, 0.88),
-        (0.82, 1.0, 1.0),
-    ]
-    assert (
-        UsdGeom.Imageable(injector.GetPrim()).ComputeVisibility()
-        == UsdGeom.Tokens.invisible
-    )
-    assert emitter.GetPrim().IsValid()
+def test_legacy_flow_presentation_path_is_removed():
+    assert not hasattr(RuntimeController, "_author_kit_cae_flow_presentation")

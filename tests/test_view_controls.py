@@ -1,8 +1,16 @@
+import pytest
+
+from digital_twin_runtime_suite.app.config import (
+    SMOKE_TUNING_VALUE_OPTIONS,
+    SmokeTuningConfig,
+)
 from digital_twin_runtime_suite.app.view_controls import (
     bool_model_value,
     build_face_panel_state,
+    build_smoke_tuning_from_models,
     build_visibility_state,
     face_panel_action_label,
+    smoke_tuning_option_index,
 )
 
 
@@ -124,3 +132,46 @@ def test_build_face_panel_state_reads_open_and_closed_model_values():
 
 def test_build_face_panel_state_accepts_missing_control():
     assert build_face_panel_state(None) is None
+
+
+def test_smoke_tuning_models_build_a_pending_batch_without_runtime_side_effects():
+    selected_values = {
+        "density": 1.5,
+        "brightness": 1.25,
+        "ambient": 0.75,
+        "shadow_density": 1.5,
+        "damping": 0.005,
+        "fade": 0.01,
+        "sharpness": 0.5,
+        "vorticity": 0.8,
+        "raymarch_quality": 0.75,
+    }
+    models = {
+        field_name: IntGetterModel(
+            smoke_tuning_option_index(field_name, selected_value)
+        )
+        for field_name, selected_value in selected_values.items()
+    }
+
+    assert build_smoke_tuning_from_models(models) == SmokeTuningConfig(
+        **selected_values
+    )
+
+
+def test_smoke_tuning_models_reject_missing_or_invalid_dropdowns():
+    complete_models = {
+        field_name: IntGetterModel(0) for field_name in SMOKE_TUNING_VALUE_OPTIONS
+    }
+    missing_models = dict(complete_models)
+    missing_models.pop("vorticity")
+    with pytest.raises(ValueError, match="vorticity"):
+        build_smoke_tuning_from_models(missing_models)
+
+    complete_models["density"] = IntGetterModel(99)
+    with pytest.raises(ValueError, match="density"):
+        build_smoke_tuning_from_models(complete_models)
+
+
+def test_smoke_tuning_dropdown_index_rejects_unsupported_resolved_values():
+    with pytest.raises(ValueError, match="density"):
+        smoke_tuning_option_index("density", 9.0)

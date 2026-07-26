@@ -51,6 +51,16 @@ display, and temporal Houdini VTI velocity playback through Kit-CAE and NVIDIA F
 
 → [Watch the server assembly preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
 
+### Runtime Performance & Rendering Trade-offs
+
+The Digital Twin Runtime Suite is developed and validated on an NVIDIA GeForce RTX 3080 12GB and is designed primarily as an **interactive technical visualisation**, rather than an offline cinematic renderer.
+
+At the current development stage, the server-level scene runs at approximately **30-40 FPS with volumetric airflow visualisation enabled**. Higher-fidelity RTX rendering modes are available within Omniverse, but were intentionally not used as the runtime baseline because their additional GPU cost would compromise interactive inspection of telemetry, animated components and volumetric flow.
+
+The current rendering configuration therefore prioritises **runtime responsiveness, simulation readability and functional interaction** over maximum photorealistic fidelity.
+
+Performance figures are hardware- and scene-dependent and will continue to be profiled as the application evolves.
+
 ## Blackwell Rig Airflow Simulation Preview
 
 *Technical viewport preview of the 4U Blackwell Rig GB203 node used as the first airflow layout review pass.*
