@@ -66,6 +66,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._airflow_attenuation_combo = None
         self._airflow_alpha_combo = None
         self._show_flow_debug_overlays_model = None
+        self._flow_vorticity_model = None
+        self._flow_vorticity_strength_model = None
+        self._flow_camera_bookmarks = {}
         self._lighting_task = None
         self._camera_sync_task = None
         self._telemetry_task = None
@@ -159,6 +162,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         if self._telemetry_task:
             self._telemetry_task.cancel()
             self._telemetry_task = None
+        if self._controller:
+            self._controller.stop_flow_runtime_callbacks()
         if self._motion_controller:
             self._motion_controller.reset()
             self._motion_controller = None
@@ -237,6 +242,18 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._show_flow_debug_overlays_model = ui.SimpleBoolModel(False)
         self._show_flow_debug_overlays_model.add_value_changed_fn(
             lambda _model: self._schedule_apply_flow_debug_overlays()
+        )
+        self._flow_vorticity_model = ui.SimpleBoolModel(
+            config.simulation_cache.flow_vorticity_enabled
+        )
+        self._flow_vorticity_model.add_value_changed_fn(
+            lambda _model: self._schedule_apply_flow_vorticity()
+        )
+        self._flow_vorticity_strength_model = ui.SimpleFloatModel(
+            config.simulation_cache.flow_vorticity_force_scale
+        )
+        self._flow_vorticity_strength_model.add_value_changed_fn(
+            lambda _model: self._schedule_apply_flow_vorticity_strength()
         )
         self._grid_step_model = ui.SimpleFloatModel(config.grid.step)
         self._grid_width_model = ui.SimpleFloatModel(config.grid.width)
@@ -488,8 +505,43 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             width=ui.Percent(100),
         )
         with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Button(
+                "Set Overview",
+                clicked_fn=lambda: self._capture_flow_camera_bookmark("Overview"),
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Set Close-up",
+                clicked_fn=lambda: self._capture_flow_camera_bookmark("Close-up"),
+                width=ui.Fraction(1),
+            )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Button(
+                "Overview",
+                clicked_fn=lambda: self._schedule_apply_flow_camera_bookmark(
+                    "Overview"
+                ),
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Close-up",
+                clicked_fn=lambda: self._schedule_apply_flow_camera_bookmark(
+                    "Close-up"
+                ),
+                width=ui.Fraction(1),
+            )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label("Show debug overlays", width=SERVER_VIEW_LABEL_WIDTH)
             ui.CheckBox(model=self._show_flow_debug_overlays_model)
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Flow vorticity", width=SERVER_VIEW_LABEL_WIDTH)
+            ui.CheckBox(model=self._flow_vorticity_model)
+            ui.Label("Strength", width=54)
+            ui.FloatDrag(
+                model=self._flow_vorticity_strength_model,
+                width=ui.Fraction(1),
+                precision=2,
+            )
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label("Attenuation", width=SERVER_VIEW_LABEL_WIDTH)
             self._airflow_attenuation_combo = ui.ComboBox(
@@ -1249,16 +1301,58 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._lighting_task = asyncio.ensure_future(self._apply_lighting())
 
     def _schedule_attach_airflow(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
         self._airflow_task = asyncio.ensure_future(self._attach_airflow())
 
     def _schedule_detach_airflow(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
         self._airflow_task = asyncio.ensure_future(self._detach_airflow())
 
     def _schedule_apply_airflow_presentation(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
         self._airflow_task = asyncio.ensure_future(self._apply_airflow_presentation())
 
     def _schedule_apply_flow_debug_overlays(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
         self._airflow_task = asyncio.ensure_future(self._apply_flow_debug_overlays())
+
+    def _schedule_apply_flow_vorticity(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(self._apply_flow_vorticity())
+
+    def _schedule_apply_flow_vorticity_strength(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(
+            self._apply_flow_vorticity_strength()
+        )
+
+    def _capture_flow_camera_bookmark(self, name: str) -> None:
+        camera = self._controller.capture_review_camera_config()
+        if not camera:
+            self._set_airflow_status(f"{name} camera bookmark capture failed.")
+            return
+        self._flow_camera_bookmarks[name] = camera
+        self._set_airflow_status(f"{name} camera bookmark captured for this session.")
+
+    def _schedule_apply_flow_camera_bookmark(self, name: str) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(
+            self._apply_flow_camera_bookmark(name)
+        )
 
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
@@ -1274,6 +1368,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_airflow_status(result.message)
 
     def _reset_airflow(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
         result = self._controller.reset_simulation_cache_in_kit()
         self._set_airflow_status(result.message)
 
@@ -1498,7 +1595,16 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_airflow_status(result.message)
 
     async def _detach_airflow(self) -> None:
-        result = self._controller.detach_simulation_cache_in_kit()
+        try:
+            result = await self._controller.detach_simulation_cache_in_kit()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            import carb
+
+            carb.log_error(f"DTRS airflow detach task failed: {error}")
+            self._set_airflow_status(f"Airflow cache detach failed: {error}")
+            return
         self._set_airflow_status(result.message)
 
     async def _apply_airflow_presentation(self) -> None:
@@ -1531,6 +1637,37 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._show_flow_debug_overlays_model.get_value_as_bool()
         )
         self._set_airflow_status(result.message)
+
+    async def _apply_flow_vorticity(self) -> None:
+        if not self._flow_vorticity_model:
+            self._set_airflow_status("Flow vorticity control is unavailable.")
+            return
+        result = self._controller.set_kit_cae_flow_vorticity_enabled_in_kit(
+            self._flow_vorticity_model.get_value_as_bool()
+        )
+        self._set_airflow_status(result.message)
+
+    async def _apply_flow_vorticity_strength(self) -> None:
+        if not self._flow_vorticity_strength_model:
+            self._set_airflow_status("Flow vorticity strength control is unavailable.")
+            return
+        result = self._controller.set_kit_cae_flow_vorticity_force_scale_in_kit(
+            self._flow_vorticity_strength_model.get_value_as_float()
+        )
+        self._set_airflow_status(result.message)
+
+    async def _apply_flow_camera_bookmark(self, name: str) -> None:
+        camera = self._flow_camera_bookmarks.get(name)
+        if not camera:
+            self._set_airflow_status(f"Capture the {name} camera bookmark first.")
+            return
+        applied = await self._controller.apply_camera_in_kit(
+            camera,
+            status_callback=self._set_airflow_status,
+        )
+        if applied:
+            self._controller.set_flow_performance_camera_bookmark(name)
+            self._set_airflow_status(f"{name} camera bookmark applied.")
 
     async def _apply_chassis_visibility_controls(self) -> None:
         from digital_twin_runtime_suite.app.view_controls import (

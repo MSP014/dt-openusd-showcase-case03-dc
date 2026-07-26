@@ -59,10 +59,11 @@ The current simulation pass turns the hero server from a static hardware model i
 
 These Houdini-solved airflow caches are physically inspired, presentation-grade qualitative proxies, not validated CFD results or a certified CFD validation study. They provide the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. The goal is to make intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
 
-DTRS currently consumes a three-frame, time-sampled Houdini VTI vector-field
-fixture through Kit-CAE and NVIDIA Flow. The structured `PointData/vel` field
-updates native runtime smoke/advection in one continuous Flow simulation, with
-the full server presentation preserved.
+DTRS is configured for a sixteen-frame sparse, time-sampled Houdini VTI
+vector-field fixture through Kit-CAE and NVIDIA Flow. The Stage 6 loop proof
+uses the structured `PointData/vel` field to update native runtime
+smoke/advection in one continuous Flow simulation, with the full server
+presentation preserved.
 
 The Flow consumer is intentionally separated from source selection. This PoC
 proves VTI temporal substitution inside the runtime; it does not yet implement
