@@ -107,11 +107,27 @@ class RuntimeController:
     KIT_CAE_FLOW_DEFAULT_ATTENUATION = 8.0
     KIT_CAE_FLOW_DEFAULT_ALPHA_PRESET = "medium"
     FLOW_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
-    FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
+    FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS = 30.0
+    FLOW_DETACH_SETTLE_UPDATE_COUNT = 3
     KIT_CAE_FLOW_TRACER_RGB = (
         (0.015, 0.08, 0.30),
         (0.0, 0.72, 0.88),
         (0.82, 1.0, 1.0),
+    )
+    KIT_CAE_FRONT_INTAKE_BINDING_IDS = frozenset(
+        {"front_p120_01", "front_p120_02", "front_p120_03"}
+    )
+    KIT_CAE_INTAKE_TRACER_PASSIVE_CHANNEL_VALUES = (
+        ("radius", 1.0),
+        ("radiusIsWorldSpace", False),
+        ("velocity", (0.0, 0.0, 0.0)),
+        ("coupleRateVelocity", 0.0),
+        ("fuel", 0.0),
+        ("coupleRateFuel", 0.0),
+        ("temperature", 0.0),
+        ("coupleRateTemperature", 0.0),
+        ("burn", 0.0),
+        ("coupleRateBurn", 0.0),
     )
     QLED_MATERIAL_PATHS = {
         "normal": "/DTRS_Runtime/Looks/QLEDOnNormal",
@@ -132,6 +148,13 @@ class RuntimeController:
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
         self._flow_airflow_simulate_path: str | None = None
+        self._flow_lifecycle_state = "DETACHED"
+        self._flow_vorticity_enabled = (
+            self.config.simulation_cache.flow_vorticity_enabled
+        )
+        self._flow_vorticity_force_scale = (
+            self.config.simulation_cache.flow_vorticity_force_scale
+        )
         self._flow_temporal_asset_hashes: dict[Path, str] = {}
         self._flow_temporal_records: list[dict[str, object]] = []
         self._flow_temporal_failure: dict[str, str] | None = None
@@ -141,6 +164,7 @@ class RuntimeController:
         self._flow_performance_session_id = 0
         self._flow_performance_attached_at: float | None = None
         self._flow_performance_samples: list[FlowPerformanceSample] = []
+        self._flow_performance_camera_bookmark = "Unspecified"
         self._front_panel_indicator_state_key: (
             tuple[int, bool, bool, bool, bool] | None
         ) = None
@@ -153,6 +177,13 @@ class RuntimeController:
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
+        self._flow_lifecycle_state = "DETACHED"
+        self._flow_vorticity_enabled = (
+            self.config.simulation_cache.flow_vorticity_enabled
+        )
+        self._flow_vorticity_force_scale = (
+            self.config.simulation_cache.flow_vorticity_force_scale
+        )
         self._flow_temporal_asset_hashes = {}
         self._flow_temporal_records = []
         self._flow_temporal_failure = None
@@ -160,6 +191,7 @@ class RuntimeController:
         self._flow_temporal_sample_time_codes = ()
         self._flow_performance_attached_at = None
         self._flow_performance_samples = []
+        self._flow_performance_camera_bookmark = "Unspecified"
         self._front_panel_indicator_state_key = None
         return self.config
 
@@ -784,6 +816,22 @@ class RuntimeController:
     ) -> SimulationCacheResult:
         """Import one Houdini VTI velocity field and drive a Kit-CAE Flow probe."""
 
+        if self._flow_lifecycle_state == "DETACHING":
+            return SimulationCacheResult(
+                False,
+                "Kit-CAE Flow detach is still in progress.",
+            )
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False,
+                "Kit-CAE Flow attach is still in progress.",
+            )
+        if self._flow_lifecycle_state == "ATTACHED":
+            return SimulationCacheResult(
+                False,
+                "Kit-CAE Flow is already attached; detach it before attaching again.",
+            )
+
         import carb
 
         cache = self.config.simulation_cache
@@ -835,6 +883,7 @@ class RuntimeController:
         if not stage:
             return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
 
+        self._flow_lifecycle_state = "ATTACHING"
         self._stop_flow_performance_sampler()
         self._log_flow_performance_event(
             carb,
@@ -851,7 +900,7 @@ class RuntimeController:
         field_path = f"{import_root}/PointData/{cache.velocity_field_name}"
         bbox_path = f"{runtime_root}/BoundingBox"
         flow_environment_path = f"{runtime_root}/FlowSimulation"
-        smoke_injector_path = f"{runtime_root}/SmokeInjector"
+        tracer_root_path = f"{runtime_root}/AirflowTracerEmitters"
         boundary_emitter_path = f"{runtime_root}/BoundaryEmitter"
         dataset_emitter_path = f"{runtime_root}/DataSetEmitter"
         app = omni.kit.app.get_app()
@@ -941,26 +990,40 @@ class RuntimeController:
             )
             await app.next_update_async()
             flow_environment_prim = stage.GetPrimAtPath(flow_environment_path)
-            await execute_command(
-                "CreateCaeVizFlowSmokeInjector",
-                boundable_paths=[bbox_path],
-                prim_path=smoke_injector_path,
-                layer_number=0,
-                mode="sphere",
-                simulation_prim=flow_environment_prim,
-            )
-            await app.next_update_async()
-            self._position_kit_cae_smoke_probe_injector(
+            UsdGeom.Xform.Define(stage, tracer_root_path)
+            tracer_positions = self._kit_cae_front_intake_tracer_positions(
                 stage,
-                smoke_injector_path,
-                metadata,
+                cache.intake_tracers,
+                self.config.fan_motion_bindings,
+                imported_grid["world_bounds"],
                 Gf,
+                Usd,
                 UsdGeom,
             )
-            self._hide_kit_cae_smoke_injector_mesh(
+            for index, position in enumerate(tracer_positions, start=1):
+                tracer_path = f"{tracer_root_path}/intake_{index:02d}"
+                await execute_command(
+                    "CreateCaeVizFlowSmokeInjector",
+                    boundable_paths=[bbox_path],
+                    prim_path=tracer_path,
+                    layer_number=0,
+                    mode="sphere",
+                    simulation_prim=flow_environment_prim,
+                )
+                await app.next_update_async()
+                self._configure_kit_cae_intake_tracer_emitter(
+                    stage,
+                    tracer_path,
+                    position,
+                    cache.intake_tracers,
+                    Gf,
+                    UsdGeom,
+                )
+            self._hide_kit_cae_intake_tracer_meshes(
                 stage,
-                smoke_injector_path,
+                tracer_root_path,
                 UsdGeom,
+                expected_count=cache.intake_tracers.count,
             )
             await execute_command(
                 "CreateCaeVizFlowBoundaryEmitter",
@@ -990,9 +1053,12 @@ class RuntimeController:
                 app,
                 emitter_prim,
             )
-            self._configure_kit_cae_native_fuel_smoke_probe(
+            self._configure_kit_cae_smoke_only_tracer_flow(
                 stage,
                 flow_environment_path,
+                cache.intake_tracers,
+                vorticity_enabled=self._flow_vorticity_enabled,
+                vorticity_force_scale=self._flow_vorticity_force_scale,
             )
             timeline = omni.timeline.get_timeline_interface()
             timeline.pause()
@@ -1048,6 +1114,7 @@ class RuntimeController:
                 self._log_kit_cae_flow_attached(
                     carb,
                     temporal_frames=len(velocity_paths),
+                    intake_tracer_count=cache.intake_tracers.count,
                     metadata=metadata,
                     origin_match=origin_match,
                     grid_match=grid_match,
@@ -1058,7 +1125,7 @@ class RuntimeController:
                 self._log_kit_cae_temporal_frame(
                     carb,
                     sequence_index=0,
-                    temporal_frames=len(velocity_paths),
+                    temporal_frames=len(velocity_paths) + 1,
                     asset=velocity_path,
                     previous_frame=None,
                     transition="INITIAL",
@@ -1073,6 +1140,7 @@ class RuntimeController:
                     flow_reset=False,
                     origin_match=origin_match,
                     grid_match=grid_match,
+                    verbose=cache.temporal_debug_logging,
                 )
                 temporal_proof_passed = await self._monitor_kit_cae_temporal_proof(
                     app=app,
@@ -1115,7 +1183,7 @@ class RuntimeController:
                     imported_grid,
                     dataset_path,
                     flow_environment_path,
-                    smoke_injector_path,
+                    tracer_root_path,
                     boundary_emitter_path,
                     dataset_emitter_path,
                     bbox_path,
@@ -1136,21 +1204,30 @@ class RuntimeController:
                 field_path=field_path,
                 bbox_path=bbox_path,
                 flow_environment_path=flow_environment_path,
-                smoke_injector_path=smoke_injector_path,
+                tracer_root_path=tracer_root_path,
                 boundary_emitter_path=boundary_emitter_path,
                 dataset_emitter_path=dataset_emitter_path,
             )
         except Exception as error:
             carb.log_error(f"DTRS Kit-CAE Flow probe failed: {error}")
             self._flow_airflow_simulate_path = None
+            self._flow_lifecycle_state = "DETACHED"
             self._flow_temporal_end_time_code = None
             self._flow_temporal_sample_time_codes = ()
             self._flow_temporal_records = []
             self._flow_temporal_failure = None
-            if stage.GetPrimAtPath(runtime_root).IsValid():
-                stage.RemovePrim(runtime_root)
-            if stage.GetPrimAtPath(import_root).IsValid():
-                stage.RemovePrim(import_root)
+            # The VTK importer authors into both the session and root layers.
+            # Roll back both opinions so a failed attach cannot poison the next one.
+            rollback_paths = (runtime_root, import_root)
+            for prim_path in rollback_paths:
+                if stage.GetPrimAtPath(prim_path).IsValid():
+                    stage.RemovePrim(prim_path)
+            await app.next_update_async()
+            stage.SetEditTarget(stage.GetRootLayer())
+            for prim_path in rollback_paths:
+                if stage.GetPrimAtPath(prim_path).IsValid():
+                    stage.RemovePrim(prim_path)
+            await app.next_update_async()
             return SimulationCacheResult(False, f"Kit-CAE airflow failed: {error}")
         finally:
             stage.SetEditTarget(previous_target)
@@ -1158,6 +1235,7 @@ class RuntimeController:
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = f"{flow_environment_path}/flowSimulate"
+        self._flow_lifecycle_state = "ATTACHED"
         self._start_flow_performance_sampler()
         if not temporal_proof_passed:
             return SimulationCacheResult(
@@ -1167,7 +1245,7 @@ class RuntimeController:
             )
         return SimulationCacheResult(
             True,
-            "Kit-CAE Flow temporal proof passed: "
+            "Kit-CAE Flow temporal loop proof passed: "
             f"PointData/{cache.velocity_field_name} Vector3 drives live smoke.",
         )
 
@@ -1194,14 +1272,14 @@ class RuntimeController:
         flow_environment_path = self._flow_airflow_simulate_path.removesuffix(
             "/flowSimulate"
         )
-        smoke_injector_path = "/DTRS_KitCAE/SmokeInjector"
+        tracer_root_path = "/DTRS_KitCAE/AirflowTracerEmitters"
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
         try:
             alpha_values = self._author_kit_cae_flow_presentation(
                 stage,
                 flow_environment_path,
-                smoke_injector_path,
+                tracer_root_path,
                 attenuation,
                 alpha_preset,
                 Gf,
@@ -1226,6 +1304,10 @@ class RuntimeController:
     def play_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Play the attached cache over its authored frame range."""
 
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False, "Kit-CAE Flow attach is still in progress."
+            )
         if self._flow_airflow_simulate_path:
             import omni.timeline
 
@@ -1255,6 +1337,10 @@ class RuntimeController:
     def pause_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Pause the attached cache at the current frame."""
 
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False, "Kit-CAE Flow attach is still in progress."
+            )
         if self._flow_airflow_simulate_path:
             import omni.timeline
 
@@ -1274,6 +1360,10 @@ class RuntimeController:
     def reset_simulation_cache_in_kit(self) -> SimulationCacheResult:
         """Return the attached cache to its first authored frame."""
 
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False, "Kit-CAE Flow attach is still in progress."
+            )
         if self._flow_airflow_simulate_path:
             import omni.timeline
             import omni.usd
@@ -1371,7 +1461,7 @@ class RuntimeController:
         field_path: str,
         bbox_path: str,
         flow_environment_path: str,
-        smoke_injector_path: str,
+        tracer_root_path: str,
         boundary_emitter_path: str,
         dataset_emitter_path: str,
     ) -> Path:
@@ -1390,8 +1480,8 @@ class RuntimeController:
                 "flow_render": f"{flow_environment_path}/flowRender",
                 "ray_march": f"{flow_environment_path}/flowRender/rayMarch",
                 "debug_volume": f"{flow_environment_path}/flowOffscreen/debugVolume",
-                "smoke_injector": smoke_injector_path,
-                "smoke_emitter": f"{smoke_injector_path}/EmitterSphere",
+                "airflow_tracer_emitters": tracer_root_path,
+                "airflow_tracer_first": f"{tracer_root_path}/intake_01/EmitterSphere",
                 "boundary_emitter_root": boundary_emitter_path,
                 "dataset_emitter": dataset_emitter_path,
             },
@@ -1409,44 +1499,228 @@ class RuntimeController:
 
         return False
 
-    def detach_simulation_cache_in_kit(self) -> SimulationCacheResult:
-        """Remove only the transient cache opinions from the session layer."""
+    async def detach_simulation_cache_in_kit(self) -> SimulationCacheResult:
+        """Deactivate Flow, flush Kit updates, then remove DTRS runtime prims."""
 
         import carb
+        import omni.kit.app
         import omni.timeline
         import omni.usd
+        from omni.cae.schema import viz as cae_viz
 
-        self._stop_flow_performance_sampler()
-        self._log_flow_performance_summary(carb)
+        if self._flow_lifecycle_state == "DETACHING":
+            return SimulationCacheResult(
+                False, "Airflow cache detach is already in progress."
+            )
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False, "Kit-CAE Flow attach is still in progress."
+            )
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
+            self.stop_flow_runtime_callbacks()
+            self._clear_flow_runtime_state()
             return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
 
+        session_runtime_paths = (
+            "/DTRS_Runtime/Airflow",
+            "/DTRS_Runtime/Looks/AirflowIndex",
+            "/DTRS_Runtime/Flow",
+            "/DTRS_KitCAE",
+        )
+        imported_dataset_path = "/DTRS_HoudiniVelocity"
+        runtime_paths = (*session_runtime_paths, imported_dataset_path)
+        if not any(stage.GetPrimAtPath(path).IsValid() for path in runtime_paths):
+            self.stop_flow_runtime_callbacks()
+            self._clear_flow_runtime_state()
+            return SimulationCacheResult(True, "Airflow cache is already detached.")
+
+        self._flow_lifecycle_state = "DETACHING"
+        self.stop_flow_runtime_callbacks()
+        self._log_flow_performance_summary(carb)
+        timeline = omni.timeline.get_timeline_interface()
+        timeline.pause()
+        app = omni.kit.app.get_app()
         previous_target = stage.GetEditTarget()
-        stage.SetEditTarget(stage.GetSessionLayer())
+        callbacks_stopped = self._flow_performance_task is None
+        operators_disabled = False
+        removed = False
         try:
-            stage.RemovePrim("/DTRS_Runtime/Airflow")
-            stage.RemovePrim("/DTRS_Runtime/Looks/AirflowIndex")
-            stage.RemovePrim("/DTRS_Runtime/Flow")
-            stage.RemovePrim("/DTRS_KitCAE")
-            stage.RemovePrim("/DTRS_HoudiniVelocity")
+            stage.SetEditTarget(stage.GetSessionLayer())
+            operators_disabled = self._deactivate_kit_cae_flow_for_detach(
+                stage, cae_viz
+            )
+            for _ in range(self.FLOW_DETACH_SETTLE_UPDATE_COUNT):
+                await app.next_update_async()
+
+            flow_environment = stage.GetPrimAtPath("/DTRS_KitCAE/FlowSimulation")
+            if flow_environment and flow_environment.IsValid():
+                flow_environment.SetActive(False)
+            for _ in range(self.FLOW_DETACH_SETTLE_UPDATE_COUNT):
+                await app.next_update_async()
+
+            # The VTK importer first defines its destination at the current
+            # session edit target, then copies the populated spec into root.
+            # Remove every runtime subtree from both contributing layers.
+            for path in runtime_paths:
+                if stage.GetPrimAtPath(path).IsValid():
+                    stage.RemovePrim(path)
+            for _ in range(2):
+                await app.next_update_async()
+
+            stage.SetEditTarget(stage.GetRootLayer())
+            # The VTK importer and Kit-CAE commands can both author root-layer
+            # runtime specs. Clear every DTRS runtime subtree from that layer.
+            for path in runtime_paths:
+                if stage.GetPrimAtPath(path).IsValid():
+                    stage.RemovePrim(path)
+            for _ in range(2):
+                await app.next_update_async()
+            removed = not any(
+                stage.GetPrimAtPath(path).IsValid() for path in runtime_paths
+            )
+        except asyncio.CancelledError:
+            # Shutdown owns the stage after cancellation; leave no DTRS callbacks live.
+            self._clear_flow_runtime_state()
+            raise
+        except Exception as error:
+            carb.log_error(f"DTRS Flow detach failed: {error}")
+            self._flow_lifecycle_state = "ATTACHED"
+            self._log_kit_cae_flow_detach(
+                carb,
+                callbacks_stopped=callbacks_stopped,
+                operators_disabled=operators_disabled,
+                flow_prims_removed=False,
+                controller_state_cleared=False,
+                result="FAIL",
+                reason=str(error),
+            )
+            return SimulationCacheResult(False, f"Airflow cache detach failed: {error}")
         finally:
             stage.SetEditTarget(previous_target)
-        omni.timeline.get_timeline_interface().pause()
+            if self._flow_lifecycle_state == "DETACHING":
+                self._flow_lifecycle_state = "ATTACHED"
+
+        if not removed:
+            self._log_kit_cae_flow_detach(
+                carb,
+                callbacks_stopped=callbacks_stopped,
+                operators_disabled=operators_disabled,
+                flow_prims_removed=False,
+                controller_state_cleared=False,
+                result="FAIL",
+                reason="runtime prim removal incomplete: "
+                + ", ".join(
+                    path
+                    for path in runtime_paths
+                    if stage.GetPrimAtPath(path).IsValid()
+                ),
+            )
+            return SimulationCacheResult(
+                False,
+                "Airflow cache detach did not remove all DTRS runtime prims.",
+            )
+
+        self._clear_flow_runtime_state()
+        self._log_kit_cae_flow_detach(
+            carb,
+            callbacks_stopped=callbacks_stopped,
+            operators_disabled=operators_disabled,
+            flow_prims_removed=True,
+            controller_state_cleared=True,
+            result="PASS",
+        )
+        return SimulationCacheResult(
+            True,
+            "Airflow cache detached from the session layer.",
+        )
+
+    def stop_flow_runtime_callbacks(self) -> None:
+        """Stop DTRS-owned asynchronous Flow diagnostics before teardown."""
+
+        self._stop_flow_performance_sampler()
+
+    def _clear_flow_runtime_state(self) -> None:
+        """Forget DTRS Flow handles only after teardown or shutdown cancellation."""
+
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
+        self._flow_lifecycle_state = "DETACHED"
         self._flow_temporal_records = []
         self._flow_temporal_failure = None
         self._flow_temporal_end_time_code = None
         self._flow_temporal_sample_time_codes = ()
         self._flow_performance_attached_at = None
         self._flow_performance_samples = []
-        return SimulationCacheResult(
-            True,
-            "Airflow cache detached from the session layer.",
-        )
+        self._flow_performance_camera_bookmark = "Unspecified"
+
+    @classmethod
+    def _log_kit_cae_flow_detach(
+        cls,
+        carb,
+        *,
+        callbacks_stopped: bool,
+        operators_disabled: bool,
+        flow_prims_removed: bool,
+        controller_state_cleared: bool,
+        result: str,
+        reason: str | None = None,
+    ) -> None:
+        """Write compact lifecycle evidence for a DTRS Flow detach attempt."""
+
+        fields = [
+            ("callbacks_stopped:", callbacks_stopped),
+            ("operators_disabled:", operators_disabled),
+            ("flow_prims_removed:", flow_prims_removed),
+            ("controller_state_cleared:", controller_state_cleared),
+        ]
+        if reason:
+            fields.append(("Reason:", reason))
+        fields.append(("RESULT:", result))
+        logger = carb.log_warn if result == "PASS" else carb.log_error
+        logger(cls._format_flow_log_block("DETACH", (("", tuple(fields)),)))
+
+    @staticmethod
+    def _deactivate_kit_cae_flow_for_detach(stage, cae_viz) -> bool:
+        """Disable the proven CAE and Flow participants before prim removal."""
+
+        disabled = True
+        emitter = stage.GetPrimAtPath("/DTRS_KitCAE/DataSetEmitter")
+        if not emitter or not emitter.IsValid():
+            disabled = False
+        else:
+            enabled_attr = cae_viz.OperatorAPI(emitter).CreateEnabledAttr()
+            enabled_attr.Set(False)
+            disabled = disabled and enabled_attr.Get() is False
+
+        simulate = stage.GetPrimAtPath("/DTRS_KitCAE/FlowSimulation/flowSimulate")
+        if not simulate or not simulate.IsValid():
+            disabled = False
+        else:
+            for attribute_name in (
+                "forceDisableEmitters",
+                "forceDisableCoreSimulation",
+            ):
+                attribute = simulate.GetAttribute(attribute_name)
+                if not attribute or not attribute.IsValid():
+                    disabled = False
+                    continue
+                attribute.Set(True)
+                disabled = disabled and attribute.Get() is True
+
+        for path in (
+            "/DTRS_KitCAE/FlowSimulation/flowOffscreen",
+            "/DTRS_KitCAE/FlowSimulation/flowRender",
+        ):
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                disabled = False
+                continue
+            prim.SetActive(False)
+            disabled = disabled and not prim.IsActive()
+        return disabled
 
     @staticmethod
     async def _clear_flow_after_update(force_clear) -> None:
@@ -1777,6 +2051,7 @@ class RuntimeController:
                         ),
                     ),
                     ("Temporal source:", sample.temporal_source or "unavailable"),
+                    ("Camera bookmark:", self._flow_performance_camera_bookmark),
                     ("Flow attached:", True),
                 )
             )
@@ -1805,6 +2080,11 @@ class RuntimeController:
             self._run_flow_performance_sampler(session_id)
         )
 
+    def set_flow_performance_camera_bookmark(self, name: str) -> None:
+        """Label future Flow performance intervals with the active fixed camera."""
+
+        self._flow_performance_camera_bookmark = name
+
     def _stop_flow_performance_sampler(self) -> None:
         """Cancel a prior Stage 6 sampler before reload, detach, or reattach."""
 
@@ -1815,7 +2095,7 @@ class RuntimeController:
             task.cancel()
 
     async def _run_flow_performance_sampler(self, session_id: int) -> None:
-        """Collect HUD observations at low frequency and log ten-second intervals."""
+        """Collect HUD observations at low frequency and log thirty-second intervals."""
 
         import carb
 
@@ -1827,6 +2107,7 @@ class RuntimeController:
         try:
             while (
                 session_id == self._flow_performance_session_id
+                and self._flow_lifecycle_state == "ATTACHED"
                 and self._flow_airflow_simulate_path
             ):
                 await asyncio.sleep(self.FLOW_PERFORMANCE_SAMPLE_INTERVAL_SECONDS)
@@ -1929,6 +2210,10 @@ class RuntimeController:
                                 "Temporal source:",
                                 latest_sample.temporal_source or "unavailable",
                             ),
+                            (
+                                "Camera bookmark:",
+                                self._flow_performance_camera_bookmark,
+                            ),
                             ("Flow attached:", bool(self._flow_airflow_simulate_path)),
                         ),
                     ),
@@ -2000,6 +2285,7 @@ class RuntimeController:
         carb,
         *,
         temporal_frames: int,
+        intake_tracer_count: int,
         metadata: dict[str, object],
         origin_match: bool,
         grid_match: bool,
@@ -2010,6 +2296,7 @@ class RuntimeController:
         """Emit one normal-path setup summary for the Flow temporal proof."""
 
         dimensions = " x ".join(str(value) for value in metadata["dimensions"])
+        tracer_config = self.config.simulation_cache.intake_tracers
         carb.log_warn(
             self._format_flow_log_block(
                 "ATTACH",
@@ -2019,6 +2306,7 @@ class RuntimeController:
                         (
                             ("Route:", "VTI_KIT_CAE_FLOW"),
                             ("Temporal frames:", temporal_frames),
+                            ("Intake tracers:", intake_tracer_count),
                             ("Grid:", dimensions),
                         ),
                     ),
@@ -2035,6 +2323,44 @@ class RuntimeController:
                             ("operator_ready:", operator_ready),
                             ("Environment:", flow_environment_path),
                             ("Dataset emitter:", dataset_emitter_path),
+                        ),
+                    ),
+                    (
+                        "Tracer injection",
+                        (
+                            ("Tracer mode:", "SMOKE_ONLY"),
+                            ("Smoke target:", f"{tracer_config.smoke_target:g}"),
+                            ("Smoke coupling:", f"{tracer_config.smoke_couple_rate:g}"),
+                            ("Smoke damping:", f"{tracer_config.smoke_damping:g}"),
+                            ("Smoke fade:", f"{tracer_config.smoke_fade:g}"),
+                            ("Renderer:", "VOLUME_SMOKE_CLOUD"),
+                            (
+                                "Cloud density multiplier:",
+                                f"{tracer_config.smoke_cloud_density_multiplier:g}",
+                            ),
+                            (
+                                "Smoke base color:",
+                                ", ".join(
+                                    f"{component:g}"
+                                    for component in (
+                                        tracer_config.smoke_cloud_base_color
+                                    )
+                                ),
+                            ),
+                            ("Buoyancy:", "OFF"),
+                            ("Combustion:", "OFF"),
+                            (
+                                "Flow vorticity:",
+                                "ON" if self._flow_vorticity_enabled else "OFF",
+                            ),
+                            (
+                                "Vorticity forceScale:",
+                                (
+                                    f"{self._flow_vorticity_force_scale:g}"
+                                    if self._flow_vorticity_enabled
+                                    else "n/a"
+                                ),
+                            ),
                         ),
                     ),
                     (
@@ -2075,6 +2401,7 @@ class RuntimeController:
         flow_reset: bool,
         origin_match: bool,
         grid_match: bool,
+        verbose: bool,
     ) -> None:
         """Record one actual source activation without recreating Flow diagnostics."""
 
@@ -2100,6 +2427,8 @@ class RuntimeController:
             "grid_match": grid_match,
         }
         self._flow_temporal_records.append(record)
+        if not verbose:
+            return
         carb.log_warn(
             self._format_flow_log_block(
                 f"TEMPORAL FRAME {sequence_index + 1}/{temporal_frames}",
@@ -2144,86 +2473,146 @@ class RuntimeController:
             )
         )
 
-    def _log_kit_cae_temporal_proof(self, carb) -> bool:
-        """Emit the Stage 6 three-frame result only when all evidence is present."""
+    @staticmethod
+    def _kit_cae_temporal_loop_proof_summary(
+        records: list[dict[str, object]],
+        velocity_paths: tuple[Path, ...],
+    ) -> dict[str, object]:
+        """Reduce the fixed Stage 6 loop contract into explicit proof evidence."""
 
-        records = self._flow_temporal_records
-        frames = [str(record["source_frame"]) for record in records]
-        hashes = {record["asset_hash"] for record in records}
-        transitions = [record["transition"] for record in records[1:]]
-        operator_ready_all = all(bool(record["operator_ready"]) for record in records)
-        origin_match_all = all(bool(record["origin_match"]) for record in records)
-        grid_match_all = all(bool(record["grid_match"]) for record in records)
-        timeline_continuous = all(
-            bool(record["timeline_advancing"]) for record in records
+        expected_assets = (*velocity_paths, velocity_paths[0]) if velocity_paths else ()
+        expected_names = [asset.name for asset in expected_assets]
+        observed_names = [str(record.get("asset", "unavailable")) for record in records]
+        frames = [str(record.get("source_frame", "unavailable")) for record in records]
+        hashes = {
+            str(record["asset_hash"])
+            for record in records
+            if record.get("asset_hash") is not None
+        }
+        transitions = [str(record.get("transition", "")) for record in records[1:]]
+        forward_transitions = sum(transition == "SWAP" for transition in transitions)
+        loop_transitions = sum(transition == "LOOP" for transition in transitions)
+        operator_ready_all = all(
+            bool(record.get("operator_ready")) for record in records
         )
-        flow_resets = sum(bool(record["flow_reset"]) for record in records)
+        origin_match_all = all(bool(record.get("origin_match")) for record in records)
+        grid_match_all = all(bool(record.get("grid_match")) for record in records)
+        timeline_continuous = all(
+            bool(record.get("timeline_advancing")) for record in records
+        )
+        flow_resets = sum(bool(record.get("flow_reset")) for record in records)
+        loop_closure = (
+            len(records) == len(expected_assets)
+            and bool(records)
+            and observed_names[-1] == expected_names[0]
+            and transitions[-1:] == ["LOOP"]
+        )
+        mismatch = next(
+            (
+                (expected_name, observed_name)
+                for expected_name, observed_name in zip(expected_names, observed_names)
+                if expected_name != observed_name
+            ),
+            None,
+        )
+        if mismatch is None and len(observed_names) < len(expected_names):
+            mismatch = (expected_names[len(observed_names)], "unavailable")
         passed = (
-            len(records) == 3
-            and len(set(frames)) == 3
-            and len(hashes) == 3
-            and transitions == ["SWAP", "SWAP"]
+            len(velocity_paths) == 16
+            and len(records) == 17
+            and observed_names == expected_names
+            and len(set(observed_names)) == 16
+            and len(hashes) == 16
+            and transitions == ["SWAP"] * 15 + ["LOOP"]
+            and forward_transitions == 15
+            and loop_transitions == 1
+            and loop_closure
             and operator_ready_all
             and origin_match_all
             and grid_match_all
             and timeline_continuous
             and flow_resets == 0
         )
+        return {
+            "frames": frames,
+            "unique_assets": len(set(observed_names)),
+            "unique_hashes": len(hashes),
+            "forward_transitions": forward_transitions,
+            "loop_transitions": loop_transitions,
+            "operator_ready_all": operator_ready_all,
+            "origin_match_all": origin_match_all,
+            "grid_match_all": grid_match_all,
+            "timeline_continuous": timeline_continuous,
+            "flow_resets": flow_resets,
+            "loop_closure": loop_closure,
+            "mismatch": mismatch,
+            "passed": passed,
+        }
+
+    def _log_kit_cae_temporal_proof(
+        self,
+        carb,
+        velocity_paths: tuple[Path, ...],
+    ) -> bool:
+        """Emit the Stage 6 sixteen-frame temporal loop proof result."""
+
+        summary = self._kit_cae_temporal_loop_proof_summary(
+            self._flow_temporal_records,
+            velocity_paths,
+        )
         sections = (
             (
                 "",
                 (
-                    ("Frames observed:", " -> ".join(frames) or "none"),
-                    ("Unique assets:", len(set(record["asset"] for record in records))),
-                    ("Unique hashes:", len(hashes)),
-                    (
-                        "Successful transitions:",
-                        sum(transition == "SWAP" for transition in transitions),
-                    ),
+                    ("Frames observed:", " -> ".join(summary["frames"]) or "none"),
+                    ("Unique source assets:", summary["unique_assets"]),
+                    ("Unique source hashes:", summary["unique_hashes"]),
+                    ("Forward transitions:", summary["forward_transitions"]),
+                    ("Loop transitions:", summary["loop_transitions"]),
                 ),
             ),
             (
                 "Invariants",
                 (
-                    ("operator_ready_all:", operator_ready_all),
-                    ("origin_match_all:", origin_match_all),
-                    ("grid_match_all:", grid_match_all),
-                    ("timeline_continuous:", timeline_continuous),
-                    ("Flow resets:", flow_resets),
+                    ("operator_ready_all:", summary["operator_ready_all"]),
+                    ("origin_match_all:", summary["origin_match_all"]),
+                    ("grid_match_all:", summary["grid_match_all"]),
+                    ("timeline_continuous:", summary["timeline_continuous"]),
+                    ("Flow resets:", summary["flow_resets"]),
+                    (
+                        "Loop closure:",
+                        "PASS" if summary["loop_closure"] else "FAIL",
+                    ),
                 ),
             ),
         )
-        if not passed:
-            mismatch = next(
-                (
-                    record
-                    for record in records
-                    if record["source_frame"]
-                    != self._kit_cae_vti_source_frame(
-                        self.config.velocity_vti_sequence_paths[
-                            int(record["sequence_index"])
-                        ]
-                    )
-                ),
-                None,
-            )
+        if not summary["passed"]:
+            mismatch = summary["mismatch"]
             failure = self._flow_temporal_failure or {}
             expected_source = (
-                self.config.velocity_vti_sequence_paths[
-                    int(mismatch["sequence_index"])
-                ].name
+                mismatch[0]
                 if mismatch is not None
                 else failure.get("expected_asset", "unavailable")
             )
             resolved_source = (
-                str(mismatch["asset"])
-                if mismatch is not None
-                else failure.get("resolved_asset", "unavailable")
+                failure.get("resolved_asset", "unavailable")
+                if mismatch is not None and mismatch[1] == "unavailable"
+                else (
+                    mismatch[1]
+                    if mismatch is not None
+                    else failure.get("resolved_asset", "unavailable")
+                )
             )
             reason = (
-                "source_asset_match=False"
-                if mismatch is not None
-                else failure.get("reason", "temporal evidence invariant failed")
+                failure.get("reason", "temporal loop evidence invariant failed")
+                if mismatch is not None and mismatch[1] == "unavailable"
+                else (
+                    "source_asset_match=False"
+                    if mismatch is not None
+                    else failure.get(
+                        "reason", "temporal loop evidence invariant failed"
+                    )
+                )
             )
             sections += (
                 (
@@ -2235,13 +2624,13 @@ class RuntimeController:
                     ),
                 ),
             )
-        sections += (("", (("RESULT:", "PASS" if passed else "FAIL"),)),)
-        message = self._format_flow_log_block("TEMPORAL PROOF", sections)
-        if passed:
+        sections += (("", (("RESULT:", "PASS" if summary["passed"] else "FAIL"),)),)
+        message = self._format_flow_log_block("TEMPORAL LOOP PROOF", sections)
+        if summary["passed"]:
             carb.log_warn(message)
         else:
             carb.log_error(message)
-        return passed
+        return bool(summary["passed"])
 
     @staticmethod
     def _author_kit_cae_temporal_velocity_samples(
@@ -2367,6 +2756,10 @@ class RuntimeController:
             if property_stack
             else "unavailable"
         )
+        composed_sample_fields = tuple(
+            (f"TC {float(time_code):.3f}:", names_at(time_code))
+            for time_code in file_names_attr.GetTimeSamples()
+        )
         message = cls._format_flow_log_block(
             "TEMPORAL MAPPING",
             (
@@ -2386,14 +2779,7 @@ class RuntimeController:
                         ("Resolved timeCode:", f"{resolved_stage_time_code:.3f}"),
                     ),
                 ),
-                (
-                    "Composed samples",
-                    (
-                        ("TC 0.000:", names_at(0.0)),
-                        ("TC 50.000:", names_at(50.0)),
-                        ("TC 100.000:", names_at(100.0)),
-                    ),
-                ),
+                ("Composed samples", composed_sample_fields),
                 (
                     "Resolved",
                     (
@@ -2473,51 +2859,35 @@ class RuntimeController:
         cae_vtk,
         Usd,
     ) -> bool:
-        """Observe two real source swaps while the existing Flow simulation runs."""
+        """Observe all sparse VTI swaps and the closing loop in one Flow session."""
 
         if len(velocity_paths) < 2 or not self._flow_temporal_sample_time_codes:
-            return self._log_kit_cae_temporal_proof(carb)
+            return self._log_kit_cae_temporal_proof(carb, velocity_paths)
 
         time_codes_per_second = float(stage.GetTimeCodesPerSecond())
-        for sequence_index, expected_asset in enumerate(velocity_paths[1:], start=1):
-            expected_time_code = self._flow_temporal_sample_time_codes[sequence_index]
-            deadline = time.monotonic() + 8.0
-            timeline_time_before = float(timeline.get_current_time())
-            while (
-                float(timeline.get_current_time()) * time_codes_per_second
-                < expected_time_code
-                and time.monotonic() < deadline
-            ):
-                await app.next_update_async()
-            if (
-                float(timeline.get_current_time()) * time_codes_per_second
-                < expected_time_code
-            ):
-                self._log_kit_cae_temporal_failure_details(
+        proof_event_count = len(velocity_paths) + 1
+
+        async def record_transition(
+            *,
+            sequence_index: int,
+            expected_asset: Path,
+            previous_frame: str,
+            transition: str,
+            timeline_time_before: float,
+            timeline_time_after: float,
+            timeline_advancing: bool,
+        ) -> bool:
+            resolved_stage_time_code = timeline_time_after * time_codes_per_second
+            if self.config.simulation_cache.temporal_debug_logging:
+                self._log_kit_cae_temporal_time_mapping(
                     carb,
-                    reason=f"timeline did not reach source frame {expected_asset.name}",
-                    timeline=timeline,
                     field_prim=field_prim,
-                    dataset_emitter=dataset_emitter,
+                    timeline_time_seconds=timeline_time_after,
+                    stage_time_codes_per_second=time_codes_per_second,
+                    resolved_stage_time_code=resolved_stage_time_code,
                     cae_vtk=cae_vtk,
                     Usd=Usd,
-                    time_codes_per_second=time_codes_per_second,
-                    expected_asset=expected_asset,
                 )
-                self._log_kit_cae_temporal_proof(carb)
-                return False
-
-            timeline_time_after = float(timeline.get_current_time())
-            resolved_stage_time_code = timeline_time_after * time_codes_per_second
-            self._log_kit_cae_temporal_time_mapping(
-                carb,
-                field_prim=field_prim,
-                timeline_time_seconds=timeline_time_after,
-                stage_time_codes_per_second=time_codes_per_second,
-                resolved_stage_time_code=resolved_stage_time_code,
-                cae_vtk=cae_vtk,
-                Usd=Usd,
-            )
             active_asset = self._kit_cae_selected_velocity_asset(
                 field_prim,
                 resolved_stage_time_code,
@@ -2550,7 +2920,6 @@ class RuntimeController:
                 and dataset_emitter.IsValid()
                 and str(dataset_emitter.GetPath()) == dataset_emitter_path
             )
-            timeline_advancing = timeline_time_after > timeline_time_before
             frame_evidence_valid = (
                 source_asset_match
                 and bool(operator_readiness["ready"])
@@ -2565,12 +2934,10 @@ class RuntimeController:
             self._log_kit_cae_temporal_frame(
                 carb,
                 sequence_index=sequence_index,
-                temporal_frames=len(velocity_paths),
+                temporal_frames=proof_event_count,
                 asset=active_asset or expected_asset,
-                previous_frame=self._kit_cae_vti_source_frame(
-                    velocity_paths[sequence_index - 1]
-                ),
-                transition="SWAP",
+                previous_frame=previous_frame,
+                transition=transition,
                 operator_ready=bool(operator_readiness["ready"]),
                 operator_wait_ms=float(operator_readiness["seconds"]) * 1000.0,
                 nano_vdb_velocities_uint_count=payload_count,
@@ -2582,15 +2949,44 @@ class RuntimeController:
                 flow_reset=flow_reset,
                 origin_match=origin_match,
                 grid_match=grid_match,
+                verbose=self.config.simulation_cache.temporal_debug_logging,
             )
-            if not frame_evidence_valid:
+            if frame_evidence_valid:
+                return True
+
+            self._log_kit_cae_temporal_failure_details(
+                carb,
+                reason=(
+                    "source_asset_match="
+                    f"{source_asset_match}, operator_ready="
+                    f"{operator_readiness['ready']}, flow_reset={flow_reset}"
+                ),
+                timeline=timeline,
+                field_prim=field_prim,
+                dataset_emitter=dataset_emitter,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+                time_codes_per_second=time_codes_per_second,
+                expected_asset=expected_asset,
+                flow_reset=flow_reset,
+            )
+            return False
+
+        for sequence_index, expected_asset in enumerate(velocity_paths[1:], start=1):
+            expected_time_code = self._flow_temporal_sample_time_codes[sequence_index]
+            deadline = time.monotonic() + 8.0
+            timeline_time_before = float(timeline.get_current_time())
+            while (
+                float(timeline.get_current_time()) * time_codes_per_second
+                < expected_time_code
+                and time.monotonic() < deadline
+            ):
+                await app.next_update_async()
+            timeline_time_after = float(timeline.get_current_time())
+            if timeline_time_after * time_codes_per_second < expected_time_code:
                 self._log_kit_cae_temporal_failure_details(
                     carb,
-                    reason=(
-                        "source_asset_match="
-                        f"{source_asset_match}, operator_ready="
-                        f"{operator_readiness['ready']}, flow_reset={flow_reset}"
-                    ),
+                    reason=f"timeline did not reach source frame {expected_asset.name}",
                     timeline=timeline,
                     field_prim=field_prim,
                     dataset_emitter=dataset_emitter,
@@ -2598,12 +2994,67 @@ class RuntimeController:
                     Usd=Usd,
                     time_codes_per_second=time_codes_per_second,
                     expected_asset=expected_asset,
-                    flow_reset=flow_reset,
                 )
-                self._log_kit_cae_temporal_proof(carb)
+                self._log_kit_cae_temporal_proof(carb, velocity_paths)
+                return False
+            if not await record_transition(
+                sequence_index=sequence_index,
+                expected_asset=expected_asset,
+                previous_frame=self._kit_cae_vti_source_frame(
+                    velocity_paths[sequence_index - 1]
+                ),
+                transition="SWAP",
+                timeline_time_before=timeline_time_before,
+                timeline_time_after=timeline_time_after,
+                timeline_advancing=timeline_time_after > timeline_time_before,
+            ):
+                self._log_kit_cae_temporal_proof(carb, velocity_paths)
                 return False
 
-        return self._log_kit_cae_temporal_proof(carb)
+        loop_deadline = time.monotonic() + 8.0
+        previous_time = float(timeline.get_current_time())
+        loop_time_before = previous_time
+        loop_time_after = previous_time
+        loop_observed = False
+        while time.monotonic() < loop_deadline:
+            await app.next_update_async()
+            current_time = float(timeline.get_current_time())
+            if current_time + 1e-6 < previous_time:
+                loop_time_before = previous_time
+                await app.next_update_async()
+                loop_time_after = float(timeline.get_current_time())
+                loop_observed = True
+                break
+            previous_time = current_time
+
+        if not loop_observed:
+            self._log_kit_cae_temporal_failure_details(
+                carb,
+                reason="timeline did not close the Stage 6 temporal loop",
+                timeline=timeline,
+                field_prim=field_prim,
+                dataset_emitter=dataset_emitter,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+                time_codes_per_second=time_codes_per_second,
+                expected_asset=velocity_paths[0],
+            )
+            self._log_kit_cae_temporal_proof(carb, velocity_paths)
+            return False
+
+        if not await record_transition(
+            sequence_index=len(velocity_paths),
+            expected_asset=velocity_paths[0],
+            previous_frame=self._kit_cae_vti_source_frame(velocity_paths[-1]),
+            transition="LOOP",
+            timeline_time_before=loop_time_before,
+            timeline_time_after=loop_time_after,
+            timeline_advancing=True,
+        ):
+            self._log_kit_cae_temporal_proof(carb, velocity_paths)
+            return False
+
+        return self._log_kit_cae_temporal_proof(carb, velocity_paths)
 
     def _log_kit_cae_temporal_failure_details(
         self,
@@ -2846,21 +3297,113 @@ class RuntimeController:
             ),
         }
 
-    @staticmethod
-    def _position_kit_cae_smoke_probe_injector(
+    @classmethod
+    def _kit_cae_front_intake_tracer_positions(
+        cls,
         stage,
-        smoke_injector_path: str,
-        metadata: dict[str, object],
+        tracer_config,
+        fan_bindings,
+        flow_world_bounds,
+        Gf,
+        Usd,
+        UsdGeom,
+    ) -> tuple[object, ...]:
+        """Place a horizontal tracer line from real front P120 and server bounds."""
+
+        server_prim = stage.GetPrimAtPath(cls.KIT_CAE_SERVER_ROOT)
+        if not server_prim or not server_prim.IsValid():
+            raise RuntimeError(
+                "DTRS server root is unavailable for intake tracer placement."
+            )
+
+        intake_bindings = tuple(
+            binding
+            for binding in fan_bindings
+            if binding.binding_id in cls.KIT_CAE_FRONT_INTAKE_BINDING_IDS
+        )
+        if len(intake_bindings) != len(cls.KIT_CAE_FRONT_INTAKE_BINDING_IDS):
+            raise RuntimeError(
+                "DTRS front P120 bindings are incomplete for intake tracers."
+            )
+
+        bbox_cache = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [UsdGeom.Tokens.default_, UsdGeom.Tokens.render, UsdGeom.Tokens.proxy],
+        )
+        server_range = bbox_cache.ComputeWorldBound(server_prim).ComputeAlignedRange()
+        if server_range.IsEmpty():
+            raise RuntimeError("DTRS server bounds are unavailable for intake tracers.")
+
+        fan_centers = []
+        for binding in intake_bindings:
+            fan_prim = stage.GetPrimAtPath(binding.mesh_path)
+            if not fan_prim or not fan_prim.IsValid():
+                raise RuntimeError(
+                    f"DTRS front P120 mesh is unavailable: {binding.mesh_path}"
+                )
+            fan_range = bbox_cache.ComputeWorldBound(fan_prim).ComputeAlignedRange()
+            if fan_range.IsEmpty():
+                raise RuntimeError(
+                    f"DTRS front P120 bounds are unavailable: {binding.mesh_path}"
+                )
+            fan_centers.append(
+                (
+                    (float(fan_range.GetMin()[0]) + float(fan_range.GetMax()[0])) / 2,
+                    (float(fan_range.GetMin()[1]) + float(fan_range.GetMax()[1])) / 2,
+                )
+            )
+
+        fan_x_positions = sorted(center[0] for center in fan_centers)
+        if len(fan_x_positions) != 3:
+            raise RuntimeError(
+                "DTRS intake tracer layout requires three front P120 centers."
+            )
+        center_y = sum(center[1] for center in fan_centers) / len(fan_centers)
+        front_z = float(server_range.GetMax()[2]) + tracer_config.front_offset
+        spacing = (fan_x_positions[-1] - fan_x_positions[0]) / 4
+        start_x = fan_x_positions[0] - spacing
+        positions = tuple(
+            Gf.Vec3d(start_x + index * spacing, center_y, front_z)
+            for index in range(tracer_config.count)
+        )
+        for position in positions:
+            if any(
+                float(position[axis]) - tracer_config.radius
+                < flow_world_bounds[0][axis]
+                or float(position[axis]) + tracer_config.radius
+                > flow_world_bounds[1][axis]
+                for axis in range(3)
+            ):
+                raise RuntimeError(
+                    "DTRS intake tracer layout extends outside the imported "
+                    "Flow bounds."
+                )
+        return positions
+
+    @classmethod
+    def _configure_kit_cae_intake_tracer_emitter(
+        cls,
+        stage,
+        tracer_path: str,
+        position,
+        tracer_config,
         Gf,
         UsdGeom,
     ) -> None:
-        """Move the diagnostic injector toward the server front without resizing it."""
+        """Configure one passive smoke source without fuel, heat, or self-velocity."""
 
-        injector = stage.GetPrimAtPath(smoke_injector_path)
-        if not injector or not injector.IsValid():
-            raise RuntimeError("Kit-CAE did not create the smoke probe injector.")
+        tracer_mesh = stage.GetPrimAtPath(tracer_path)
+        if not tracer_mesh or not tracer_mesh.IsA(UsdGeom.Mesh):
+            raise RuntimeError(
+                f"Kit-CAE intake tracer mesh is unavailable: {tracer_path}"
+            )
+        emitter = tracer_mesh.GetChild("EmitterSphere")
+        if not emitter or not emitter.IsValid():
+            raise RuntimeError(
+                f"Kit-CAE intake tracer emitter is unavailable: {tracer_path}"
+            )
 
-        xformable = UsdGeom.Xformable(injector)
+        xformable = UsdGeom.Xformable(tracer_mesh)
         translate_op = next(
             (
                 op
@@ -2869,53 +3412,134 @@ class RuntimeController:
             ),
             None,
         )
-        if translate_op is None:
-            raise RuntimeError(
-                "Kit-CAE smoke probe injector is missing a translate op."
+        scale_op = next(
+            (
+                op
+                for op in xformable.GetOrderedXformOps()
+                if op.GetOpType() == UsdGeom.XformOp.TypeScale
+            ),
+            None,
+        )
+        if translate_op is None or scale_op is None:
+            raise RuntimeError("Kit-CAE intake tracer is missing transform operations.")
+        translate_op.Set(position)
+        scale_op.Set(
+            Gf.Vec3f(
+                tracer_config.radius,
+                tracer_config.radius,
+                tracer_config.radius,
             )
-
-        position = translate_op.Get()
-        origin = metadata["vti_header_origin"]
-        spacing = metadata["spacing"]
-        dimensions = metadata["dimensions"]
-        domain_z_max = origin[2] + (dimensions[2] - 1) * spacing[2]
-        target_z = domain_z_max - (domain_z_max - origin[2]) * 0.25
-        translate_op.Set(Gf.Vec3d(position[0], position[1], target_z))
+        )
+        for attribute_name, value in cls.KIT_CAE_INTAKE_TRACER_PASSIVE_CHANNEL_VALUES:
+            attribute = emitter.GetAttribute(attribute_name)
+            if not attribute or not attribute.IsValid():
+                raise RuntimeError(
+                    f"Kit-CAE intake tracer is missing {attribute_name}: {tracer_path}"
+                )
+            attribute.Set(value)
+        for attribute_name, value in (
+            ("smoke", tracer_config.smoke_target),
+            ("coupleRateSmoke", tracer_config.smoke_couple_rate),
+        ):
+            attribute = emitter.GetAttribute(attribute_name)
+            if not attribute or not attribute.IsValid():
+                raise RuntimeError(
+                    f"Kit-CAE intake tracer is missing {attribute_name}: {tracer_path}"
+                )
+            attribute.Set(value)
 
     @staticmethod
-    def _configure_kit_cae_native_fuel_smoke_probe(
+    def _configure_kit_cae_smoke_only_tracer_flow(
         stage,
         flow_environment_path: str,
+        tracer_config,
+        *,
+        vorticity_enabled: bool,
+        vorticity_force_scale: float,
     ) -> None:
-        """Return Flow rendering to the stock fuel-to-smoke path."""
+        """Disable combustion physics and give passive smoke a finite lifetime."""
 
         flow_environment = stage.GetPrimAtPath(flow_environment_path)
-        offscreen = flow_environment.GetChild("flowOffscreen")
-        render = flow_environment.GetChild("flowRender")
+        simulate = (
+            flow_environment.GetChild("flowSimulate") if flow_environment else None
+        )
+        advection = simulate.GetChild("advection") if simulate else None
+        smoke_channel = advection.GetChild("smoke") if advection else None
+        vorticity = simulate.GetChild("vorticity") if simulate else None
+        offscreen = (
+            flow_environment.GetChild("flowOffscreen") if flow_environment else None
+        )
+        render = flow_environment.GetChild("flowRender") if flow_environment else None
         debug_volume = offscreen.GetChild("debugVolume") if offscreen else None
         ray_march = render.GetChild("rayMarch") if render else None
+        ray_march_cloud = ray_march.GetChild("cloud") if ray_march else None
         required_attributes = (
+            (debug_volume, "enableSpeedAsTemperature"),
             (debug_volume, "enableVelocityAsDensity"),
             (ray_march, "enableRawMode"),
+            (ray_march_cloud, "enableCloudMode"),
+            (ray_march_cloud, "densityMultiplier"),
+            (ray_march_cloud, "volumeBaseColor"),
+            (advection, "combustionEnabled"),
+            (advection, "buoyancyPerSmoke"),
+            (advection, "buoyancyPerTemp"),
+            (smoke_channel, "damping"),
+            (smoke_channel, "fade"),
+            (smoke_channel, "secondOrderBlendFactor"),
+            (vorticity, "enabled"),
+            (vorticity, "forceScale"),
+            (vorticity, "smokeMask"),
+            (vorticity, "velocityMask"),
+            (vorticity, "velocityLinearMask"),
+            (vorticity, "constantMask"),
         )
         for prim, attribute_name in required_attributes:
             attribute = prim.GetAttribute(attribute_name) if prim else None
             if not attribute or not attribute.IsValid():
                 prim_path = prim.GetPath() if prim else flow_environment_path
                 raise RuntimeError(
-                    "Kit-CAE Flow render probe is missing "
+                    "Kit-CAE smoke-only tracer setup is missing "
                     f"{prim_path}.{attribute_name}."
                 )
 
+        # Render smoke density as a cloud. This avoids reinjecting temperature
+        # just to drive the standard temperature-colormap renderer.
+        debug_volume.GetAttribute("enableSpeedAsTemperature").Set(False)
         debug_volume.GetAttribute("enableVelocityAsDensity").Set(False)
         ray_march.GetAttribute("enableRawMode").Set(False)
+        ray_march_cloud.GetAttribute("enableCloudMode").Set(True)
+        ray_march_cloud.GetAttribute("densityMultiplier").Set(
+            tracer_config.smoke_cloud_density_multiplier
+        )
+        ray_march_cloud.GetAttribute("volumeBaseColor").Set(
+            tracer_config.smoke_cloud_base_color
+        )
+        advection.GetAttribute("combustionEnabled").Set(False)
+        advection.GetAttribute("buoyancyPerSmoke").Set(0.0)
+        advection.GetAttribute("buoyancyPerTemp").Set(0.0)
+        smoke_channel.GetAttribute("damping").Set(tracer_config.smoke_damping)
+        smoke_channel.GetAttribute("fade").Set(tracer_config.smoke_fade)
+        second_order_blend = smoke_channel.GetAttribute("secondOrderBlendFactor")
+        current_second_order_blend = second_order_blend.Get()
+        if (
+            current_second_order_blend is None
+            or float(current_second_order_blend)
+            < tracer_config.smoke_second_order_blend_factor
+        ):
+            second_order_blend.Set(tracer_config.smoke_second_order_blend_factor)
+        vorticity.GetAttribute("enabled").Set(vorticity_enabled)
+        vorticity.GetAttribute("forceScale").Set(vorticity_force_scale)
+        vorticity.GetAttribute("smokeMask").Set(1.0)
+        vorticity.GetAttribute("velocityMask").Set(0.0)
+        vorticity.GetAttribute("velocityLinearMask").Set(0.0)
+        vorticity.GetAttribute("constantMask").Set(0.0)
 
     @classmethod
     def _author_kit_cae_flow_presentation(
         cls,
         stage,
         flow_environment_path: str,
-        smoke_injector_path: str,
+        tracer_root_path: str,
         attenuation: float,
         alpha_preset: str,
         Gf,
@@ -2957,12 +3581,130 @@ class RuntimeController:
                 for index in range(len(alpha_values))
             ]
         )
-        cls._hide_kit_cae_smoke_injector_mesh(
+        cls._hide_kit_cae_intake_tracer_meshes(
             stage,
-            smoke_injector_path,
+            tracer_root_path,
             UsdGeom,
         )
         return alpha_values
+
+    def set_kit_cae_flow_vorticity_enabled_in_kit(
+        self,
+        enabled: bool,
+    ) -> SimulationCacheResult:
+        """Enable or disable smoke-masked Flow vorticity without resetting Flow."""
+
+        import carb
+        import omni.usd
+
+        self._flow_vorticity_enabled = enabled
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False, "Kit-CAE Flow attach is still in progress."
+            )
+
+        stage = omni.usd.get_context().get_stage()
+        if not self._set_kit_cae_flow_vorticity_enabled(stage, enabled):
+            return SimulationCacheResult(
+                True,
+                "Flow vorticity preference saved for the next airflow attach.",
+            )
+
+        self._log_kit_cae_flow_vorticity_state(carb, stage)
+        return SimulationCacheResult(
+            True,
+            "Flow vorticity "
+            f"{'enabled' if enabled else 'disabled'} without a Flow reset.",
+        )
+
+    def set_kit_cae_flow_vorticity_force_scale_in_kit(
+        self,
+        force_scale: float,
+    ) -> SimulationCacheResult:
+        """Update Flow vorticity strength without clearing or rebuilding Flow."""
+
+        import carb
+        import omni.usd
+
+        if force_scale < 0:
+            return SimulationCacheResult(
+                False, "Flow vorticity strength must not be negative."
+            )
+        if self._flow_lifecycle_state == "ATTACHING":
+            return SimulationCacheResult(
+                False, "Kit-CAE Flow attach is still in progress."
+            )
+
+        self._flow_vorticity_force_scale = force_scale
+        stage = omni.usd.get_context().get_stage()
+        if not self._set_kit_cae_flow_vorticity_force_scale(stage, force_scale):
+            return SimulationCacheResult(
+                True,
+                "Flow vorticity strength preference saved for the next airflow attach.",
+            )
+
+        self._log_kit_cae_flow_vorticity_state(carb, stage)
+        return SimulationCacheResult(
+            True, "Flow vorticity strength updated without a Flow reset."
+        )
+
+    def _log_kit_cae_flow_vorticity_state(self, carb, stage) -> None:
+        """Record the live vorticity masks so an A/B comparison is auditable."""
+
+        vorticity = self._get_kit_cae_flow_vorticity_prim(stage)
+        attributes = {
+            name: vorticity.GetAttribute(name).Get()
+            for name in (
+                "enabled",
+                "forceScale",
+                "smokeMask",
+                "constantMask",
+                "velocityMask",
+            )
+        }
+        carb.log_warn(
+            "=== DTRS FLOW / VORTICITY "
+            "===============================================\n"
+            f"  Flow vorticity:        {'ON' if attributes['enabled'] else 'OFF'}\n"
+            f"  forceScale:            {float(attributes['forceScale']):g}\n"
+            f"  smokeMask:             {float(attributes['smokeMask']):g}\n"
+            f"  constantMask:          {float(attributes['constantMask']):g}\n"
+            f"  velocityMask:          {float(attributes['velocityMask']):g}\n"
+            "==============================================================="
+        )
+
+    @staticmethod
+    def _get_kit_cae_flow_vorticity_prim(stage):
+        simulate = (
+            stage.GetPrimAtPath("/DTRS_KitCAE/FlowSimulation/flowSimulate")
+            if stage
+            else None
+        )
+        return simulate.GetChild("vorticity") if simulate else None
+
+    @staticmethod
+    def _set_kit_cae_flow_vorticity_enabled(stage, enabled: bool) -> bool:
+        """Set only FlowVorticityParams.enabled without rebuilding the simulation."""
+
+        vorticity = RuntimeController._get_kit_cae_flow_vorticity_prim(stage)
+        enabled_attr = vorticity.GetAttribute("enabled") if vorticity else None
+        if not enabled_attr or not enabled_attr.IsValid():
+            return False
+        enabled_attr.Set(enabled)
+        return True
+
+    @staticmethod
+    def _set_kit_cae_flow_vorticity_force_scale(stage, force_scale: float) -> bool:
+        """Set only FlowVorticityParams.forceScale; never clear or rebuild Flow."""
+
+        if force_scale < 0:
+            return False
+        vorticity = RuntimeController._get_kit_cae_flow_vorticity_prim(stage)
+        force_scale_attr = vorticity.GetAttribute("forceScale") if vorticity else None
+        if not force_scale_attr or not force_scale_attr.IsValid():
+            return False
+        force_scale_attr.Set(float(force_scale))
+        return True
 
     def set_kit_cae_debug_overlays_visible_in_kit(
         self,
@@ -3012,19 +3754,32 @@ class RuntimeController:
         return True
 
     @staticmethod
-    def _hide_kit_cae_smoke_injector_mesh(
+    def _hide_kit_cae_intake_tracer_meshes(
         stage,
-        smoke_injector_path: str,
+        tracer_root_path: str,
         UsdGeom,
+        *,
+        expected_count: int | None = None,
     ) -> None:
-        """Hide only the injector's diagnostic mesh; Flow data remain on its child."""
+        """Hide tracer meshes while keeping their FlowEmitterSphere children active."""
 
-        injector_mesh = stage.GetPrimAtPath(smoke_injector_path)
-        if not injector_mesh or not injector_mesh.IsA(UsdGeom.Mesh):
-            raise RuntimeError("Kit-CAE smoke injector mesh is unavailable.")
-        UsdGeom.Imageable(injector_mesh).CreateVisibilityAttr().Set(
-            UsdGeom.Tokens.invisible
+        tracer_root = stage.GetPrimAtPath(tracer_root_path)
+        tracer_meshes = (
+            [prim for prim in tracer_root.GetChildren() if prim.IsA(UsdGeom.Mesh)]
+            if tracer_root and tracer_root.IsValid()
+            else []
         )
+        if not tracer_meshes:
+            raise RuntimeError("Kit-CAE intake tracer meshes are unavailable.")
+        if expected_count is not None and len(tracer_meshes) != expected_count:
+            raise RuntimeError(
+                "Kit-CAE intake tracer mesh count does not match the "
+                "DTRS configuration."
+            )
+        for tracer_mesh in tracer_meshes:
+            UsdGeom.Imageable(tracer_mesh).CreateVisibilityAttr().Set(
+                UsdGeom.Tokens.invisible
+            )
 
     @classmethod
     def _clear_kit_cae_server_visibility_session_opinion(cls, stage, UsdGeom) -> bool:
@@ -3144,7 +3899,7 @@ class RuntimeController:
         imported_grid: dict[str, object],
         dataset_path: str,
         flow_environment_path: str,
-        smoke_injector_path: str,
+        tracer_root_path: str,
         boundary_emitter_path: str,
         dataset_emitter_path: str,
         bbox_path: str,
@@ -3217,7 +3972,13 @@ class RuntimeController:
         )
         flow_colormap = flow_offscreen.GetChild("colormap") if flow_offscreen else None
         dataset_emitter = stage.GetPrimAtPath(dataset_emitter_path)
-        smoke_injector = stage.GetPrimAtPath(smoke_injector_path)
+        tracer_root = stage.GetPrimAtPath(tracer_root_path)
+        tracer_meshes = (
+            [prim for prim in tracer_root.GetChildren() if prim.IsA(UsdGeom.Mesh)]
+            if tracer_root and tracer_root.IsValid()
+            else []
+        )
+        smoke_injector = tracer_meshes[0] if tracer_meshes else None
         smoke_emitter = (
             smoke_injector.GetChild("EmitterSphere") if smoke_injector else None
         )
@@ -3407,7 +4168,8 @@ class RuntimeController:
             ("operator_wait_timed_out", operator_readiness["timed_out"]),
             ("allocationScale", attr_value(dataset_emitter, "allocationScale")),
             ("applyPostPressure", attr_value(dataset_emitter, "applyPostPressure")),
-            ("smoke_injector_path", smoke_injector_path),
+            ("tracer_root_path", tracer_root_path),
+            ("tracer_mesh_count", len(tracer_meshes)),
             (
                 "smoke_emitter_path",
                 smoke_emitter.GetPath() if smoke_emitter else None,

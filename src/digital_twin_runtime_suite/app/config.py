@@ -30,6 +30,8 @@ SIMULATION_CACHE_OVERRIDE_KEYS = (
     "velocity_vti_path",
     "velocity_vti_sequence_paths",
     "velocity_field_name",
+    "flow_vorticity_enabled",
+    "flow_vorticity_force_scale",
 )
 
 
@@ -174,6 +176,22 @@ class FanMotionBindingConfig:
 
 
 @dataclass(frozen=True)
+class IntakeTracerConfig:
+    """Shared geometry for the Stage 6 front-intake Flow tracer sources."""
+
+    count: int = 7
+    radius: float = 0.01
+    front_offset: float = 0.008
+    smoke_target: float = 0.5
+    smoke_couple_rate: float = 30.0
+    smoke_damping: float = 0.0
+    smoke_fade: float = 0.01
+    smoke_cloud_density_multiplier: float = 1.0
+    smoke_cloud_base_color: tuple[float, float, float] = (0.58, 0.64, 0.69)
+    smoke_second_order_blend_factor: float = 0.5
+
+
+@dataclass(frozen=True)
 class SimulationCacheConfig:
     """Configured airflow runtime input and rendering route."""
 
@@ -190,6 +208,10 @@ class SimulationCacheConfig:
     velocity_vti_path: str = ""
     velocity_vti_sequence_paths: tuple[str, ...] = ()
     velocity_field_name: str = "vel"
+    temporal_debug_logging: bool = False
+    flow_vorticity_enabled: bool = False
+    flow_vorticity_force_scale: float = 0.1
+    intake_tracers: IntakeTracerConfig = IntakeTracerConfig()
 
 
 @dataclass(frozen=True)
@@ -792,6 +814,32 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         str(path).strip() for path in raw_velocity_vti_sequence_paths
     )
     velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
+    temporal_debug_logging = bool(data.get("temporal_debug_logging", False))
+    flow_vorticity_enabled = bool(data.get("flow_vorticity_enabled", False))
+    flow_vorticity_force_scale = float(data.get("flow_vorticity_force_scale", 0.1))
+    raw_intake_tracers = data.get("intake_tracers", {})
+    if not isinstance(raw_intake_tracers, dict):
+        raise ValueError("simulation_cache.intake_tracers must be a table.")
+    intake_tracers = IntakeTracerConfig(
+        count=int(raw_intake_tracers.get("count", 7)),
+        radius=float(raw_intake_tracers.get("radius", 0.01)),
+        front_offset=float(raw_intake_tracers.get("front_offset", 0.008)),
+        smoke_target=float(raw_intake_tracers.get("smoke_target", 0.5)),
+        smoke_couple_rate=float(raw_intake_tracers.get("smoke_couple_rate", 30.0)),
+        smoke_damping=float(raw_intake_tracers.get("smoke_damping", 0.0)),
+        smoke_fade=float(raw_intake_tracers.get("smoke_fade", 0.01)),
+        smoke_cloud_density_multiplier=float(
+            raw_intake_tracers.get("smoke_cloud_density_multiplier", 1.0)
+        ),
+        smoke_cloud_base_color=_parse_rgb(
+            raw_intake_tracers.get("smoke_cloud_base_color"),
+            (0.58, 0.64, 0.69),
+            "simulation_cache.intake_tracers.smoke_cloud_base_color",
+        ),
+        smoke_second_order_blend_factor=float(
+            raw_intake_tracers.get("smoke_second_order_blend_factor", 0.5)
+        ),
+    )
     if runtime_mode not in {"index", "kit_cae"}:
         raise ValueError("simulation_cache.runtime_mode must be 'index' or 'kit_cae'.")
     if enabled and runtime_mode == "index" and not wrapper_path:
@@ -805,10 +853,10 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
             "simulation_cache.velocity_vti_sequence_paths must not contain empty paths."
         )
     if velocity_vti_sequence_paths:
-        if len(velocity_vti_sequence_paths) != 3:
+        if len(velocity_vti_sequence_paths) != 16:
             raise ValueError(
                 "simulation_cache.velocity_vti_sequence_paths must contain exactly "
-                "three frames for the Stage 6 temporal probe."
+                "sixteen ordered frames for the Stage 6 temporal loop proof."
             )
         if velocity_vti_sequence_paths[0] != velocity_vti_path:
             raise ValueError(
@@ -837,6 +885,44 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         raise ValueError("simulation_cache.field_name must not be empty.")
     if not velocity_field_name:
         raise ValueError("simulation_cache.velocity_field_name must not be empty.")
+    if flow_vorticity_force_scale < 0:
+        raise ValueError(
+            "simulation_cache.flow_vorticity_force_scale must not be negative."
+        )
+    if intake_tracers.count != 7:
+        raise ValueError("simulation_cache.intake_tracers.count must be 7.")
+    if intake_tracers.radius <= 0:
+        raise ValueError("simulation_cache.intake_tracers.radius must be positive.")
+    if intake_tracers.front_offset <= 0:
+        raise ValueError(
+            "simulation_cache.intake_tracers.front_offset must be positive."
+        )
+    if intake_tracers.smoke_target <= 0:
+        raise ValueError(
+            "simulation_cache.intake_tracers.smoke_target must be positive."
+        )
+    if intake_tracers.smoke_couple_rate <= 0:
+        raise ValueError(
+            "simulation_cache.intake_tracers.smoke_couple_rate must be positive."
+        )
+    if not 0 <= intake_tracers.smoke_damping <= 1:
+        raise ValueError(
+            "simulation_cache.intake_tracers.smoke_damping must be in 0..1."
+        )
+    if intake_tracers.smoke_fade < 0:
+        raise ValueError(
+            "simulation_cache.intake_tracers.smoke_fade must not be negative."
+        )
+    if intake_tracers.smoke_cloud_density_multiplier <= 0:
+        raise ValueError(
+            "simulation_cache.intake_tracers.smoke_cloud_density_multiplier "
+            "must be positive."
+        )
+    if not 0 <= intake_tracers.smoke_second_order_blend_factor <= 0.5:
+        raise ValueError(
+            "simulation_cache.intake_tracers.smoke_second_order_blend_factor "
+            "must be in 0..0.5."
+        )
     if sampling_distance <= 0:
         raise ValueError("simulation_cache.sampling_distance must be positive.")
     if not 1 <= resolution_scale <= 100:
@@ -861,6 +947,10 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         velocity_vti_path=velocity_vti_path,
         velocity_vti_sequence_paths=velocity_vti_sequence_paths,
         velocity_field_name=velocity_field_name,
+        temporal_debug_logging=temporal_debug_logging,
+        flow_vorticity_enabled=flow_vorticity_enabled,
+        flow_vorticity_force_scale=flow_vorticity_force_scale,
+        intake_tracers=intake_tracers,
     )
 
 

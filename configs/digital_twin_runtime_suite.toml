@@ -250,10 +250,38 @@ sampling_distance = 0.0255
 resolution_scale = 25
 rendering_samples = 1
 filter_mode = "nearest"
-velocity_vti_path = "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti"
+velocity_vti_path = "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti"
 velocity_vti_sequence_paths = [
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1015.vti",
-    "vti/server_airflow_sims/velocity/server_airflow_velocity_1016.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1051.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1101.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1151.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1201.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1251.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1301.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1351.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1401.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1451.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1501.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1551.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1601.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1651.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1701.vti",
+    "vti/server_airflow_sims/velocity/server_airflow_velocity_1751.vti",
 ]
 velocity_field_name = "vel"
+temporal_debug_logging = false
+flow_vorticity_enabled = false
+flow_vorticity_force_scale = 0.1
+
+[simulation_cache.intake_tracers]
+count = 7
+radius = 0.01
+front_offset = 0.008
+smoke_target = 0.5
+smoke_couple_rate = 30.0
+smoke_damping = 0.0
+smoke_fade = 0.01
+smoke_cloud_density_multiplier = 1.0
+smoke_cloud_base_color = [0.58, 0.64, 0.69]
+smoke_second_order_blend_factor = 0.5

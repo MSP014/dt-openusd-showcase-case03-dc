@@ -39,19 +39,62 @@ def test_v02_runtime_config_resolves_default_asset():
     assert config.simulation_cache.resolution_scale == 25
     assert config.simulation_cache.rendering_samples == 1
     assert config.simulation_cache.filter_mode == "nearest"
-    assert config.velocity_vti_path.name == "server_airflow_velocity_1014.vti"
+    assert config.simulation_cache.temporal_debug_logging is False
+    assert config.simulation_cache.flow_vorticity_enabled is False
+    assert config.simulation_cache.flow_vorticity_force_scale == 0.1
+    assert config.simulation_cache.intake_tracers.count == 7
+    assert config.simulation_cache.intake_tracers.radius == 0.01
+    assert config.simulation_cache.intake_tracers.front_offset == 0.008
+    assert config.simulation_cache.intake_tracers.smoke_target == 0.5
+    assert config.simulation_cache.intake_tracers.smoke_couple_rate == 30.0
+    assert config.simulation_cache.intake_tracers.smoke_damping == 0.0
+    assert config.simulation_cache.intake_tracers.smoke_fade == 0.01
+    assert config.simulation_cache.intake_tracers.smoke_cloud_density_multiplier == 1.0
+    assert config.simulation_cache.intake_tracers.smoke_cloud_base_color == (
+        0.58,
+        0.64,
+        0.69,
+    )
+    assert config.simulation_cache.intake_tracers.smoke_second_order_blend_factor == 0.5
+    assert config.velocity_vti_path.name == "server_airflow_velocity_1001.vti"
     assert config.simulation_cache.velocity_vti_path == (
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti"
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti"
     )
     assert tuple(path.name for path in config.velocity_vti_sequence_paths) == (
-        "server_airflow_velocity_1014.vti",
-        "server_airflow_velocity_1015.vti",
-        "server_airflow_velocity_1016.vti",
+        "server_airflow_velocity_1001.vti",
+        "server_airflow_velocity_1051.vti",
+        "server_airflow_velocity_1101.vti",
+        "server_airflow_velocity_1151.vti",
+        "server_airflow_velocity_1201.vti",
+        "server_airflow_velocity_1251.vti",
+        "server_airflow_velocity_1301.vti",
+        "server_airflow_velocity_1351.vti",
+        "server_airflow_velocity_1401.vti",
+        "server_airflow_velocity_1451.vti",
+        "server_airflow_velocity_1501.vti",
+        "server_airflow_velocity_1551.vti",
+        "server_airflow_velocity_1601.vti",
+        "server_airflow_velocity_1651.vti",
+        "server_airflow_velocity_1701.vti",
+        "server_airflow_velocity_1751.vti",
     )
     assert config.simulation_cache.velocity_vti_sequence_paths == (
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1015.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1016.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1051.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1101.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1151.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1201.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1251.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1301.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1351.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1401.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1451.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1501.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1551.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1601.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1651.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1701.vti",
+        "vti/server_airflow_sims/velocity/server_airflow_velocity_1751.vti",
     )
     assert config.simulation_cache.velocity_field_name == "vel"
 

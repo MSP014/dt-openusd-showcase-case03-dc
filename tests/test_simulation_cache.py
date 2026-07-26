@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from digital_twin_runtime_suite.app.commands import (
     FlowPerformanceSample,
     RuntimeController,
@@ -200,7 +202,227 @@ def test_kit_cae_spatial_sanity_wireframes_are_hidden_by_default_and_toggle():
     assert abs(server_wireframe.GetAttribute("widths").Get()[0] - 0.003) < 1e-6
 
 
-def test_kit_cae_temporal_velocity_samples_author_three_vti_frames(tmp_path):
+def test_kit_cae_flow_deactivation_precedes_runtime_prim_removal():
+    from pxr import Sdf, Usd, UsdGeom
+
+    stage = Usd.Stage.CreateInMemory()
+    emitter = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/DataSetEmitter").GetPrim()
+    enabled = emitter.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool)
+    enabled.Set(True)
+
+    simulate = UsdGeom.Xform.Define(
+        stage,
+        "/DTRS_KitCAE/FlowSimulation/flowSimulate",
+    ).GetPrim()
+    disable_emitters = simulate.CreateAttribute(
+        "forceDisableEmitters",
+        Sdf.ValueTypeNames.Bool,
+    )
+    disable_core = simulate.CreateAttribute(
+        "forceDisableCoreSimulation",
+        Sdf.ValueTypeNames.Bool,
+    )
+    disable_emitters.Set(False)
+    disable_core.Set(False)
+    offscreen = UsdGeom.Xform.Define(
+        stage,
+        "/DTRS_KitCAE/FlowSimulation/flowOffscreen",
+    ).GetPrim()
+    render = UsdGeom.Xform.Define(
+        stage,
+        "/DTRS_KitCAE/FlowSimulation/flowRender",
+    ).GetPrim()
+
+    class FakeOperatorAPI:
+        def __init__(self, prim):
+            self._prim = prim
+
+        def CreateEnabledAttr(self):
+            return self._prim.GetAttribute("enabled")
+
+    class FakeCaeViz:
+        OperatorAPI = FakeOperatorAPI
+
+    assert RuntimeController._deactivate_kit_cae_flow_for_detach(stage, FakeCaeViz)
+
+    assert enabled.Get() is False
+    assert disable_emitters.Get() is True
+    assert disable_core.Get() is True
+    assert offscreen.IsActive() is False
+    assert render.IsActive() is False
+
+
+def test_kit_cae_front_intake_tracer_positions_follow_p120_bounds():
+    from pxr import Gf, Usd, UsdGeom
+
+    config = RuntimeConfig.load(
+        Path("configs/digital_twin_runtime_suite.toml"),
+        apply_local_overrides=False,
+    )
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(stage, "/blackwell_rig")
+
+    def define_box(path, translate, scale):
+        cube = UsdGeom.Cube.Define(stage, path)
+        transform = UsdGeom.XformCommonAPI(cube)
+        transform.SetTranslate(Gf.Vec3d(*translate))
+        transform.SetScale(Gf.Vec3f(*scale))
+
+    define_box("/blackwell_rig/chassis", (0.0, 0.08, -0.25), (0.24, 0.08, 0.27))
+    for index, x_position in enumerate((-0.1, 0.025, 0.15), start=1):
+        binding = next(
+            item
+            for item in config.fan_motion_bindings
+            if item.binding_id == f"front_p120_0{index}"
+        )
+        define_box(binding.mesh_path, (x_position, 0.08, -0.03), (0.06, 0.06, 0.01))
+
+    positions = RuntimeController._kit_cae_front_intake_tracer_positions(
+        stage,
+        config.simulation_cache.intake_tracers,
+        config.fan_motion_bindings,
+        ((-0.25, -0.01, -0.55), (0.25, 0.18, 0.05)),
+        Gf,
+        Usd,
+        UsdGeom,
+    )
+
+    assert len(positions) == 7
+    assert tuple(round(float(position[0]), 6) for position in positions) == (
+        -0.1625,
+        -0.1,
+        -0.0375,
+        0.025,
+        0.0875,
+        0.15,
+        0.2125,
+    )
+    assert all(round(float(position[1]), 6) == 0.08 for position in positions)
+    assert all(round(float(position[2]), 6) == 0.028 for position in positions)
+
+
+def test_kit_cae_smoke_only_tracer_setup_disables_combustion_and_masks_vorticity():
+    from pxr import Sdf, Usd, UsdGeom
+
+    config = RuntimeConfig.load(
+        Path("configs/digital_twin_runtime_suite.toml"),
+        apply_local_overrides=False,
+    )
+    stage = Usd.Stage.CreateInMemory()
+
+    def define_prim(path):
+        return UsdGeom.Xform.Define(stage, path).GetPrim()
+
+    def define_attribute(prim, name, value_type, value):
+        return prim.CreateAttribute(name, value_type).Set(value)
+
+    environment = define_prim("/DTRS_KitCAE/FlowSimulation")
+    simulate = define_prim(f"{environment.GetPath()}/flowSimulate")
+    advection = define_prim(f"{simulate.GetPath()}/advection")
+    smoke = define_prim(f"{advection.GetPath()}/smoke")
+    vorticity = define_prim(f"{simulate.GetPath()}/vorticity")
+    offscreen = define_prim(f"{environment.GetPath()}/flowOffscreen")
+    debug_volume = define_prim(f"{offscreen.GetPath()}/debugVolume")
+    render = define_prim(f"{environment.GetPath()}/flowRender")
+    ray_march = define_prim(f"{render.GetPath()}/rayMarch")
+    ray_march_cloud = define_prim(f"{ray_march.GetPath()}/cloud")
+
+    define_attribute(
+        debug_volume, "enableSpeedAsTemperature", Sdf.ValueTypeNames.Bool, True
+    )
+    define_attribute(
+        debug_volume, "enableVelocityAsDensity", Sdf.ValueTypeNames.Bool, True
+    )
+    define_attribute(ray_march, "enableRawMode", Sdf.ValueTypeNames.Bool, True)
+    define_attribute(ray_march_cloud, "enableCloudMode", Sdf.ValueTypeNames.Bool, False)
+    define_attribute(
+        ray_march_cloud, "densityMultiplier", Sdf.ValueTypeNames.Float, 0.0
+    )
+    define_attribute(
+        ray_march_cloud,
+        "volumeBaseColor",
+        Sdf.ValueTypeNames.Float3,
+        (0.0, 0.0, 0.0),
+    )
+    define_attribute(advection, "combustionEnabled", Sdf.ValueTypeNames.Bool, True)
+    define_attribute(advection, "buoyancyPerSmoke", Sdf.ValueTypeNames.Float, 1.0)
+    define_attribute(advection, "buoyancyPerTemp", Sdf.ValueTypeNames.Float, 1.0)
+    define_attribute(smoke, "damping", Sdf.ValueTypeNames.Float, 0.3)
+    define_attribute(smoke, "fade", Sdf.ValueTypeNames.Float, 0.65)
+    define_attribute(smoke, "secondOrderBlendFactor", Sdf.ValueTypeNames.Float, 0.0)
+    define_attribute(vorticity, "enabled", Sdf.ValueTypeNames.Bool, True)
+    for attribute_name in (
+        "forceScale",
+        "smokeMask",
+        "velocityMask",
+        "velocityLinearMask",
+        "constantMask",
+    ):
+        define_attribute(vorticity, attribute_name, Sdf.ValueTypeNames.Float, 0.0)
+
+    RuntimeController._configure_kit_cae_smoke_only_tracer_flow(
+        stage,
+        str(environment.GetPath()),
+        config.simulation_cache.intake_tracers,
+        vorticity_enabled=False,
+        vorticity_force_scale=config.simulation_cache.flow_vorticity_force_scale,
+    )
+
+    assert debug_volume.GetAttribute("enableSpeedAsTemperature").Get() is False
+    assert debug_volume.GetAttribute("enableVelocityAsDensity").Get() is False
+    assert ray_march.GetAttribute("enableRawMode").Get() is False
+    assert ray_march_cloud.GetAttribute("enableCloudMode").Get() is True
+    assert ray_march_cloud.GetAttribute("densityMultiplier").Get() == 1.0
+    assert tuple(
+        ray_march_cloud.GetAttribute("volumeBaseColor").Get()
+    ) == pytest.approx((0.58, 0.64, 0.69))
+    assert advection.GetAttribute("combustionEnabled").Get() is False
+    assert advection.GetAttribute("buoyancyPerSmoke").Get() == 0.0
+    assert advection.GetAttribute("buoyancyPerTemp").Get() == 0.0
+    assert smoke.GetAttribute("damping").Get() == 0.0
+    assert smoke.GetAttribute("fade").Get() == pytest.approx(0.01)
+    assert smoke.GetAttribute("secondOrderBlendFactor").Get() == 0.5
+    assert vorticity.GetAttribute("enabled").Get() is False
+    assert vorticity.GetAttribute("forceScale").Get() == pytest.approx(0.1)
+    assert vorticity.GetAttribute("smokeMask").Get() == 1.0
+    assert vorticity.GetAttribute("velocityMask").Get() == 0.0
+    assert vorticity.GetAttribute("velocityLinearMask").Get() == 0.0
+    assert vorticity.GetAttribute("constantMask").Get() == 0.0
+
+
+def test_kit_cae_flow_vorticity_toggle_changes_only_enabled_without_reset():
+    from pxr import Sdf, Usd, UsdGeom
+
+    stage = Usd.Stage.CreateInMemory()
+    simulate = UsdGeom.Xform.Define(
+        stage,
+        "/DTRS_KitCAE/FlowSimulation/flowSimulate",
+    ).GetPrim()
+    force_clear = simulate.CreateAttribute("forceClear", Sdf.ValueTypeNames.Bool)
+    force_clear.Set(False)
+    vorticity = UsdGeom.Xform.Define(
+        stage,
+        "/DTRS_KitCAE/FlowSimulation/flowSimulate/vorticity",
+    ).GetPrim()
+    enabled = vorticity.CreateAttribute("enabled", Sdf.ValueTypeNames.Bool)
+    enabled.Set(False)
+    force_scale = vorticity.CreateAttribute("forceScale", Sdf.ValueTypeNames.Float)
+    force_scale.Set(0.1)
+
+    assert RuntimeController._set_kit_cae_flow_vorticity_enabled(stage, True)
+    assert enabled.Get() is True
+    assert force_clear.Get() is False
+
+    assert RuntimeController._set_kit_cae_flow_vorticity_enabled(stage, False)
+    assert enabled.Get() is False
+    assert force_clear.Get() is False
+
+    assert RuntimeController._set_kit_cae_flow_vorticity_force_scale(stage, 0.6)
+    assert force_scale.Get() == pytest.approx(0.6)
+    assert force_clear.Get() is False
+
+
+def test_kit_cae_temporal_velocity_samples_author_sixteen_sparse_vti_frames(tmp_path):
     from pxr import Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
@@ -222,7 +444,24 @@ def test_kit_cae_temporal_velocity_samples_author_three_vti_frames(tmp_path):
 
     paths = tuple(
         tmp_path / f"server_airflow_velocity_{frame}.vti"
-        for frame in (1014, 1015, 1016)
+        for frame in (
+            1001,
+            1051,
+            1101,
+            1151,
+            1201,
+            1251,
+            1301,
+            1351,
+            1401,
+            1451,
+            1501,
+            1551,
+            1601,
+            1651,
+            1701,
+            1751,
+        )
     )
     time_codes = RuntimeController._author_kit_cae_temporal_velocity_samples(
         field.GetPrim(),
@@ -233,10 +472,73 @@ def test_kit_cae_temporal_velocity_samples_author_three_vti_frames(tmp_path):
         Usd,
     )
 
-    assert time_codes == (0.0, 50.0, 100.0)
+    assert time_codes == tuple(float(time_code) for time_code in range(0, 800, 50))
     assert [
         file_names_attr.Get(Usd.TimeCode(time_code))[0].path for time_code in time_codes
     ] == [path.as_posix() for path in paths]
+
+
+def test_kit_cae_temporal_loop_proof_requires_sixteen_distinct_sources_and_closure(
+    tmp_path,
+):
+    velocity_paths = tuple(
+        tmp_path / f"server_airflow_velocity_{frame}.vti"
+        for frame in (
+            1001,
+            1051,
+            1101,
+            1151,
+            1201,
+            1251,
+            1301,
+            1351,
+            1401,
+            1451,
+            1501,
+            1551,
+            1601,
+            1651,
+            1701,
+            1751,
+        )
+    )
+    records = []
+    for index, asset in enumerate((*velocity_paths, velocity_paths[0])):
+        records.append(
+            {
+                "sequence_index": index,
+                "source_frame": RuntimeController._kit_cae_vti_source_frame(asset),
+                "asset": asset.name,
+                "asset_hash": f"{index % len(velocity_paths):012x}",
+                "transition": (
+                    "INITIAL" if index == 0 else "LOOP" if index == 16 else "SWAP"
+                ),
+                "operator_ready": True,
+                "timeline_advancing": True,
+                "flow_reset": False,
+                "origin_match": True,
+                "grid_match": True,
+            }
+        )
+
+    summary = RuntimeController._kit_cae_temporal_loop_proof_summary(
+        records,
+        velocity_paths,
+    )
+
+    assert summary["passed"] is True
+    assert summary["forward_transitions"] == 15
+    assert summary["loop_transitions"] == 1
+    assert summary["loop_closure"] is True
+    assert summary["unique_assets"] == 16
+    assert summary["unique_hashes"] == 16
+
+    incomplete_summary = RuntimeController._kit_cae_temporal_loop_proof_summary(
+        records[:-1],
+        velocity_paths,
+    )
+    assert incomplete_summary["passed"] is False
+    assert incomplete_summary["loop_closure"] is False
 
 
 def test_kit_cae_vti_origin_compatibility_opinion_uses_session_layer():
@@ -276,47 +578,6 @@ def test_kit_cae_vti_origin_compatibility_opinion_uses_session_layer():
     assert origin_attr.GetPropertyStack()[0].layer == stage.GetSessionLayer()
 
 
-def test_kit_cae_native_fuel_probe_disables_only_render_debug_overrides():
-    from pxr import Sdf, Usd, UsdGeom
-
-    stage = Usd.Stage.CreateInMemory()
-    environment = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/FlowSimulation")
-    offscreen = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowOffscreen",
-    )
-    render = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowRender",
-    )
-    debug_volume = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowOffscreen/debugVolume",
-    )
-    ray_march = UsdGeom.Xform.Define(
-        stage,
-        "/DTRS_KitCAE/FlowSimulation/flowRender/rayMarch",
-    )
-    debug_volume.GetPrim().CreateAttribute(
-        "enableVelocityAsDensity",
-        Sdf.ValueTypeNames.Bool,
-    ).Set(True)
-    ray_march.GetPrim().CreateAttribute(
-        "enableRawMode",
-        Sdf.ValueTypeNames.Bool,
-    ).Set(True)
-
-    RuntimeController._configure_kit_cae_native_fuel_smoke_probe(
-        stage,
-        str(environment.GetPath()),
-    )
-
-    assert debug_volume.GetPrim().GetAttribute("enableVelocityAsDensity").Get() is False
-    assert ray_march.GetPrim().GetAttribute("enableRawMode").Get() is False
-    assert offscreen.GetPrim().IsValid()
-    assert render.GetPrim().IsValid()
-
-
 def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
     from pxr import Gf, Sdf, Usd, UsdGeom
 
@@ -352,14 +613,21 @@ def test_kit_cae_flow_presentation_authors_tracer_ramp_and_opacity_only():
             Gf.Vec4f(0.7, 0.01, 0.14, 1.0),
         ]
     )
-    injector = UsdGeom.Mesh.Define(stage, "/DTRS_KitCAE/SmokeInjector")
-    emitter = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/SmokeInjector/EmitterSphere")
+    tracer_root = UsdGeom.Xform.Define(stage, "/DTRS_KitCAE/AirflowTracerEmitters")
+    injector = UsdGeom.Mesh.Define(
+        stage,
+        "/DTRS_KitCAE/AirflowTracerEmitters/intake_01",
+    )
+    emitter = UsdGeom.Xform.Define(
+        stage,
+        "/DTRS_KitCAE/AirflowTracerEmitters/intake_01/EmitterSphere",
+    )
     stage.SetEditTarget(stage.GetSessionLayer())
 
     alphas = RuntimeController._author_kit_cae_flow_presentation(
         stage,
         str(environment.GetPath()),
-        str(injector.GetPath()),
+        str(tracer_root.GetPath()),
         10.0,
         "medium",
         Gf,

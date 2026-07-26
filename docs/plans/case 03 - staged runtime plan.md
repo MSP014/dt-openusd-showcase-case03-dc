@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
 **Status**: Draft
-**Last Updated**: 2026-07-25
+**Last Updated**: 2026-07-26
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -62,34 +62,40 @@ Jira tracking:
 
 Stage 6 current checkpoint:
 
-- The full DTRS server scene without airflow has a measured `78.6 FPS`
-  pre-Attach baseline at `1280 x 720` on the RTX 3080. The direct
-  OpenVDB/RTX-IndeX playback route remains closed after its final fast-path
-  test stayed around `2.4 FPS`.
-- **STATIC VTI -> KIT-CAE -> FLOW CAPABILITY PROOF: PASSED.** The real Houdini
-  velocity asset `server_airflow_velocity_1014.vti` drives native NVIDIA Flow
-  smoke through Kit-CAE in DTRS.
-- **3-FRAME TEMPORAL VTI -> KIT-CAE -> FLOW PROOF: PASSED.** The one live
-  `FlowSimulation` and one `DataSetEmitter` continue while composed
-  `PointData/vel` resolves `1014 -> 1015 -> 1016`: three distinct assets and
-  SHA-256 identities, two successful transitions, `operator_ready_all=True`,
-  `origin_match_all=True`, `grid_match_all=True`,
+- DTRS now uses the working airflow route:
+
+  ```text
+  Houdini airflow simulation
+    -> runtime-resampled temporal VTI velocity fields
+    -> Kit-CAE
+    -> CAE velocity / NanoVDB bridge
+    -> NVIDIA Flow
+    -> real-time volumetric smoke tracer
+  ```
+
+- The temporal dataset contains 16 unique VTI samples, `1001 -> 1051 -> ...
+  -> 1751 -> loop`, at a deliberate cadence of 50 Houdini source frames per
+  one second of DTRS playback.
+- **16-SAMPLE TEMPORAL VTI -> KIT-CAE -> FLOW LOOP PROOF: PASSED.** The proof
+  records 16 unique assets, 16 unique SHA-256 identities, 15 forward
+  transitions, one loop transition, `origin_match=True`, `grid_match=True`,
   `timeline_continuous=True`, and `Flow resets=0`.
-- The three-frame fixture uses the resampled `184 x 72 x 232` VTI grid at
-  approximately `0.00255 m` spacing. Its authoritative header origin is
-  restored as a DTRS session-layer compatibility opinion before downstream
-  CAE/Flow setup, leaving the source VTI and authored server USD unchanged.
-- Static Flow presentation is selected: attenuation 8, Medium opacity, and a
-  deep-blue/cyan through cyan to pale-cyan/near-white tracer ramp. The DTRS
-  default applies this look during Attach; diagnostic bounds remain available
-  through an explicit control but are hidden by default.
-- The temporary Stage 6 performance logger records the Kit HUD statistics.
-  After settle, ten-second averages were `48.8-52.5 FPS` through 70 seconds of
-  attached temporal playback, with GPU memory around `4.6-4.7 GiB` and process
-  RSS around `6.1-6.4 GiB`.
-- The remaining Stage 6 work is bounded: test temporal sampling cadence, then
-  make the production playback and storage decision. No longer sequence is
-  warranted until the cadence probes provide that evidence.
+- The front-intake tracer layout now uses seven emitters in one horizontal row.
+  Emitters 2, 4, and 6 align with the centres of the three front P120 fans.
+- The tracer has moved from the diagnostic fuel/temperature setup to
+  `SMOKE_ONLY`: fuel, temperature, burn, combustion, and buoyancy are OFF;
+  smoke is ON. DTRS renders it with Flow Volume Smoke Cloud.
+- The smoke now reads as a real-time volumetric tracer and is transported
+  through the server by the imported Houdini VTI velocity field.
+- The Airflow panel includes a live `Flow vorticity` checkbox, which toggles
+  without a Flow reset. Its strength behaviour remains part of the next
+  presentation and performance tuning pass.
+- RTX 3080 performance depends on camera coverage and the visible volume. The
+  current overview demonstration is around 30 FPS; optimisation remains part
+  of Stage 6 rather than a completed claim.
+- The smoke look is functional but not final. Density, light blue-grey colour,
+  detail/sharpness, meaningful vorticity strength and scale, and the final
+  performance baseline still require tuning.
 
 The local authoring and tooling environment still uses `case03-env`. Digital Twin Runtime Suite runtime code, however, runs inside Kit's Python environment
 when launched through `kit.exe`. Any Python dependency used by runtime code must
@@ -102,34 +108,29 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-The next Stage 6 gate is a temporal sampling cadence probe, not further static
-Flow tuning. The three-frame temporal runtime contract is already proved, and
-the temporary performance logger remains enabled for the rest of Stage 6.
+The next Stage 6 session begins with **smoke presentation tuning**, not a new
+runtime architecture. Continue from the working `SMOKE_ONLY +
+VOLUME_SMOKE_CLOUD` route and evaluate changes in this order:
 
-Start with exactly three resampled runtime VTI frames at source stride `Delta 5`:
-`server_airflow_velocity_1014.vti`,
-`server_airflow_velocity_1019.vti`, and
-`server_airflow_velocity_1024.vti`. Preserve the current `184 x 72 x 232`
-grid, origin/spacing compatibility repair, Kit-CAE bridge, one Flow simulation,
-one DataSetEmitter, velocity coupling, smoke setup, and selected airflow look.
-First produce those three resampled VTI fixtures with the private Houdini
-exporter; do not alter the current DTRS temporal fixture or configuration until
-they are available. The proof must again show three distinct asset hashes, two
-successful source transitions, a continuous timeline, and zero Flow resets while
-the performance logger captures the settled interval statistics.
+1. renderer-side density;
+2. light blue-grey smoke colour;
+3. smoke detail through second-order advection quality;
+4. vorticity strength and masks; and
+5. controlled FPS comparison with vorticity OFF versus ON.
 
-This first probe tests source-frame distance and visible airflow response with
-the current one-second hold per selected source. It is not yet a claim about the
-final real-time source-to-DTRS playback mapping or final storage count; those are
-separate decisions. If `Delta 5` remains readable and the runtime evidence
-passes, repeat with `1014 -> 1024 -> 1034` (`Delta 10`). Only then choose the
-least frequent source stride that preserves the intended airflow character and
-plan a longer Houdini export.
+Do not change the temporal VTI pipeline, runtime grid, velocity coupling,
+emitter placement, or collision system during this tuning pass. Flow remains
+the runtime visualisation layer; the Houdini velocity field remains the source
+of the primary airflow physics.
+
+After the smoke presentation and controlled performance baseline are stable,
+choose the minimum VTI update frequency that preserves readable airflow. That
+cadence decision determines the number of VTI files and the Houdini export
+interval for the longer fixture.
 
 Do not expand Stage 6 into Engineering X-Ray, workload-to-cache state binding,
 velocity trails, heatmaps, automatic workload cycling, rack/data-hall
-navigation, or generated simulation. Those remain separate staged slices after
-the cached playback surface is stable.
+navigation, or generated simulation. Those remain separate staged slices.
 
 ---
 
@@ -654,472 +655,66 @@ Jira: `DC-45`
 
 Release track: `0.4.0` (released on Stage 8 completion).
 
-Introduce an honest runtime airflow layer only when the asset package contains
-a real Houdini-authored cache, velocity field, or matching visual layer to
-drive. Stage 6 must not present generated live simulation as baked simulation
-playback.
-
-Required scope:
-- **Runtime airflow evidence:** Implement playback or visual mapping of baked
-  Houdini airflow/thermal simulation data, using direct OpenVDB playback only
-  if it is performant enough for the full DTRS scene. If direct density playback
-  fails the frame-budget target, use a velocity-driven runtime visualisation or
-  a streamlines/hybrid route backed by the same Houdini simulation source.
-- **Measured acceptance:** Treat the route as shippable only when the full
-  Blackwell Rig server scene, interactive camera, airflow layer, correct
-  geometry depth/compositing, and smooth frame changes run at about 25 FPS or
-  better at 1280 x 720 on the target RTX 3080 workstation profile.
-- **Status honesty:** Report whether the active route is direct density
-  playback, velocity-driven airflow visualisation, engineering streamlines, or
-  a missing/unsupported simulation layer.
-
-Done when the app can enable the selected airflow evidence route and report its
-load, playback, performance, and fallback status without pretending to generate
-the Houdini simulation live.
-
-#### Implementation Checkpoint - 2026-07-19 Pit Stop
-
-Status: active investigation; cache playback is not yet visually validated.
-
-Confirmed cache and USD repairs:
-
-- The asset package now contains one intended cache sequence only:
-  `assets/_external/vdb/server_airflow_sims/server_airflow_vdb_load_50`, with
-  800 VDB frames covering time codes `1001` through `1800`.
-- The Houdini USD wrapper at
-  `assets/_external/usd/server_airflow_v001/server_airflow_load_50.usda` was
-  re-exported with `defaultPrim = /sim`, a `1001-1800` range, and both
-  `timeCodesPerSecond` and `framesPerSecond` set to `50`.
-- The `density` `OpenVDBAsset` now declares `fieldDataType = "float"`, matching
-  the inspected VDB grid (`density`, scalar fog volume, float values).  This
-  removes the missing field-type metadata that makes runtime interpretation
-  ambiguous.
-- Per-frame `filePath` time samples resolve to all 800 local VDB files.
-  DTRS preflight accepts the wrapper and verifies the range, field, type, and
-  file samples before attach.
-- A manually specified volume extent was used for the export instead of a full
-  frame-range extent scan.  The latter took about two minutes for a single
-  frame and is not an acceptable export-time path for this sequence.
-
-Known non-blocking wrapper cleanup:
-
-- Houdini still time-samples constant `fieldName = "density"` and
-  `fieldIndex = 0`.  This is redundant animation data, but it does not block
-  cache resolution or rendering.  Do not spend further time on it until a
-  visible native volume is established.
-
-Runtime work completed so far:
-
-- Added config-backed cache preflight and operator controls for attach, detach,
-  play, pause, and reset.  The runtime composes the wrapper through the session
-  layer, leaving the authored USD and VDB assets untouched.
-- Added the Kit dependency `omni.rtx.index_composite` and installed its release
-  extension with the official Kit repository tooling.  The extension loads at
-  DTRS startup together with `omni.index.usd` and `omni.index.renderer`.
-- Replaced the unsupported MDL proxy attempt with the official native NVIDIA
-  IndeX composition shape: `nvindex:composite`, `omni:rtx:skip`, native IndeX
-  material output, colormap, and compositing settings are authored transiently
-  in the DTRS session layer.
-- Focused Python tests pass locally (`16 passed`) for wrapper preflight and the
-  authored session-layer contract.  This is structural validation only, not
-  proof that a volume is visible in the GPU viewport.
-
-Rejected paths and observed failures:
-
-- Raw RTX volume rendering produced an opaque red, surface-like mass rather
-  than a readable airflow volume.
-- The MDL `OmniVolumeDensity` proxy is invalid for this VDB source.  Kit logged
-  `volume_density_texture` type `3D` versus VDB type `1D`, then crashed in the
-  native rendering path.  This proxy must not be restored.
-- The first native IndeX compositing attempt loads its dependencies but still
-  produces no visible airflow.  The live DTRS viewport also changes its selected
-  renderer to `Scientific (IndeX)` rather than staying on the intended RTX
-  compositor path.  This is the current blocker, not a solved renderer setup.
-
-Resume point and diagnostic order:
-
-1. Capture and inspect the live DTRS session layer immediately after Attach:
-   reference, composed `Volume`, `OpenVDBAsset`, material binding, IndeX
-   attributes, and current timeline time must be checked in the running Kit
-   process rather than inferred from unit tests.
-2. Identify which setting or extension action selects `Scientific (IndeX)` and
-   keep the viewport on RTX while NVIDIA IndeX compositing is enabled.  Do not
-   reintroduce `set_hd_engine("index")` or any MDL VDB proxy.
-3. Reproduce the official compositing fixture with one local airflow VDB frame
-   in the same Kit release.  Compare its session/stage opinions with the DTRS
-   authored ones to isolate renderer configuration from wrapper playback.
-4. Once one frame is visible, validate native time-sampled `filePath` playback
-   over several distant frames before tuning opacity, colour, sampling distance,
-   or the DTRS presentation.
-5. Treat any GPU crash, black proxy, or no-volume result as a renderer-contract
-   finding and preserve the relevant Kit log before changing Houdini exports.
-
-#### Implementation Checkpoint - 2026-07-20 Pit Stop
-
-Status: active investigation; native OpenVDB playback is visually established,
-but it is not yet fast enough for showreel capture.
-
-Verified runtime result:
-
-- The native RTX / NVIDIA IndeX compositing path can render the original Houdini
-  `density` OpenVDB sequence inside the DTRS viewport while keeping the server
-  geometry visible and the camera interactive. This proves that the repaired
-  wrapper and the session-layer composition contract are viable.
-- The original cache is not a usable playback payload: its 800 source frames
-  average about 33 MiB each. Playback measured about `0.75-1.5 FPS`; pausing a
-  frame reached only about `19-20 FPS`. This is below the Stage 6 capture
-  target of 25 FPS at 1280x720.
-
-Rejected NanoVDB proxy experiment:
-
-- A 30-frame, 25-FPS test set was made from source frames `1001, 1003, ...,
-  1059` using Kit's `omni.volume` converter. It produced about 2.46 GiB of
-  `.nvdb` data and therefore was not a storage reduction.
-- The current USD `OpenVDBAsset` / RTX-IndeX importer contract requires
-  OpenVDB files. Attaching the `.nvdb` wrapper failed with
-  `OpenVDB importer (NanoVDB): failed to fetch OpenVDB data` and no volume was
-  rendered. Do not repeat this route through `OpenVDBAsset`.
-
-Historical next controlled test (superseded on 2026-07-23):
-
-The following VDB proxy test records the path that was taken after this
-checkpoint. It is retained as evidence only: the final IndeX fast-path A/B
-failed, so direct `OpenVDBAsset`/RTX-IndeX playback and further VDB resampling
-are closed for Stage 6.
-
-1. The original 800-frame `.vdb` cache remained untouched; the local DTRS
-   override was restored to its original wrapper before the test launch.
-2. Houdini `VDB Resample` with `mode = voxelsizeonly`, linear filtering, and
-   `voxel size = 0.00255` (2x the original `0.001275`) created a separate
-   30-frame `.vdb` proxy from `1001, 1003, ..., 1059`, mapped to runtime frames
-   `1001-1030` at 25 FPS.
-3. A one-frame proof at this resolution produced a valid `.vdb` of 4.7 MiB,
-   versus roughly 33 MiB for the source frame. The historical next session
-   validated this 30-frame `.vdb` wrapper in DTRS before the route was closed.
-4. No full 400-frame proxy was generated, the master cache was not modified,
-   and NanoVDB was not retried through `OpenVDBAsset` before the A/B result.
-
-#### Implementation Checkpoint - 2026-07-20 Long Pit Stop
-
-Status: active investigation. Stage 6 is **not delivered**. Cached airflow is
-visually playable in DTRS, but its current animated volume path is not viable
-for showreel capture.
-
-Current measured state:
-
-- The current test cache is the separate Houdini 21 export under
-  `assets/_external/vdb/server_airflow_sims/server_airflow_vdb_test`, with 400
-  frames mapped to `1001-1400` at 25 FPS. Its wrapper is
-  `assets/_external/usd/server_airflows/sim_test.usda` and targets
-  `/sim/test/density`.
-- The test density grid is a scalar `float` OpenVDB grid. Frame `1001` is
-  approximately 4.73 MiB on disk, has a voxel size of `0.00255`, resolution
-  `184 x 72 x 213`, and about 11.73 MiB expanded memory.
-- Exporting from Houdini 21 removed the prior VDB-format-225 compatibility
-  warning. Renaming the sequence to `1001-1400` and correcting the wrapper's
-  `fieldDataType` also allowed time-sampled playback to advance. Neither
-  change materially improved animated performance.
-- The DTRS GPU profile measured approximately `328.6 ms` for a frame while the
-  volume is playing, or about 3 FPS. With no active airflow cache, the same
-  review scene is about 24 FPS. The volume/RTX-IndeX composition path is
-  therefore the dominant cost; the source-frame disk size is not sufficient
-  evidence that ordinary VDB sequence playback will meet the capture target.
-- The current DTRS IndeX quality settings are `resolutionScale = 25`,
-  `renderingSamples = 1`, `filterMode = trilinear`, and
-  `samplingDistance = 0.012`. The sampling distance is about 4.7 test-cache
-  voxels. The profiler records a total GPU duration only, so it does not yet
-  identify a more granular sub-cost inside the volume renderer.
-
-Findings that must not be re-investigated as primary fixes:
-
-- VDB format `225` was a compatibility defect, but VDB `224` did not remove
-  the 2-3 FPS playback limit.
-- The wrapper's frame numbering, time-sampled `filePath`, and
-  `fieldDataType = float` were necessary for playback correctness, but are not
-  the measured performance bottleneck.
-- Redundant animated `extent`, `fieldName`, and `fieldIndex` samples are USD
-  hygiene issues, not an explanation for the observed render cost. Do not
-  spend another Houdini pass on them before a renderer route proves viable.
-- The Kit `omni.volume` NanoVDB conversion remains rejected for the current
-  `OpenVDBAsset`/IndeX wrapper: it produced a larger `.nvdb` payload and the
-  importer failed to load it. Do not retry that route through `OpenVDBAsset`.
-
-Updated decision boundary - 2026-07-22:
-
-The measured bottleneck is the runtime representation and rendering path, not
-the absence of simulation data and not only the VDB file size. Direct density
-playback through `OpenVDBAsset` and RTX/NVIDIA IndeX is now treated as a final
-fast-path check, not as the route to rescue at any cost.
-
-A no-airflow DTRS baseline captured on 2026-07-23 shows the full Blackwell Rig
-server review scene running at about 67-69 FPS at 1280 x 720 on the RTX 3080,
-with frame time around 14.5-14.8 ms, approximately 3.1 GiB of GPU memory used,
-and approximately 5.3-5.4 GiB of process memory used. This confirms that the
-server scene, UI, and base viewport are not the current Stage 6 bottleneck; the
-remaining performance risk belongs to the airflow representation and rendering
-path.
-
-Baseline and route order:
-
-1. **Preserve the verified DTRS frame budget.** Treat the 67-69 FPS no-airflow
-   baseline as the control measurement before changing airflow routes. Record
-   the active renderer/settings with the next performance capture, but do not
-   spend Stage 6 time on broad baseline tuning unless later changes regress the
-   no-airflow scene. If the full server scene falls back near 24-26 FPS without
-   airflow, restore the baseline before judging any airflow route.
-2. **IndeX fast-path A/B failed on 2026-07-23.** The existing test VDB sequence
-   was run with `filterMode = nearest`, `samplingDistance = 0.0255`, 25 percent
-   resolution scale, and one sample. The full DTRS scene measured about
-   `2.38-2.44 FPS` (`410 ms` frame time), with no meaningful improvement over
-   the prior approximately 3 FPS result. The captured GPU profile identifies a
-   single `RTX Rendering` block of about `312 ms`; it confirms that rendering
-   dominates the frame, but does not resolve a more granular IndeX sub-cost.
-   Do not proceed to the 15 percent or 12.5 percent variants: their entry
-   criterion was a meaningful gain at 25 percent. Close direct
-   `OpenVDBAsset`/RTX-IndeX playback as the interactive Stage 6 route and do
-   not continue Houdini VDB resampling as a speculative fix.
-3. **Next capability spike: velocity-driven Flow/CAE route.** Treat Kit-CAE or
-   NVIDIA Flow driven by exported Houdini velocity as the main capability
-   spike, not as a guaranteed production route. Use 10-30 representative
-   frames, not the full cache. Prefer VTI if the export path is clean; otherwise
-   test NPY/NPZ velocity data. The proof must show that the runtime airflow
-   follows the Houdini velocity field, reads as movement through the server,
-   respects geometry depth/compositing, avoids visible frame-change stalls, and
-   keeps the full DTRS scene near the 25 FPS target. The first VTI proof must
-   import a Case 03-owned vector field through DTRS with the minimal compatible
-   Kit-CAE VTK extensions loaded from the read-only reference checkout, verify
-   that its three-component `vel` point data becomes a CAE vector field, and
-   only then connect that field to a CAE Flow dataset emitter.
-4. **Flow OpenVDB/NanoVDB emitter route only if needed.** If the velocity-driven
-   route is unavailable or inconclusive, test a separate NVIDIA Flow ingestion
-   path. This is not the rejected `.nvdb` through `OpenVDBAsset` route. Use an
-   early-fail ladder: one static frame, then 10 frames, then 30 frames. Stop if
-   the static frame is already expensive or if sequence switching introduces
-   visible stalls.
-5. **Hybrid fallback.** If volumetric smoke cannot meet the target, Stage 6
-   should ship interactive velocity-field engineering visualisation in DTRS
-   using streamlines or an equivalent lightweight airflow layer, while keeping
-   high-fidelity Houdini density VDB evidence for offline cinematic render.
-   This preserves the digital-twin value: Houdini remains the source
-   simulation, and DTRS remains the interactive review surface.
-
-Do not spend more Stage 6 time on:
-
-- further VDB resampling without new measured evidence;
-- `.nvdb` experiments through `OpenVDBAsset`;
-- `fieldName`, `fieldIndex`, or extent cleanup as a performance fix;
-- RTX Interactive non-uniform volumes as the main route before the Flow/CAE
-  capability spike;
-- Kit-CAE Volume Operator work before the Flow/CAE velocity hypothesis is
-  checked;
-- full 400-frame exports before a 10-30 frame proof passes.
-
-#### Kit-CAE Reference Boundary - 2026-07-24
-
-`E:\omniverse_kit_cae` is an external NVIDIA Kit-CAE reference application.
-It may be built, launched, inspected, and used to run unmodified NVIDIA
-examples. It must not become a home for Case 03 scripts, converters, test
-datasets, generated output, or DTRS modifications.
-
-All public Case 03 artifacts for the Flow/CAE capability spike belong in this
-repository: VTI interchange assets, small reproducible test datasets, probe
-scripts, DTRS integration code, and the resulting engineering documentation.
-The Houdini-side velocity exporter remains private production tooling inside
-the Houdini project: it depends on `hou.VDB` and is neither public DTRS code nor
-content for the Kit-CAE checkout. Kit-CAE may be invoked as an external
-runtime/reference; it is not a second authored project tree.
-
-#### Historical Kit-CAE Velocity Flow Checkpoint - 2026-07-24
-
-Status: superseded by the static capability proof below. This records the
-intermediate state before origin repair and visible smoke validation.
-
-Confirmed evidence:
-
-- The external Kit-CAE reference checkout builds and launches on the target
-  workstation with Kit `110.1.2`; its VTK variant enables the VTK importer and
-  delegate required for `.vti` assets.
-- NVIDIA's `example_npz_flow.py` was run successfully. It connects a dataset
-  vector field through `FieldSelectionAPI("velocities")` to
-  `CreateCaeVizFlowDataSetEmitter` and produces live Flow smoke. This proves
-  the Dataset -> velocity field -> Flow DataSetEmitter architecture, rather
-  than replaying a baked density cache.
-- The real Case 03 asset
-  `assets/_external/vti/server_airflow_sims/velocity/server_airflow_velocity_1014.vti`
-  now imports through Kit-CAE inside DTRS. Its `PointData/vel` array is accepted
-  as a three-component vector field, and DTRS creates the official Kit-CAE
-  bounding box, Flow environment, smoke injector, boundary emitter, and Flow
-  DataSetEmitter without an attach-time exception.
-- The current Kit-CAE VTK importer copies into the stage root layer. The DTRS
-  probe therefore imports the asset at a top-level prim and keeps its transient
-  Flow objects separate; do not move that import under a session-only DTRS
-  parent without replacing the importer behaviour.
-- The first DTRS viewport proof was intentionally **not a pass**: Flow was live,
-  but the VTI bounds and smoke injector are displaced from `/blackwell_rig`.
-  The source VTI bounds are `(-0.93585, -0.01265, -2.17330)` to
-  `(0.93075, 0.71155, 0.18290)`. Do not compensate by eye with an arbitrary
-  scale or translation. Compare the logged VTI, server, and Flow world bounds,
-  then author the measured registration transform at the correct boundary.
-- The initial Flow update warns that its DataSetEmitter has no selected fields
-  before DTRS assigns the `velocities` target. Verify the post-bind target and
-  visible velocity response before treating the smoke sphere as evidence that
-  `vel` is influencing Flow.
-- The real Houdini velocity source is an axis-aligned Vector3 VDB with
-  resolution `184 x 72 x 232`, voxel spacing `0.0102`, and `3,073,536` voxels.
-  Houdini HOM exposes its bulk values through `voxelRangeAsVector3()` in
-  `X -> Y -> Z` order (`X` changes fastest). A small fixture has proved the
-  private conversion chain Vector3 VDB -> float32 vectors -> `vtkFloatArray`
-  -> `vtkImageData` -> `.vti`.
-
-Architecture and ownership boundary:
+Stage 6 establishes an honest runtime airflow visualisation from a Houdini
+velocity field. DTRS does not claim to generate the source simulation live.
+The working runtime contract is:
 
 ```text
-PRIVATE PRODUCTION
-Houdini .hip -> Vector3 VDB vel -> Houdini-side Python exporter -> VTI
-
-PUBLIC RUNTIME CONTRACT
-DTRS-owned VTI -> Kit-CAE VTK importer -> CAE velocity field
-              -> NVIDIA Flow DataSetEmitter -> live smoke
+Houdini airflow simulation
+  -> runtime-resampled temporal VTI velocity fields
+  -> Kit-CAE CaeDataSet / PointData/vel
+  -> CAE velocity / NanoVDB bridge
+  -> one NVIDIA Flow DataSetEmitter and FlowSimulation
+  -> real-time volumetric smoke tracer
 ```
 
-The public VTI contract is a regular `vtkImageData` asset with point-data field
-`vel`, three `float32` components, and Houdini-authored dimensions, spacing,
-and spatial origin. Preserve and verify VDB voxel-center versus VTK ImageData
-origin semantics before treating spatial registration as complete. The public
-repository documents and consumes this interchange asset; it does not expose
-the private `.hip` or Houdini exporter implementation.
+#### Working Runtime Checkpoint - 2026-07-26
 
-Spatial registration ownership: a stable Houdini-to-DTRS coordinate mapping is
-production data and must be baked by the private Houdini VDB -> VTI exporter
-into the VTI origin/direction/spacing representation. DTRS consumes that
-registered VTI without a magic per-asset correction. A temporary, documented
-DTRS probe override is allowed only to validate the measured mapping before the
-VTI is regenerated.
+Status: **working runtime proof; presentation and performance tuning in
+progress. Stage 6 is not delivered.**
 
-Historical proof ladder and decision gates:
+Completed:
 
-1. **Static field proof: PASSED.** The registered
-   `server_airflow_velocity_1014.vti` reaches `PointData/vel`, produces the
-   internal Flow velocity payload, and visibly drives native smoke with the
-   server in the review frame. Diagnostic bounds are now hidden by default.
-2. **Three-frame temporal proof: PASSED.** The native Kit-CAE VTK delegate
-   advances the time-sampled `fileNames` field in place from `1014 -> 1015 ->
-   1016`; the existing Flow simulation and DataSetEmitter remain live, and the
-   proof logs distinct asset hashes, continuous time, and zero resets.
-3. **Sampling cadence proof: next.** Treat source-frame stride and DTRS playback
-   hold duration as independent variables. Start with the `Delta 5` fixture
-   `1014 -> 1019 -> 1024`, then test `Delta 10` only if the first probe passes.
-   Do not infer a final real-time playback rate or 800-frame storage count from
-   either three-frame probe.
-4. **Performance and production decision: later Stage 6 gate.** The attached
-   temporal fixture already sustains ten-second averages of `48.8-52.5 FPS` at
-   `1280 x 720` on the RTX 3080, above the approximately 25 FPS threshold.
-   Repeat the same evidence collection for the chosen cadence before selecting
-   the production visualisation and export plan.
+- VTI -> Kit-CAE -> Flow velocity ingestion.
+- Spatial/origin validation with the narrow DTRS session-layer compatibility
+  opinion; source VTI and authored server USD remain unchanged.
+- Temporal 16-sample playback at one second per sample:
+  `1001 -> 1051 -> ... -> 1751 -> 1001`.
+- Continuous Flow simulation with one DataSetEmitter and zero resets across 15
+  forward transitions and the loop closure.
+- Seven-source front-intake tracer layout, with emitters 2, 4, and 6 aligned to
+  the three front P120 fan centres.
+- Passive smoke-only tracer mode: fuel, temperature, burn, combustion, and
+  buoyancy are disabled; smoke is transported by the imported VTI velocity.
+- Real-time Flow Volume Smoke Cloud rendering.
+- Live vorticity toggle without a Flow reset.
+- Structured temporal validation/proof logging and low-frequency runtime
+  performance logging.
 
-#### Static VTI -> Kit-CAE -> Flow Capability Proof - 2026-07-24
+The temporal proof is PASS only because it records 16 unique source assets and
+hashes, 15 forward transitions, one loop transition, `operator_ready_all=True`,
+`origin_match_all=True`, `grid_match_all=True`,
+`timeline_continuous=True`, `Flow resets=0`, and loop closure PASS.
 
-**Status: PASSED.** The static Houdini velocity route is now a demonstrated
-runtime capability, not a speculative architecture.
+In progress:
 
-```text
-Houdini Vector3 VDB vel
-  -> private Houdini VDB-to-VTI exporter
-  -> VTI structured vector field
-  -> Kit-CAE VTK importer
-  -> CAE PointData/vel
-  -> Flow DataSetEmitter
-  -> internal NanoVDB velocity payload
-  -> NVIDIA Flow native fuel smoke
-  -> advection by the Houdini velocity field
-```
+- Smoke density and light blue-grey presentation tuning.
+- Smoke detail and advection-quality tuning without reducing the runtime grid
+  cell size.
+- Meaningful vorticity strength and mask configuration.
+- Controlled vorticity OFF/ON performance benchmark at fixed overview and
+  close-up camera bookmarks.
+- Flow lifecycle reliability for Detach -> Attach, if later manual verification
+  exposes a regression.
+- Final Stage 6 performance baseline and the source-sampling cadence/storage
+  decision.
 
-Static proof evidence:
+Keep the temporal VTI pipeline, runtime grid, CAE -> Flow velocity coupling,
+front-intake emitter placement, and collision system unchanged while the smoke
+presentation is tuned.
 
-- `server_airflow_velocity_1014.vti` is a `184 x 72 x 232` structured vector
-  field with `vel` as three `float32` point-data components and approximately
-  `0.00255 m` spacing.
-- The DataSetEmitter reaches an internal populated `nanoVdbVelocities` payload;
-  `coupleRateVelocity=120` and `operator_ready=True`. Timeline stepping and
-  the Flow/RTX runtime were verified in DTRS.
-- Native `NATIVE_FUEL` smoke is visible and follows the field with the full
-  `/blackwell_rig` visible. The diagnostic smoke-injector mesh is hidden while
-  its active Flow emitter remains in the scene.
-- The static scene sustains approximately `47-48 FPS` at `1280 x 720` on the
-  RTX 3080. Applying a Flow presentation change briefly falls to about
-  `41 FPS`, then returns to the measured steady range.
-- Reference parity is complete: `REFERENCE_FLOW_WORKS=True`,
-  `REFERENCE_IN_DTRS_WORKS=True`, and `VTI_REFERENCE_IMPORT_WORKS=True`.
-
-Known compatibility issue - VTI ImageData origin:
-
-The current Kit-CAE/DTRS integration imports a VTI with a valid non-zero header
-origin as `ImageDataAPI.origin=(0,0,0)`. Before creating the BoundingBox or
-CAE/Flow objects, DTRS authors a session-layer compatibility opinion that
-restores the authoritative VTI header origin. The source VTI and the authored
-server USD asset are not modified. The current VTI is already in world scale:
-the old runtime `x0.25` and bounding-box-only spatial corrections were removed.
-The resulting check is `dataset_bbox_bounds_match=True`.
-
-The private Houdini VDB-to-VTI exporter remains the production owner of source
-interchange data. DTRS consumes the VTI contract and retains only this narrow,
-non-destructive compatibility shim until the Kit-CAE behaviour is understood
-or corrected upstream.
-
-Closed diagnostic hypotheses:
-
-- invalid VTI or missing vector field;
-- CAE-to-Flow payload failure;
-- timeline stepping failure;
-- Flow/RTX or DTRS runtime incompatibility;
-- spatial origin mismatch; and
-- Flow smoke-emitter failure.
-
-#### Three-Frame Temporal VTI -> Kit-CAE -> Flow Proof - 2026-07-25
-
-**Status: PASSED.** DTRS now proves time-varying Houdini velocity data through
-one continuous Kit-CAE/Flow runtime chain:
-
-```text
-server_airflow_velocity_1014.vti
-  -> server_airflow_velocity_1015.vti
-  -> server_airflow_velocity_1016.vti
-  -> time-sampled PointData/vel
-  -> one DataSetEmitter
-  -> one FlowSimulation
-  -> native smoke response
-```
-
-Temporal evidence:
-
-- `Frames observed: 1014 -> 1015 -> 1016`; three unique asset paths and three
-  unique SHA-256 identities.
-- `Successful transitions: 2`, `operator_ready_all=True`,
-  `origin_match_all=True`, `grid_match_all=True`, and
-  `timeline_continuous=True`.
-- `Flow resets: 0`: the active FlowSimulation and DataSetEmitter paths stay
-  stable through both source updates.
-- The post-proof sampler continues to resolve the cyclic temporal sources while
-  Flow remains attached. Across 10.5-70.5 seconds, the measured ten-second
-  FPS averages were `48.8-52.5` at `1280 x 720` on the RTX 3080; GPU memory
-  stayed near `4.6-4.7 GiB` and process RSS near `6.1-6.4 GiB`.
-
-Remaining Stage 6 proof ladder:
-
-1. **Temporal sampling cadence: next.** Use the exact three-frame `Delta 5`
-   fixture `1014 -> 1019 -> 1024` without changing the runtime architecture.
-   Preserve the current per-source hold for this probe, capture the same proof
-   and performance evidence, and assess both visible response and transition
-   readability. This is a source-stride experiment, not a final playback-rate
-   or storage decision.
-2. **Wider stride only after evidence.** If `Delta 5` passes, repeat with
-   `1014 -> 1024 -> 1034` (`Delta 10`) under the same runtime contract. Select
-   a longer export cadence only after comparing the actual visual and runtime
-   evidence from both probes.
-3. **Production decision.** Define the final source-time-to-DTRS-time mapping,
-   longer-sequence storage budget, and production visualisation mode only after
-   a chosen stride has passed the same full-server evidence gate. Do not export
-   the full 800-frame loop before that decision.
+Historical direct OpenVDB/RTX-IndeX and early diagnostic Flow experiments are
+closed evidence routes. They do not describe the active Stage 6 runtime path.
 
 ### Stage 7 - Engineering X-Ray Visual Mode Slice
 
