@@ -63,11 +63,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._view_task = None
         self._auxiliary_windows_task = None
         self._airflow_status_label = None
-        self._airflow_attenuation_combo = None
-        self._airflow_alpha_combo = None
+        self._smoke_tuning_combos = {}
         self._show_flow_debug_overlays_model = None
-        self._flow_vorticity_model = None
-        self._flow_vorticity_strength_model = None
         self._flow_camera_bookmarks = {}
         self._lighting_task = None
         self._camera_sync_task = None
@@ -242,18 +239,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._show_flow_debug_overlays_model = ui.SimpleBoolModel(False)
         self._show_flow_debug_overlays_model.add_value_changed_fn(
             lambda _model: self._schedule_apply_flow_debug_overlays()
-        )
-        self._flow_vorticity_model = ui.SimpleBoolModel(
-            config.simulation_cache.flow_vorticity_enabled
-        )
-        self._flow_vorticity_model.add_value_changed_fn(
-            lambda _model: self._schedule_apply_flow_vorticity()
-        )
-        self._flow_vorticity_strength_model = ui.SimpleFloatModel(
-            config.simulation_cache.flow_vorticity_force_scale
-        )
-        self._flow_vorticity_strength_model.add_value_changed_fn(
-            lambda _model: self._schedule_apply_flow_vorticity_strength()
         )
         self._grid_step_model = ui.SimpleFloatModel(config.grid.step)
         self._grid_width_model = ui.SimpleFloatModel(config.grid.width)
@@ -454,6 +439,26 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         self._status_label = ui.Label("Ready", height=34, elided_text=True)
 
+    def _build_smoke_tuning_row(
+        self,
+        label: str,
+        field_name: str,
+        value: float,
+    ) -> None:
+        from digital_twin_runtime_suite.app.config import SMOKE_TUNING_VALUE_OPTIONS
+        from digital_twin_runtime_suite.app.view_controls import (
+            smoke_tuning_option_index,
+        )
+
+        choices = SMOKE_TUNING_VALUE_OPTIONS[field_name]
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
+            self._smoke_tuning_combos[field_name] = ui.ComboBox(
+                smoke_tuning_option_index(field_name, value),
+                *(f"{choice:g}" for choice in choices),
+                width=ui.Fraction(1),
+            )
+
     def _build_airflow_cache_controls(self) -> None:
         cache = self._controller.config.simulation_cache
         wrapper_name = (
@@ -533,38 +538,40 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label("Show debug overlays", width=SERVER_VIEW_LABEL_WIDTH)
             ui.CheckBox(model=self._show_flow_debug_overlays_model)
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label("Flow vorticity", width=SERVER_VIEW_LABEL_WIDTH)
-            ui.CheckBox(model=self._flow_vorticity_model)
-            ui.Label("Strength", width=54)
-            ui.FloatDrag(
-                model=self._flow_vorticity_strength_model,
-                width=ui.Fraction(1),
-                precision=2,
-            )
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label("Attenuation", width=SERVER_VIEW_LABEL_WIDTH)
-            self._airflow_attenuation_combo = ui.ComboBox(
-                2,
-                "3",
-                "6",
-                "8",
-                "10",
-                "15",
-                width=ui.Fraction(1),
-            )
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label("Smoke opacity", width=SERVER_VIEW_LABEL_WIDTH)
-            self._airflow_alpha_combo = ui.ComboBox(
-                1,
-                "Native",
-                "Medium",
-                "Strong",
-                width=ui.Fraction(1),
-            )
+        self._smoke_tuning_combos = {}
+        smoke_tuning = cache.smoke_tuning
+        ui.Label("Smoke Tuning", height=22)
+        ui.Label("Appearance", height=18)
+        self._build_smoke_tuning_row("Density", "density", smoke_tuning.density)
+        self._build_smoke_tuning_row(
+            "Brightness",
+            "brightness",
+            smoke_tuning.brightness,
+        )
+        self._build_smoke_tuning_row("Ambient", "ambient", smoke_tuning.ambient)
+        self._build_smoke_tuning_row(
+            "Shadow density",
+            "shadow_density",
+            smoke_tuning.shadow_density,
+        )
+        ui.Label("Dynamics", height=18)
+        self._build_smoke_tuning_row("Damping", "damping", smoke_tuning.damping)
+        self._build_smoke_tuning_row("Fade", "fade", smoke_tuning.fade)
+        self._build_smoke_tuning_row("Sharpness", "sharpness", smoke_tuning.sharpness)
+        self._build_smoke_tuning_row(
+            "Vorticity",
+            "vorticity",
+            smoke_tuning.vorticity,
+        )
+        ui.Label("Quality", height=18)
+        self._build_smoke_tuning_row(
+            "Raymarch quality",
+            "raymarch_quality",
+            smoke_tuning.raymarch_quality,
+        )
         ui.Button(
-            "Apply Flow look",
-            clicked_fn=self._schedule_apply_airflow_presentation,
+            "Apply Smoke Settings",
+            clicked_fn=self._schedule_apply_smoke_tuning,
             height=26,
             width=ui.Percent(100),
         )
@@ -1312,31 +1319,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._airflow_task = asyncio.ensure_future(self._detach_airflow())
 
-    def _schedule_apply_airflow_presentation(self) -> None:
+    def _schedule_apply_smoke_tuning(self) -> None:
         if self._airflow_task and not self._airflow_task.done():
             self._set_airflow_status("Airflow operation is already in progress.")
             return
-        self._airflow_task = asyncio.ensure_future(self._apply_airflow_presentation())
+        self._airflow_task = asyncio.ensure_future(self._apply_smoke_tuning())
 
     def _schedule_apply_flow_debug_overlays(self) -> None:
         if self._airflow_task and not self._airflow_task.done():
             self._set_airflow_status("Airflow operation is already in progress.")
             return
         self._airflow_task = asyncio.ensure_future(self._apply_flow_debug_overlays())
-
-    def _schedule_apply_flow_vorticity(self) -> None:
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_airflow_status("Airflow operation is already in progress.")
-            return
-        self._airflow_task = asyncio.ensure_future(self._apply_flow_vorticity())
-
-    def _schedule_apply_flow_vorticity_strength(self) -> None:
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_airflow_status("Airflow operation is already in progress.")
-            return
-        self._airflow_task = asyncio.ensure_future(
-            self._apply_flow_vorticity_strength()
-        )
 
     def _capture_flow_camera_bookmark(self, name: str) -> None:
         camera = self._controller.capture_review_camera_config()
@@ -1607,26 +1600,24 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._set_airflow_status(result.message)
 
-    async def _apply_airflow_presentation(self) -> None:
-        attenuation_values = (3.0, 6.0, 8.0, 10.0, 15.0)
-        alpha_presets = ("native", "medium", "strong")
-        attenuation_model = self._combo_index_model(self._airflow_attenuation_combo)
-        alpha_model = self._combo_index_model(self._airflow_alpha_combo)
-        if not attenuation_model or not alpha_model:
-            self._set_airflow_status("Flow presentation controls are unavailable.")
-            return
-        attenuation_index = self._model_int(attenuation_model)
-        alpha_index = self._model_int(alpha_model)
-        if not (
-            0 <= attenuation_index < len(attenuation_values)
-            and 0 <= alpha_index < len(alpha_presets)
-        ):
-            self._set_airflow_status("Flow presentation selection is invalid.")
-            return
-        result = await self._controller.apply_kit_cae_flow_presentation_in_kit(
-            attenuation_values[attenuation_index],
-            alpha_presets[alpha_index],
+    async def _apply_smoke_tuning(self) -> None:
+        from digital_twin_runtime_suite.app.view_controls import (
+            build_smoke_tuning_from_models,
         )
+
+        index_models = {
+            field_name: self._combo_index_model(combo)
+            for field_name, combo in self._smoke_tuning_combos.items()
+        }
+        if any(model is None for model in index_models.values()):
+            self._set_airflow_status("Smoke Tuning controls are unavailable.")
+            return
+        try:
+            tuning = build_smoke_tuning_from_models(index_models)
+        except ValueError as error:
+            self._set_airflow_status(f"Smoke Tuning selection is invalid: {error}")
+            return
+        result = self._controller.apply_kit_cae_smoke_tuning_in_kit(tuning)
         self._set_airflow_status(result.message)
 
     async def _apply_flow_debug_overlays(self) -> None:
@@ -1635,24 +1626,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         result = self._controller.set_kit_cae_debug_overlays_visible_in_kit(
             self._show_flow_debug_overlays_model.get_value_as_bool()
-        )
-        self._set_airflow_status(result.message)
-
-    async def _apply_flow_vorticity(self) -> None:
-        if not self._flow_vorticity_model:
-            self._set_airflow_status("Flow vorticity control is unavailable.")
-            return
-        result = self._controller.set_kit_cae_flow_vorticity_enabled_in_kit(
-            self._flow_vorticity_model.get_value_as_bool()
-        )
-        self._set_airflow_status(result.message)
-
-    async def _apply_flow_vorticity_strength(self) -> None:
-        if not self._flow_vorticity_strength_model:
-            self._set_airflow_status("Flow vorticity strength control is unavailable.")
-            return
-        result = self._controller.set_kit_cae_flow_vorticity_force_scale_in_kit(
-            self._flow_vorticity_strength_model.get_value_as_float()
         )
         self._set_airflow_status(result.message)
 

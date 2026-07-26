@@ -10,10 +10,12 @@ from digital_twin_runtime_suite.app.config import (
     ChassisPresentationConfig,
     FacePanelConfig,
     FrontPanelIndicatorsConfig,
+    GridConfig,
     LightingConfig,
     QledDisplayConfig,
     RotationConfig,
     RuntimeConfig,
+    SmokeTuningConfig,
     VisibilityGroupConfig,
 )
 
@@ -40,22 +42,27 @@ def test_v02_runtime_config_resolves_default_asset():
     assert config.simulation_cache.rendering_samples == 1
     assert config.simulation_cache.filter_mode == "nearest"
     assert config.simulation_cache.temporal_debug_logging is False
-    assert config.simulation_cache.flow_vorticity_enabled is False
-    assert config.simulation_cache.flow_vorticity_force_scale == 0.1
+    assert config.simulation_cache.smoke_tuning == SmokeTuningConfig(
+        density=0.5,
+        brightness=1.0,
+        ambient=1.0,
+        shadow_density=1.0,
+        damping=0.0,
+        fade=0.0,
+        sharpness=0.9,
+        vorticity=0.6,
+        raymarch_quality=0.75,
+    )
     assert config.simulation_cache.intake_tracers.count == 7
     assert config.simulation_cache.intake_tracers.radius == 0.01
     assert config.simulation_cache.intake_tracers.front_offset == 0.008
     assert config.simulation_cache.intake_tracers.smoke_target == 0.5
     assert config.simulation_cache.intake_tracers.smoke_couple_rate == 30.0
-    assert config.simulation_cache.intake_tracers.smoke_damping == 0.0
-    assert config.simulation_cache.intake_tracers.smoke_fade == 0.01
-    assert config.simulation_cache.intake_tracers.smoke_cloud_density_multiplier == 1.0
     assert config.simulation_cache.intake_tracers.smoke_cloud_base_color == (
         0.58,
         0.64,
         0.69,
     )
-    assert config.simulation_cache.intake_tracers.smoke_second_order_blend_factor == 0.5
     assert config.velocity_vti_path.name == "server_airflow_velocity_1001.vti"
     assert config.simulation_cache.velocity_vti_path == (
         "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti"
@@ -297,6 +304,112 @@ def test_local_simulation_cache_override_wins_over_base_config(tmp_path):
     assert config.simulation_cache.wrapper_path == "usd/airflow/runtime_proxy.usda"
     assert config.simulation_cache.resolution_scale == 50
     assert base_config.simulation_cache.enabled is False
+
+
+def test_local_smoke_tuning_override_wins_per_field(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "\n".join(
+            [
+                "[simulation_cache.smoke_tuning]",
+                "density = 1.5",
+                "ambient = 0.75",
+                "damping = 0.005",
+                "vorticity = 0.8",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    tuning = RuntimeConfig.load(config_path).simulation_cache.smoke_tuning
+
+    assert tuning.density == 1.5
+    assert tuning.ambient == 0.75
+    assert tuning.damping == 0.005
+    assert tuning.vorticity == 0.8
+    assert tuning.brightness == 1.0
+    assert tuning.sharpness == 0.9
+
+
+def test_invalid_local_smoke_tuning_fields_fall_back_independently(tmp_path, caplog):
+    config_path = _write_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "\n".join(
+            [
+                "[simulation_cache.smoke_tuning]",
+                "density = 1.5",
+                "ambient = true",
+                "fade = 4.0",
+                "sharpness = 0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    tuning = RuntimeConfig.load(config_path).simulation_cache.smoke_tuning
+
+    assert tuning.density == 1.5
+    assert tuning.sharpness == 0.5
+    assert tuning.ambient == 1.0
+    assert tuning.fade == 0.0
+    assert "smoke_tuning.ambient" in caplog.text
+    assert "smoke_tuning.fade" in caplog.text
+
+
+def test_malformed_local_override_does_not_prevent_startup(tmp_path, caplog):
+    config_path = _write_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "[simulation_cache.smoke_tuning\ndensity = 1.5", encoding="utf-8"
+    )
+
+    config = RuntimeConfig.load(config_path)
+
+    assert config.simulation_cache.smoke_tuning == SmokeTuningConfig()
+    assert "Ignoring malformed local DTRS override" in caplog.text
+
+
+def test_runtime_controller_saves_smoke_tuning_without_losing_peer_overrides(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+    lighting = LightingConfig(
+        hdri_path="hdri/saved.exr",
+        exposure=2.0,
+        intensity=84.0,
+        show_hdri_background=False,
+        review_key_light_enabled=False,
+        review_key_light_intensity=125.0,
+        rotation=RotationConfig(x=1.0, y=2.0, z=3.0),
+    )
+    camera = CameraConfig(
+        position=RotationConfig(x=11.0, y=22.0, z=33.0),
+        rotation=RotationConfig(x=-10.0, y=45.0, z=5.0),
+    )
+    grid = GridConfig(enabled=False, step=0.5, width=0.002)
+    controller.save_runtime_override(lighting, camera, grid)
+    tuning = SmokeTuningConfig(
+        density=1.5,
+        brightness=1.25,
+        ambient=0.75,
+        shadow_density=1.5,
+        damping=0.005,
+        fade=0.01,
+        sharpness=0.5,
+        vorticity=0.8,
+        raymarch_quality=0.75,
+    )
+
+    local_path = controller.save_smoke_tuning_override(tuning)
+    reloaded = RuntimeConfig.load(config_path)
+
+    assert local_path.exists()
+    assert not local_path.with_name(f"{local_path.name}.tmp").exists()
+    assert reloaded.lighting == lighting
+    assert reloaded.camera == camera
+    assert reloaded.grid == grid
+    assert reloaded.simulation_cache.smoke_tuning == tuning
 
 
 def test_runtime_controller_saves_and_clears_lighting_override(tmp_path):

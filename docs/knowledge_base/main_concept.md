@@ -143,6 +143,26 @@ Runtime behavior is added in stages. Commands and shared state should stay
 separate from button callbacks so a future external control surface can drive
 the same operations without replacing the Kit viewer.
 
+### Flow Subsystem Navigation
+
+| Module | Ownership |
+| --- | --- |
+| app/flow/runtime.py | Attach, Detach, lifecycle, callbacks, and re-attach safety |
+| app/flow/temporal.py | Temporal VTI samples, source mapping, and loop proof helpers |
+| app/flow/validation.py | VTI, CAE payload, origin, grid, and spatial validation |
+| app/flow/smoke.py | Intake tracers, Cloud rendering, and Smoke Tuning authoring |
+| app/flow/performance.py | FPS and memory sample contracts and aggregation |
+
+### Runtime Performance & Rendering Trade-offs
+
+DTRS is developed and validated on an NVIDIA GeForce RTX 3080 12GB as an
+interactive technical visualisation. At the current server-scene stage it runs
+at approximately **30-40 FPS with volumetric airflow visualisation enabled**.
+The baseline deliberately prioritises responsive telemetry inspection,
+animated components and readable volumetric flow over the additional GPU cost
+of higher-fidelity RTX rendering modes. Results remain hardware- and
+scene-dependent and will be profiled as the runtime evolves.
+
 ### Layer 4: Future Control and Packaging
 
 A React/FastAPI control surface, package wrapper, container, streaming setup,
