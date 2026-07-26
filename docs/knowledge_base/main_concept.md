@@ -1,33 +1,38 @@
 # Case 03: Digital Twin Runtime Suite Concept
 
-> **Philosophy:** Reproducible Tech Pack - a staged Houdini/OpenUSD to
-> Omniverse runtime project that demonstrates authored hardware assets,
-> hydrated USD packaging, synthetic telemetry, cached engineering
-> visualization, and interactive review inside Digital Twin Runtime Suite.
+> **Philosophy:** Reproducible Tech Pack - a Houdini/OpenUSD-to-Omniverse
+> runtime project that demonstrates authored hardware assets, hydrated USD
+> packaging, synthetic telemetry, qualitative engineering visualisation, and
+> interactive review inside Digital Twin Runtime Suite.
 
-## 1. Current Truth Boundary
+## 1. Current Product Boundary
 
-Digital Twin Runtime Suite is the public application name for the Case 03
-runtime.
+Digital Twin Runtime Suite (DTRS) is the public Omniverse Kit application for
+the Case 03 runtime. Its configured default asset is the complete **Blackwell
+Rig GB203** server assembly, loaded from the hydrated external asset package.
 
-The current implementation path is staged:
+The current runtime provides:
 
-1. **v0.1 Asset Preview:** launch the Kit application, read runtime config,
-   resolve `assets/_external/`, load the Noctua NH-D9 TR5-SP6 CPU cooler USD,
-   and show load/render/runtime status.
-2. **Look Review:** add lighting and exposure controls for asset review.
-3. **Synthetic Telemetry:** generate runtime telemetry while the app is open.
-4. **Telemetry Driven Motion:** drive CPU cooler fan motion from telemetry.
-5. **Server Review:** load the full Blackwell Rig/server scene.
-6. **Cached Simulation Playback:** enable real exported airflow or thermal
-   cache layers.
-7. **Manual Workload State Preview:** expose `25%`, `50%`, `75%`, and `96%`
-   preview states only when real USD/material/cache/runtime hooks exist.
-8. **Scale Navigation:** navigate deliberately between server, rack, and data
-   hall scales.
+- full-server RTX viewport review with persistent enclosure, lighting, grid,
+  and camera controls;
+- a synthetic node telemetry provider with selectable workload modes and
+  telemetry-driven fan motion across the server;
+- manifest-driven temporal VTI velocity playback through Kit-CAE and NVIDIA
+  Flow for the selected airflow dataset;
+- operator controls for Cloud smoke appearance, transport, and procedural
+  intake-emitter layout, persisted as local runtime overrides;
+- temporal, spatial, and lifecycle checks for the VTI-to-Kit-CAE-to-Flow path.
 
-Anything beyond the active stage is target architecture, not completed runtime
-behavior.
+The current airflow visualisation is a qualitative technical-review tool. The
+Houdini-solved velocity fields are controlled demonstration inputs, not a
+validated CFD benchmark or a certified thermal result.
+
+The following remain future work rather than current product behaviour:
+
+- live telemetry adapters and automatic telemetry-to-dataset state binding;
+- Engineering X-Ray, vector streamlines, and thermal heatmaps;
+- rack- and hall-scale runtime navigation;
+- external web control surfaces, streaming, containers, and cloud deployment.
 
 ## 2. High-Level Concept
 
@@ -35,8 +40,9 @@ behavior.
 Case 03 Data Center showreel.
 
 **Mission:** demonstrate a controlled review surface for a Blackwell-based data
-center digital-twin concept, starting from real authored hardware assets and
-growing toward telemetry-driven operational visualization.
+center digital-twin concept, grounded in authored hardware assets and extended
+with telemetry and airflow visualisation where those signals make the system
+more legible.
 
 **Engineering logic:** the scene is treated as an air-energy system. Hardware,
 cooling, airflow paths, power draw, and workload states are designed to read as
@@ -66,54 +72,55 @@ showreel proof point.
 
 ### Level Rack
 
-- Rack-scale views aggregate node behavior into intake, exhaust, pressure, and
-  cooling-effort stories.
-- Full rack behavior is future scope until the server scene and rack assets are
-  stable in the runtime.
+- Rack-scale views aggregate node behaviour into intake, exhaust, pressure,
+  and cooling-effort stories.
+- Full rack behaviour is future scope; DTRS currently operates at node scale.
 
 ### Level Hall
 
 - Data hall views are the highest abstraction level.
 - Hall-scale PUE, facility airflow, row-level status, and macro thermal cues
-  remain target architecture until the staged runtime reaches scale navigation.
+  remain target architecture rather than current runtime behaviour.
 
 ## 4. Operational States
 
-The long-term state model is:
+DTRS currently provides synthetic workload selection for telemetry review. The
+long-term state model keeps four presentation targets:
 
-| State | Demo Load | Description | Visual Cues |
-| :--- | :--- | :--- | :--- |
-| **Idle** | 25% | Low active service state | Low RPM, calm airflow, cool lighting. |
-| **Nominal** | 50% | Routine inference | Steady cooling, stable LEDs, balanced thermal profile. |
-| **Surge** | 75% | High traffic | Fans ramp up, visible heat buildup, stronger airflow. |
-| **Critical** | 96% | Inference surge / stress preview | Maximum cooling response, warning LEDs, aggressive thermal cues. |
+| State | Demo Load | Intended Visual Cues |
+| :--- | :--- | :--- |
+| **Idle** | 25% | Low cooling demand and calm airflow. |
+| **Nominal** | 50% | Steady cooling and balanced thermal presentation. |
+| **Surge** | 75% | Higher cooling demand and stronger airflow. |
+| **Critical** | 96% | Maximum cooling response and thermal-risk cues. |
 
-These states are planned manual preview states until the runtime connects them
-to real USD variants, material overrides, cached simulation layers, or live
-telemetry hooks.
+The workload target currently drives the synthetic telemetry model. Dedicated
+USD variants, material overrides, state-specific airflow datasets, heatmaps,
+and automatic visual-state transitions are separate future integrations.
 
-## 5. Visual Modes
+## 5. Visual Presentation
 
-Long-term visual modes may include:
+The current viewport is a standard full-server engineering review surface with
+enclosure, lighting, grid, camera, telemetry, and airflow controls.
 
-- **Photoreal / Review:** conventional PBR asset review.
-- **Engineering X-Ray:** transparent or simplified geometry with thermal
-  overlays.
-- **Velocity / Streamlines:** cached or generated airflow vectors and
-  qualitative airflow paths.
-- **Telemetry HUD:** compact status panels for selected hardware or scene
-  scale.
+Future presentation capabilities may include:
 
-These modes are not v0.1 requirements. v0.1 only needs the CPU cooler asset
-preview and reliable runtime status.
+- **Engineering X-Ray:** transparent or simplified geometry with technical
+  overlays;
+- **Velocity / Streamlines:** generated vector geometry or qualitative airflow
+  paths;
+- **Telemetry HUD:** compact in-viewport status panels for selected hardware
+  or scene scale.
+
+These capabilities are not current DTRS modes.
 
 ## 6. Runtime Architecture
 
 ### Layer 1: Houdini/OpenUSD Asset Factory
 
 Houdini remains responsible for modeling, UVs, materials, normals, LOD cleanup,
-and exported USD composition. Digital Twin Runtime Suite does not repair
-geometry at runtime.
+velocity-field generation, and exported USD composition. DTRS does not repair
+geometry or re-simulate airflow at runtime.
 
 ### Layer 2: Hydrated Asset Package
 
@@ -123,89 +130,95 @@ Git:
 - USD assets;
 - textures;
 - HDRIs;
-- VDBs and future cached simulation layers;
-- any other heavy runtime package assets.
+- portable `airflow_datasets/` trees containing a `manifest.toml` and temporal
+  VTI velocity samples;
+- other future heavy runtime package assets.
 
-Runtime paths must be relative or explicitly configurable.
+Runtime paths must be relative or explicitly configurable. Dataset selection is
+by manifest identity (`scope` and `state`), never by numbered directory names
+or a hardcoded VTI path list.
 
 ### Layer 3: Digital Twin Runtime Suite Runtime
 
 The runtime is a standalone Omniverse Kit application:
 
 - app title: `Digital Twin Runtime Suite`;
-- first extension id: `msp.dtrs`;
+- extension id: `msp.dtrs`;
 - source root: `src/digital_twin_runtime_suite/`;
-- current DTRS config: `configs/digital_twin_runtime_suite.toml`;
-- first asset id: `noctua_nh_d9_tr5_sp6`;
-- first USD asset path under asset root: `usd/cpu_fan/cpu_fan.usd`.
+- runtime config: `configs/digital_twin_runtime_suite.toml`;
+- default asset id: `blackwell_rig_gb203`;
+- default USD asset path: `usd/Blackwell_Rig_server_assembly.usd`.
 
-Runtime behavior is added in stages. Commands and shared state should stay
-separate from button callbacks so a future external control surface can drive
-the same operations without replacing the Kit viewer.
+Runtime commands remain separate from OmniUI button callbacks so the same
+operations can later be driven by another control surface without replacing the
+Kit viewer.
 
-### Flow Subsystem Navigation
+### Airflow and Flow Navigation
 
 | Module | Ownership |
 | --- | --- |
-| app/flow/runtime.py | Attach, Detach, lifecycle, callbacks, and re-attach safety |
-| app/flow/temporal.py | Temporal VTI samples, source mapping, and loop proof helpers |
-| app/flow/validation.py | VTI, CAE payload, origin, grid, and spatial validation |
-| app/flow/smoke.py | Intake tracers, Cloud rendering, and Smoke Tuning authoring |
-| app/flow/performance.py | FPS and memory sample contracts and aggregation |
+| `app/airflow_dataset.py` | Manifest discovery, VTI sample ordering, and portable dataset validation. |
+| `app/flow/runtime.py` | Attach, Detach, lifecycle, callback coordination, and re-attach safety. |
+| `app/flow/temporal.py` | Manifest-derived temporal VTI cadence, source switching, and loop proof. |
+| `app/flow/validation.py` | VTI metadata, CAE payload, origin, grid, and spatial validation. |
+| `app/flow/diagnostics.py` | Optional Flow diagnostics, render probes, and spatial-sanity helpers. |
+| `app/flow/smoke.py` | Intake tracers, Cloud rendering, emitter layout, and smoke-tuning authoring. |
+| `app/flow/performance.py` | FPS and memory sample contracts and aggregation. |
 
 ### Runtime Performance & Rendering Trade-offs
 
 DTRS is developed and validated on an NVIDIA GeForce RTX 3080 12GB as an
-interactive technical visualisation. At the current server-scene stage it runs
-at approximately **30-40 FPS with volumetric airflow visualisation enabled**.
-The baseline deliberately prioritises responsive telemetry inspection,
-animated components and readable volumetric flow over the additional GPU cost
-of higher-fidelity RTX rendering modes. Results remain hardware- and
-scene-dependent and will be profiled as the runtime evolves.
+interactive technical visualisation, rather than an offline cinematic renderer.
+The baseline prioritises responsive telemetry inspection, animated components,
+readable volumetric flow, and functional interaction over the additional GPU
+cost of higher-fidelity RTX rendering modes. Performance remains hardware- and
+scene-dependent and will continue to be profiled as the runtime evolves.
 
 ### Layer 4: Future Control and Packaging
 
 A React/FastAPI control surface, package wrapper, container, streaming setup,
-or cloud deployment may become useful later. They are not part of the current
-staged build.
-
-The current priority is path-portable local Kit runtime first, package-ready
-later.
+or cloud deployment may become useful later. The current priority is a
+path-portable local Kit runtime first and package-ready deployment later.
 
 ## 7. Synthetic Telemetry Direction
 
-Synthetic telemetry exists because there is no live data center telemetry
-source for the showreel. The goal is to prove the interaction model:
+Synthetic telemetry is used because the showreel has no live data-center
+telemetry source. It provides a normalized runtime signal for workload, thermal,
+power, cooling, and limit presentation while keeping the current application
+self-contained.
 
-- telemetry values update while the app is running;
-- fan RPM, temperatures, power draw, LEDs, heatmaps, and airflow visuals can be
-  driven from data instead of a DCC timeline;
-- future source-specific adapters can be validated against the same normalised
-  telemetry model without exposing source-specific schemas to the presentation
-  layer.
-
-This is a direction for Stage 3 and later, not v0.1.
+The current provider updates while the app is running and drives configured fan
+motion. Future source-specific adapters can be validated against the same
+normalized model without exposing source-specific schemas to the presentation
+layer. Live telemetry ingestion, thermal heatmaps, and automatic airflow-cache
+selection are not implemented yet.
 
 ## 8. Simulation Direction
 
-Houdini-solved airflow and thermal caches are controlled demonstration inputs,
-not validated CFD benchmarks.
+Houdini-solved airflow is exported as temporal VTI velocity data. DTRS discovers
+the selected dataset from its manifest, validates its temporal and spatial
+contract, and maps the samples to Kit-CAE and NVIDIA Flow at the source-defined
+cadence.
 
-Future cache layers may include:
+The current Flow path uses the imported VTI vector field as the velocity source
+for a continuous smoke-only technical visualisation. Operator tuning changes
+presentation and transport behaviour without modifying the source VTI files.
 
-- VDB density or temperature fields;
+Future simulation layers may include:
+
+- density or temperature volumes;
 - BasisCurves streamlines;
 - material overrides for thermal states;
 - state-specific visual layers for workload previews.
 
-No runtime stage should claim cached simulation playback until real exported
-cache assets exist and Digital Twin Runtime Suite can load or enable them.
+Those additions must be described as runtime behaviour only after their assets,
+data contract, and DTRS integration exist.
 
 ## 9. USD Architecture Boundary
 
 ADR007 and `docs/knowledge_base/usd_architecture/` define the current USD
-baseline and future target architecture. They no longer mean that every asset
-must already implement the final server/rack/data hall contract.
+baseline and future target architecture. They do not mean that every asset must
+already implement the final server, rack, and data-hall contract.
 
 Current assets should prioritize:
 
@@ -214,20 +227,15 @@ Current assets should prioritize:
 - clean UVs and normals for Omniverse;
 - disabled or deferred unvalidated LOD variants;
 - hydrated asset package compatibility;
-- runtime-addressable parts where future behavior needs them.
+- runtime-addressable parts where behaviour needs them.
 
 Future large-scale assets may add payloads, references, instancing, material
-libraries, telemetry primvars, and cached state variants as the staged runtime
-reaches those needs.
+libraries, telemetry primvars, and cached state variants when the runtime needs
+them.
 
-## 10. Implementation Notes
+## 10. Documentation Boundary
 
-- Stage 1 should not implement cameras, scene groups, diagnostics, telemetry,
-  workload states, server/rack/data hall navigation, or built-in media tools.
-- The first practical runtime behavior target after telemetry exists is CPU
-  cooler fan motion.
-- The CPU cooler USD currently exposes a named fan blade prim at
-  `/cpu_fan/geo/render/cpu_cooler/cpu_fan/blades/blades`; pivot and rotation
-  axis should be checked during Stage 4 implementation.
-- Public documentation should describe the staged Digital Twin Runtime Suite
-  direction, not local template paths or workstation-only workflows.
+Public documentation describes the current DTRS runtime and clearly labels
+target architecture as future work. It must not depend on local template paths,
+workstation-only workflows, fixed dataset file counts, or undocumented runtime
+assumptions.

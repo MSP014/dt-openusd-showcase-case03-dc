@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import logging
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+
+from digital_twin_runtime_suite.app.airflow_dataset import (
+    AirflowDataset,
+    AirflowDatasetSelector,
+    discover_airflow_dataset,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +26,20 @@ SMOKE_TUNING_VALUE_OPTIONS: dict[str, tuple[float, ...]] = {
     "fade": (0.0, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.65),
     "sharpness": (0.0, 0.001, 0.125, 0.25, 0.5, 0.625, 0.75, 0.9, 1.0),
     "vorticity": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0),
+    "velocity_scale_multiplier": (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 8.0, 16.0),
+    "time_scale": (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0),
     "raymarch_quality": (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0),
+}
+
+DEFAULT_SMOKE_BASE_COLOR = (0.58, 0.64, 0.69)
+
+EMITTER_LAYOUT_VALUE_OPTIONS: dict[str, tuple[float | int, ...]] = {
+    "emitters_per_row": (5, 6, 7, 8, 9, 10),
+    "rows": (1, 2, 3, 4, 5),
+    "depth": (0.0, 0.25, 0.5, 0.75, 1.0),
+    "size": (0.0, 0.25, 0.5, 0.75, 1.0),
+    "horizontal_margin": (0.02, 0.04, 0.08, 0.1),
+    "vertical_margin": (0.02, 0.04, 0.08, 0.1),
 }
 
 LIGHTING_OVERRIDE_KEYS = (
@@ -43,8 +62,7 @@ SIMULATION_CACHE_OVERRIDE_KEYS = (
     "resolution_scale",
     "rendering_samples",
     "filter_mode",
-    "velocity_vti_path",
-    "velocity_vti_sequence_paths",
+    "airflow_dataset",
     "velocity_field_name",
 )
 
@@ -198,7 +216,6 @@ class IntakeTracerConfig:
     front_offset: float = 0.008
     smoke_target: float = 0.5
     smoke_couple_rate: float = 30.0
-    smoke_cloud_base_color: tuple[float, float, float] = (0.58, 0.64, 0.69)
 
 
 @dataclass(frozen=True)
@@ -213,7 +230,22 @@ class SmokeTuningConfig:
     fade: float = 0.0
     sharpness: float = 0.9
     vorticity: float = 0.6
+    velocity_scale_multiplier: float = 1.0
+    time_scale: float = 1.0
     raymarch_quality: float = 0.75
+    base_color: tuple[float, float, float] = DEFAULT_SMOKE_BASE_COLOR
+
+
+@dataclass(frozen=True)
+class EmitterLayoutConfig:
+    """Normalized operator controls for the procedural intake tracer grid."""
+
+    emitters_per_row: int = 7
+    rows: int = 1
+    depth: float = 1.0
+    size: float = 0.75
+    horizontal_margin: float = 0.04
+    vertical_margin: float = 0.02
 
 
 @dataclass(frozen=True)
@@ -230,11 +262,15 @@ class SimulationCacheConfig:
     resolution_scale: int = 25
     rendering_samples: int = 1
     filter_mode: str = "nearest"
-    velocity_vti_path: str = ""
-    velocity_vti_sequence_paths: tuple[str, ...] = ()
+    airflow_dataset: AirflowDatasetSelector = AirflowDatasetSelector(
+        root="airflow_datasets",
+        scope="server",
+        state="load_normal",
+    )
     velocity_field_name: str = "vel"
     temporal_debug_logging: bool = False
     smoke_tuning: SmokeTuningConfig = SmokeTuningConfig()
+    emitter_layout: EmitterLayoutConfig = EmitterLayoutConfig()
     intake_tracers: IntakeTracerConfig = IntakeTracerConfig()
 
 
@@ -374,18 +410,23 @@ class RuntimeConfig:
 
     @property
     def velocity_vti_path(self) -> Path:
-        """Return the resolved Houdini-generated VTI velocity field."""
+        """Return the first discovered VTI sample for compatibility consumers."""
 
-        return (self.asset_root / self.simulation_cache.velocity_vti_path).resolve()
+        return self.resolve_airflow_dataset().velocity_vti_path
 
     @property
     def velocity_vti_sequence_paths(self) -> tuple[Path, ...]:
-        """Return the configured VTI temporal probe, or its single static frame."""
+        """Return the manifest-discovered VTI samples in source-frame order."""
 
-        paths = self.simulation_cache.velocity_vti_sequence_paths or (
-            self.simulation_cache.velocity_vti_path,
+        return self.resolve_airflow_dataset().velocity_vti_sequence_paths
+
+    def resolve_airflow_dataset(self) -> AirflowDataset:
+        """Discover the configured external airflow dataset on demand."""
+
+        return discover_airflow_dataset(
+            self.asset_root,
+            self.simulation_cache.airflow_dataset,
         )
-        return tuple((self.asset_root / path).resolve() for path in paths)
 
     @property
     def local_config_path(self) -> Path:
@@ -406,6 +447,8 @@ def format_runtime_override(
     camera: CameraConfig | None = None,
     grid: GridConfig | None = None,
     smoke_tuning: SmokeTuningConfig | None = None,
+    emitter_layout: EmitterLayoutConfig | None = None,
+    chassis_presentation: ChassisPresentationConfig | None = None,
 ) -> str:
     """Serialize local operator overrides as minimal TOML."""
 
@@ -462,8 +505,43 @@ def format_runtime_override(
             f"fade = {smoke_tuning.fade:.6g}\n"
             f"sharpness = {smoke_tuning.sharpness:.6g}\n"
             f"vorticity = {smoke_tuning.vorticity:.6g}\n"
+            f"velocity_scale_multiplier = "
+            f"{smoke_tuning.velocity_scale_multiplier:.6g}\n"
+            f"time_scale = {smoke_tuning.time_scale:.6g}\n"
             f"raymarch_quality = {smoke_tuning.raymarch_quality:.6g}\n"
+            "base_color = ["
+            f"{smoke_tuning.base_color[0]:.6g}, "
+            f"{smoke_tuning.base_color[1]:.6g}, "
+            f"{smoke_tuning.base_color[2]:.6g}]\n"
         )
+    if emitter_layout:
+        text += (
+            "\n"
+            "[simulation_cache.emitter_layout]\n"
+            f"emitters_per_row = {emitter_layout.emitters_per_row}\n"
+            f"rows = {emitter_layout.rows}\n"
+            f"depth = {emitter_layout.depth:.6g}\n"
+            f"size = {emitter_layout.size:.6g}\n"
+            f"horizontal_margin = {emitter_layout.horizontal_margin:.6g}\n"
+            f"vertical_margin = {emitter_layout.vertical_margin:.6g}\n"
+        )
+    if chassis_presentation and (
+        chassis_presentation.visibility_groups
+        or chassis_presentation.face_panel.enabled
+    ):
+        text += "\n[chassis_presentation]\n"
+        if chassis_presentation.face_panel.enabled:
+            text += (
+                "face_panel_open = "
+                f"{_toml_bool(chassis_presentation.face_panel.default_open)}\n"
+            )
+        if chassis_presentation.visibility_groups:
+            text += "\n[chassis_presentation.visibility]\n"
+            text += "".join(
+                f"{_toml_string(group.group_id)} = "
+                f"{_toml_bool(group.default_visible)}\n"
+                for group in chassis_presentation.visibility_groups
+            )
     return text
 
 
@@ -515,6 +593,63 @@ def _merge_runtime_override(
                 grid[key] = local_grid[key]
         data["grid"] = grid
 
+    local_chassis = local_data.get("chassis_presentation")
+    if isinstance(local_chassis, dict):
+        chassis = dict(data.get("chassis_presentation", {}))
+        visibility_groups = chassis.get("visibility_groups")
+        local_visibility = local_chassis.get("visibility")
+        if local_visibility is not None and not isinstance(local_visibility, dict):
+            LOGGER.warning(
+                "Ignoring chassis_presentation.visibility local override: "
+                "expected a table."
+            )
+        elif isinstance(local_visibility, dict) and isinstance(visibility_groups, dict):
+            updated_groups = dict(visibility_groups)
+            for group_id, visible in local_visibility.items():
+                group = updated_groups.get(group_id)
+                if not isinstance(group, dict):
+                    LOGGER.warning(
+                        "Ignoring unknown chassis visibility group local override: %s",
+                        group_id,
+                    )
+                    continue
+                if not isinstance(visible, bool):
+                    LOGGER.warning(
+                        "Ignoring chassis visibility override %s=%r; expected bool.",
+                        group_id,
+                        visible,
+                    )
+                    continue
+                updated_group = dict(group)
+                updated_group["default_visible"] = visible
+                updated_groups[group_id] = updated_group
+            chassis["visibility_groups"] = updated_groups
+        elif isinstance(local_visibility, dict):
+            LOGGER.warning(
+                "Ignoring chassis visibility local override: no configured groups."
+            )
+
+        face_panel_open = local_chassis.get("face_panel_open")
+        if face_panel_open is not None:
+            face_panel = chassis.get("face_panel")
+            if not isinstance(face_panel_open, bool):
+                LOGGER.warning(
+                    "Ignoring chassis face_panel_open=%r; expected bool.",
+                    face_panel_open,
+                )
+            elif not isinstance(face_panel, dict) or not face_panel.get(
+                "enabled", False
+            ):
+                LOGGER.warning(
+                    "Ignoring chassis face_panel_open local override: "
+                    "no hinge configured."
+                )
+            else:
+                updated_face_panel = dict(face_panel)
+                updated_face_panel["default_open"] = face_panel_open
+                chassis["face_panel"] = updated_face_panel
+        data["chassis_presentation"] = chassis
+
     local_simulation_cache = local_data.get("simulation_cache")
     if isinstance(local_simulation_cache, dict):
         base_simulation_cache = data.get("simulation_cache")
@@ -534,10 +669,17 @@ def _merge_runtime_override(
         local_smoke_tuning = local_simulation_cache.get("smoke_tuning")
         if isinstance(local_smoke_tuning, dict):
             smoke_tuning = dict(simulation_cache.get("smoke_tuning", {}))
-            for key in SMOKE_TUNING_VALUE_OPTIONS:
+            for key in (*SMOKE_TUNING_VALUE_OPTIONS, "base_color"):
                 if key in local_smoke_tuning:
                     smoke_tuning[key] = local_smoke_tuning[key]
             simulation_cache["smoke_tuning"] = smoke_tuning
+        local_emitter_layout = local_simulation_cache.get("emitter_layout")
+        if isinstance(local_emitter_layout, dict):
+            emitter_layout = dict(simulation_cache.get("emitter_layout", {}))
+            for key in EMITTER_LAYOUT_VALUE_OPTIONS:
+                if key in local_emitter_layout:
+                    emitter_layout[key] = local_emitter_layout[key]
+            simulation_cache["emitter_layout"] = emitter_layout
         data["simulation_cache"] = simulation_cache
 
 
@@ -598,6 +740,47 @@ def _parse_chassis_presentation_config(data: Any) -> ChassisPresentationConfig:
         front_panel_indicators=_parse_front_panel_indicators_config(
             data.get("front_panel_indicators")
         ),
+    )
+
+
+def chassis_presentation_with_operator_state(
+    presentation: ChassisPresentationConfig,
+    visibility_by_group: dict[str, bool],
+    face_panel_open: bool | None,
+) -> ChassisPresentationConfig:
+    """Validate and apply only operator-owned enclosure presentation state."""
+
+    known_groups = {group.group_id for group in presentation.visibility_groups}
+    if len(known_groups) != len(presentation.visibility_groups):
+        raise ValueError("chassis visibility group ids must be unique.")
+    unknown_groups = set(visibility_by_group) - known_groups
+    if unknown_groups:
+        names = ", ".join(sorted(unknown_groups))
+        raise ValueError(f"unknown chassis visibility groups: {names}")
+    if any(not isinstance(visible, bool) for visible in visibility_by_group.values()):
+        raise ValueError("chassis visibility values must be boolean.")
+    if face_panel_open is not None and not isinstance(face_panel_open, bool):
+        raise ValueError("face panel state must be boolean.")
+    if face_panel_open is not None and not presentation.face_panel.enabled:
+        raise ValueError("no front-panel hinge is configured.")
+
+    visibility_groups = tuple(
+        replace(
+            group,
+            default_visible=visibility_by_group.get(
+                group.group_id,
+                group.default_visible,
+            ),
+        )
+        for group in presentation.visibility_groups
+    )
+    face_panel = presentation.face_panel
+    if face_panel_open is not None:
+        face_panel = replace(face_panel, default_open=face_panel_open)
+    return replace(
+        presentation,
+        visibility_groups=visibility_groups,
+        face_panel=face_panel,
     )
 
 
@@ -871,6 +1054,13 @@ def validate_smoke_tuning(tuning: SmokeTuningConfig) -> None:
         if value not in supported_values:
             allowed = ", ".join(f"{item:g}" for item in supported_values)
             raise ValueError(f"smoke_tuning.{field_name} must be one of: {allowed}.")
+    if len(tuning.base_color) != 3 or any(
+        not isinstance(component, (int, float))
+        or isinstance(component, bool)
+        or not 0.0 <= float(component) <= 1.0
+        for component in tuning.base_color
+    ):
+        raise ValueError("smoke_tuning.base_color must be three RGB values in [0, 1].")
 
 
 def _parse_smoke_tuning_config(data: Any) -> SmokeTuningConfig:
@@ -903,7 +1093,77 @@ def _parse_smoke_tuning_config(data: Any) -> SmokeTuningConfig:
             )
             value = default
         values[field_name] = value
-    return SmokeTuningConfig(**values)
+    return SmokeTuningConfig(
+        **values,
+        base_color=_parse_smoke_base_color(data.get("base_color"), defaults.base_color),
+    )
+
+
+def _parse_smoke_base_color(
+    data: Any,
+    default: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    try:
+        color = _parse_rgb(data, default, "simulation_cache.smoke_tuning.base_color")
+        if any(not 0.0 <= component <= 1.0 for component in color):
+            raise ValueError
+        return color
+    except (TypeError, ValueError):
+        LOGGER.warning(
+            "Unsupported smoke_tuning.base_color=%r; using existing Flow color %s.",
+            data,
+            default,
+        )
+        return default
+
+
+def validate_emitter_layout(layout: EmitterLayoutConfig) -> None:
+    """Raise when a requested layout value is outside the supported menu."""
+
+    for field_name, supported_values in EMITTER_LAYOUT_VALUE_OPTIONS.items():
+        value = getattr(layout, field_name)
+        if value not in supported_values:
+            allowed = ", ".join(f"{item:g}" for item in supported_values)
+            raise ValueError(f"emitter_layout.{field_name} must be one of: {allowed}.")
+
+
+def _parse_emitter_layout_config(data: Any) -> EmitterLayoutConfig:
+    defaults = EmitterLayoutConfig()
+    if not isinstance(data, dict):
+        return defaults
+
+    values: dict[str, float | int] = {}
+    for field_name, supported_values in EMITTER_LAYOUT_VALUE_OPTIONS.items():
+        default = getattr(defaults, field_name)
+        raw_value = data.get(field_name, default)
+        try:
+            if isinstance(raw_value, bool):
+                raise ValueError
+            if isinstance(default, int):
+                numeric_value = float(raw_value)
+                if not numeric_value.is_integer():
+                    raise ValueError
+                value = int(numeric_value)
+            else:
+                value = float(raw_value)
+        except (TypeError, ValueError):
+            LOGGER.warning(
+                "Unsupported emitter_layout.%s=%r; using default %s.",
+                field_name,
+                raw_value,
+                default,
+            )
+            value = default
+        if value not in supported_values:
+            LOGGER.warning(
+                "Unsupported emitter_layout.%s=%r; using default %s.",
+                field_name,
+                raw_value,
+                default,
+            )
+            value = default
+        values[field_name] = value
+    return EmitterLayoutConfig(**values)
 
 
 def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
@@ -913,16 +1173,18 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     enabled = bool(data.get("enabled", True))
     runtime_mode = str(data.get("runtime_mode", "index")).strip().lower()
     wrapper_path = str(data.get("wrapper_path", "")).strip()
-    velocity_vti_path = str(data.get("velocity_vti_path", "")).strip()
-    raw_velocity_vti_sequence_paths = data.get("velocity_vti_sequence_paths", [])
-    if not isinstance(raw_velocity_vti_sequence_paths, list):
-        raise ValueError("simulation_cache.velocity_vti_sequence_paths must be a list.")
-    velocity_vti_sequence_paths = tuple(
-        str(path).strip() for path in raw_velocity_vti_sequence_paths
+    raw_airflow_dataset = data.get("airflow_dataset", {})
+    if not isinstance(raw_airflow_dataset, dict):
+        raise ValueError("simulation_cache.airflow_dataset must be a table.")
+    airflow_dataset = AirflowDatasetSelector(
+        root=str(raw_airflow_dataset.get("root", "")).strip(),
+        scope=str(raw_airflow_dataset.get("scope", "")).strip(),
+        state=str(raw_airflow_dataset.get("state", "")).strip(),
     )
     velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
     temporal_debug_logging = bool(data.get("temporal_debug_logging", False))
     smoke_tuning = _parse_smoke_tuning_config(data.get("smoke_tuning"))
+    emitter_layout = _parse_emitter_layout_config(data.get("emitter_layout"))
     raw_intake_tracers = data.get("intake_tracers", {})
     if not isinstance(raw_intake_tracers, dict):
         raise ValueError("simulation_cache.intake_tracers must be a table.")
@@ -932,35 +1194,26 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         front_offset=float(raw_intake_tracers.get("front_offset", 0.008)),
         smoke_target=float(raw_intake_tracers.get("smoke_target", 0.5)),
         smoke_couple_rate=float(raw_intake_tracers.get("smoke_couple_rate", 30.0)),
-        smoke_cloud_base_color=_parse_rgb(
-            raw_intake_tracers.get("smoke_cloud_base_color"),
-            (0.58, 0.64, 0.69),
-            "simulation_cache.intake_tracers.smoke_cloud_base_color",
-        ),
     )
     if runtime_mode not in {"index", "kit_cae"}:
         raise ValueError("simulation_cache.runtime_mode must be 'index' or 'kit_cae'.")
     if enabled and runtime_mode == "index" and not wrapper_path:
         raise ValueError("simulation_cache.wrapper_path is required when enabled.")
-    if enabled and runtime_mode == "kit_cae" and not velocity_vti_path:
-        raise ValueError(
-            "simulation_cache.velocity_vti_path is required for the Kit-CAE route."
-        )
-    if any(not path for path in velocity_vti_sequence_paths):
-        raise ValueError(
-            "simulation_cache.velocity_vti_sequence_paths must not contain empty paths."
-        )
-    if velocity_vti_sequence_paths:
-        if len(velocity_vti_sequence_paths) != 16:
-            raise ValueError(
-                "simulation_cache.velocity_vti_sequence_paths must contain exactly "
-                "sixteen ordered frames for the Stage 6 temporal loop proof."
+    if (
+        enabled
+        and runtime_mode == "kit_cae"
+        and not all(
+            (
+                airflow_dataset.root,
+                airflow_dataset.scope,
+                airflow_dataset.state,
             )
-        if velocity_vti_sequence_paths[0] != velocity_vti_path:
-            raise ValueError(
-                "simulation_cache.velocity_vti_path must be the first temporal "
-                "probe frame."
-            )
+        )
+    ):
+        raise ValueError(
+            "simulation_cache.airflow_dataset root, scope, and state are required "
+            "for the Kit-CAE route."
+        )
 
     root_prim_path = str(data.get("root_prim_path", "/sim")).strip()
     volume_prim_path = str(
@@ -1020,11 +1273,11 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         resolution_scale=resolution_scale,
         rendering_samples=rendering_samples,
         filter_mode=filter_mode,
-        velocity_vti_path=velocity_vti_path,
-        velocity_vti_sequence_paths=velocity_vti_sequence_paths,
+        airflow_dataset=airflow_dataset,
         velocity_field_name=velocity_field_name,
         temporal_debug_logging=temporal_debug_logging,
         smoke_tuning=smoke_tuning,
+        emitter_layout=emitter_layout,
         intake_tracers=intake_tracers,
     )
 

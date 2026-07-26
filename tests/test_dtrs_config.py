@@ -2,11 +2,14 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from digital_twin_runtime_suite.app.commands import RuntimeController
 
 # isort: off
 from digital_twin_runtime_suite.app.config import (
     CameraConfig,
+    EmitterLayoutConfig,
     ChassisPresentationConfig,
     FacePanelConfig,
     FrontPanelIndicatorsConfig,
@@ -17,6 +20,7 @@ from digital_twin_runtime_suite.app.config import (
     RuntimeConfig,
     SmokeTuningConfig,
     VisibilityGroupConfig,
+    chassis_presentation_with_operator_state,
 )
 
 # isort: on
@@ -51,59 +55,69 @@ def test_v02_runtime_config_resolves_default_asset():
         fade=0.0,
         sharpness=0.9,
         vorticity=0.6,
+        velocity_scale_multiplier=1.0,
+        time_scale=1.0,
         raymarch_quality=0.75,
+        base_color=(0.58, 0.64, 0.69),
     )
     assert config.simulation_cache.intake_tracers.count == 7
+    assert config.simulation_cache.emitter_layout == EmitterLayoutConfig(
+        emitters_per_row=7,
+        rows=1,
+        depth=1.0,
+        size=0.75,
+        horizontal_margin=0.04,
+        vertical_margin=0.02,
+    )
     assert config.simulation_cache.intake_tracers.radius == 0.01
     assert config.simulation_cache.intake_tracers.front_offset == 0.008
     assert config.simulation_cache.intake_tracers.smoke_target == 0.5
     assert config.simulation_cache.intake_tracers.smoke_couple_rate == 30.0
-    assert config.simulation_cache.intake_tracers.smoke_cloud_base_color == (
+    assert config.simulation_cache.smoke_tuning.base_color == (
         0.58,
         0.64,
         0.69,
     )
-    assert config.velocity_vti_path.name == "server_airflow_velocity_1001.vti"
-    assert config.simulation_cache.velocity_vti_path == (
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti"
+    assert config.simulation_cache.airflow_dataset.root == "airflow_datasets"
+    assert config.simulation_cache.airflow_dataset.scope == "server"
+    assert config.simulation_cache.airflow_dataset.state == "load_normal"
+    dataset = config.resolve_airflow_dataset()
+    assert dataset.velocity_vti_path.name == "server_airflow_velocity_1001.vti"
+    assert dataset.manifest.sample_count == len(dataset.velocity_vti_sequence_paths)
+    assert dataset.manifest.source_fps == 50.0
+    assert dataset.manifest.sample_step_frames == 10
+    assert dataset.manifest.sample_rate_hz == 5.0
+    assert dataset.sample_interval_seconds == 0.2
+    assert dataset.loop_duration_seconds == 16.0
+    assert dataset.manifest.grid == (184, 72, 232)
+    sequence_names = tuple(path.name for path in dataset.velocity_vti_sequence_paths)
+    assert sequence_names[0] == "server_airflow_velocity_1001.vti"
+    assert sequence_names[-1] == "server_airflow_velocity_1791.vti"
+    assert [
+        int(name.removesuffix(".vti").rsplit("_", maxsplit=1)[-1])
+        for name in sequence_names
+    ] == list(range(1001, 1801, 10))
+    assert config.velocity_vti_sequence_paths == dataset.velocity_vti_sequence_paths
+
+
+def test_kit_cae_route_requires_airflow_dataset_identity(tmp_path):
+    source_config = Path("configs/digital_twin_runtime_suite.toml")
+    invalid_config = source_config.read_text(encoding="utf-8").replace(
+        'state = "load_normal"',
+        'state = ""',
+        1,
     )
-    assert tuple(path.name for path in config.velocity_vti_sequence_paths) == (
-        "server_airflow_velocity_1001.vti",
-        "server_airflow_velocity_1051.vti",
-        "server_airflow_velocity_1101.vti",
-        "server_airflow_velocity_1151.vti",
-        "server_airflow_velocity_1201.vti",
-        "server_airflow_velocity_1251.vti",
-        "server_airflow_velocity_1301.vti",
-        "server_airflow_velocity_1351.vti",
-        "server_airflow_velocity_1401.vti",
-        "server_airflow_velocity_1451.vti",
-        "server_airflow_velocity_1501.vti",
-        "server_airflow_velocity_1551.vti",
-        "server_airflow_velocity_1601.vti",
-        "server_airflow_velocity_1651.vti",
-        "server_airflow_velocity_1701.vti",
-        "server_airflow_velocity_1751.vti",
-    )
-    assert config.simulation_cache.velocity_vti_sequence_paths == (
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1001.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1051.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1101.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1151.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1201.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1251.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1301.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1351.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1401.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1451.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1501.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1551.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1601.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1651.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1701.vti",
-        "vti/server_airflow_sims/velocity/server_airflow_velocity_1751.vti",
-    )
-    assert config.simulation_cache.velocity_field_name == "vel"
+    config_path = tmp_path / "digital_twin_runtime_suite.toml"
+    config_path.write_text(invalid_config, encoding="utf-8")
+
+    try:
+        RuntimeConfig.load(config_path, apply_local_overrides=False)
+    except ValueError as error:
+        assert "airflow_dataset root, scope, and state" in str(error)
+    else:
+        raise AssertionError(
+            "Expected missing airflow dataset identity to be rejected."
+        )
 
 
 def test_v02_runtime_config_resolves_server_fan_motion_bindings():
@@ -317,6 +331,9 @@ def test_local_smoke_tuning_override_wins_per_field(tmp_path):
                 "ambient = 0.75",
                 "damping = 0.005",
                 "vorticity = 0.8",
+                "velocity_scale_multiplier = 4.0",
+                "time_scale = 2.0",
+                "base_color = [0.1, 0.2, 0.3]",
             ]
         ),
         encoding="utf-8",
@@ -328,6 +345,9 @@ def test_local_smoke_tuning_override_wins_per_field(tmp_path):
     assert tuning.ambient == 0.75
     assert tuning.damping == 0.005
     assert tuning.vorticity == 0.8
+    assert tuning.velocity_scale_multiplier == 4.0
+    assert tuning.time_scale == 2.0
+    assert tuning.base_color == (0.1, 0.2, 0.3)
     assert tuning.brightness == 1.0
     assert tuning.sharpness == 0.9
 
@@ -343,6 +363,9 @@ def test_invalid_local_smoke_tuning_fields_fall_back_independently(tmp_path, cap
                 "ambient = true",
                 "fade = 4.0",
                 "sharpness = 0.5",
+                "velocity_scale_multiplier = 9.0",
+                "time_scale = 5.0",
+                "base_color = [1.2, 0.0, 0.0]",
             ]
         ),
         encoding="utf-8",
@@ -354,8 +377,166 @@ def test_invalid_local_smoke_tuning_fields_fall_back_independently(tmp_path, cap
     assert tuning.sharpness == 0.5
     assert tuning.ambient == 1.0
     assert tuning.fade == 0.0
+    assert tuning.velocity_scale_multiplier == 1.0
+    assert tuning.time_scale == 1.0
+    assert tuning.base_color == (0.58, 0.64, 0.69)
     assert "smoke_tuning.ambient" in caplog.text
     assert "smoke_tuning.fade" in caplog.text
+    assert "smoke_tuning.base_color" in caplog.text
+
+
+def test_local_emitter_layout_override_round_trips_and_falls_back_per_field(
+    tmp_path, caplog
+):
+    config_path = _write_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "\n".join(
+            [
+                "[simulation_cache.emitter_layout]",
+                "emitters_per_row = 8",
+                "rows = 3.5",
+                "depth = 0.5",
+                "size = 9.0",
+                "horizontal_margin = 0.08",
+                "vertical_margin = 0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    layout = RuntimeConfig.load(config_path).simulation_cache.emitter_layout
+
+    assert layout == EmitterLayoutConfig(
+        emitters_per_row=8,
+        rows=1,
+        depth=0.5,
+        size=0.75,
+        horizontal_margin=0.08,
+        vertical_margin=0.02,
+    )
+    assert "emitter_layout.size" in caplog.text
+    assert "emitter_layout.rows" in caplog.text
+    assert "emitter_layout.vertical_margin" in caplog.text
+
+
+def test_local_chassis_override_merges_known_controls_and_rejects_bad_values(
+    tmp_path,
+    caplog,
+):
+    config_path = _write_chassis_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "\n".join(
+            [
+                "[chassis_presentation]",
+                "face_panel_open = true",
+                "",
+                "[chassis_presentation.visibility]",
+                "top_cover = true",
+                "left_side = false",
+                'right_side = "invalid"',
+                "unknown_group = true",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    presentation = RuntimeConfig.load(config_path).chassis_presentation
+    visibility = {
+        group.group_id: group.default_visible
+        for group in presentation.visibility_groups
+    }
+
+    assert visibility == {
+        "top_cover": True,
+        "left_side": False,
+        "right_side": True,
+    }
+    assert presentation.face_panel.default_open is True
+    assert "right_side" in caplog.text
+    assert "unknown chassis visibility group" in caplog.text
+
+
+def test_chassis_operator_state_rejects_unknown_group_and_invalid_face_panel():
+    presentation = ChassisPresentationConfig(
+        visibility_groups=(
+            VisibilityGroupConfig("top", "Top", False, ("/server/top",)),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unknown chassis visibility groups"):
+        chassis_presentation_with_operator_state(presentation, {"missing": True}, None)
+    with pytest.raises(ValueError, match="no front-panel hinge"):
+        chassis_presentation_with_operator_state(presentation, {"top": True}, True)
+
+
+def test_controller_saves_chassis_override_without_losing_peer_overrides(tmp_path):
+    config_path = _write_chassis_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+    lighting = LightingConfig(
+        hdri_path="hdri/saved.exr",
+        exposure=2.0,
+        intensity=84.0,
+        show_hdri_background=False,
+        review_key_light_enabled=False,
+        review_key_light_intensity=125.0,
+        rotation=RotationConfig(x=1.0, y=2.0, z=3.0),
+    )
+    tuning = SmokeTuningConfig(density=1.5)
+    layout = EmitterLayoutConfig(emitters_per_row=8, rows=3, depth=0.5)
+    controller.save_runtime_override(
+        lighting,
+        grid=GridConfig(enabled=False, step=0.5, width=0.002),
+        smoke_tuning=tuning,
+        emitter_layout=layout,
+    )
+
+    local_path = controller.save_chassis_presentation_override(
+        {"top_cover": True, "left_side": False, "right_side": False},
+        True,
+    )
+    reloaded = RuntimeConfig.load(config_path)
+    visibility = {
+        group.group_id: group.default_visible
+        for group in reloaded.chassis_presentation.visibility_groups
+    }
+
+    assert local_path.exists()
+    assert not local_path.with_name(f"{local_path.name}.tmp").exists()
+    assert reloaded.lighting == lighting
+    assert reloaded.grid == GridConfig(enabled=False, step=0.5, width=0.002)
+    assert reloaded.simulation_cache.smoke_tuning == tuning
+    assert reloaded.simulation_cache.emitter_layout == layout
+    assert visibility == {"top_cover": True, "left_side": False, "right_side": False}
+    assert reloaded.chassis_presentation.face_panel.default_open is True
+    local_text = local_path.read_text(encoding="utf-8")
+    assert "[chassis_presentation.visibility]" in local_text
+    assert "target_path" not in local_text
+
+
+def test_runtime_controller_saves_emitter_layout_without_losing_peer_overrides(
+    tmp_path,
+):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+    tuning = SmokeTuningConfig(density=1.5)
+    controller.save_smoke_tuning_override(tuning)
+    layout = EmitterLayoutConfig(
+        emitters_per_row=10,
+        rows=5,
+        depth=0.25,
+        size=1.0,
+        horizontal_margin=0.08,
+        vertical_margin=0.1,
+    )
+
+    local_path = controller.save_emitter_layout_override(layout)
+    reloaded = RuntimeConfig.load(config_path)
+
+    assert local_path.exists()
+    assert reloaded.simulation_cache.emitter_layout == layout
+    assert reloaded.simulation_cache.smoke_tuning == tuning
 
 
 def test_malformed_local_override_does_not_prevent_startup(tmp_path, caplog):
@@ -398,7 +579,10 @@ def test_runtime_controller_saves_smoke_tuning_without_losing_peer_overrides(tmp
         fade=0.01,
         sharpness=0.5,
         vorticity=0.8,
+        velocity_scale_multiplier=4.0,
+        time_scale=2.0,
         raymarch_quality=0.75,
+        base_color=(0.2, 0.3, 0.4),
     )
 
     local_path = controller.save_smoke_tuning_override(tuning)
@@ -1063,6 +1247,42 @@ def _preview_surface_input_tuple(stage, material_path: str, input_name: str, Usd
     shader = UsdShade.Shader.Get(stage, f"{material_path}/PreviewSurface")
     value = shader.GetInput(input_name).Get()
     return tuple(round(float(component), 4) for component in value)
+
+
+def _write_chassis_runtime_config(tmp_path: Path) -> Path:
+    config_path = _write_runtime_config(tmp_path)
+    with config_path.open("a", encoding="utf-8") as config_file:
+        config_file.write(
+            "\n"
+            "[chassis_presentation]\n"
+            "open_chassis = false\n"
+            "cover_paths = []\n"
+            "\n"
+            "[chassis_presentation.visibility_groups.top_cover]\n"
+            'label = "Top cover"\n'
+            "default_visible = false\n"
+            'paths = ["/server/chassis/top"]\n'
+            "\n"
+            "[chassis_presentation.visibility_groups.left_side]\n"
+            'label = "Left side"\n'
+            "default_visible = true\n"
+            'paths = ["/server/chassis/left"]\n'
+            "\n"
+            "[chassis_presentation.visibility_groups.right_side]\n"
+            'label = "Right side"\n'
+            "default_visible = true\n"
+            'paths = ["/server/chassis/right"]\n'
+            "\n"
+            "[chassis_presentation.face_panel]\n"
+            "enabled = true\n"
+            'target_path = "/server/chassis/front"\n'
+            'rotation_axis = "X"\n'
+            "closed_angle_degrees = 0.0\n"
+            "open_angle_degrees = 90.0\n"
+            "animation_duration_seconds = 0.0\n"
+            "default_open = false\n"
+        )
+    return config_path
 
 
 def _write_runtime_config(tmp_path: Path) -> Path:

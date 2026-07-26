@@ -51,6 +51,18 @@
   - [ ] Retain the measured result in the Stage 6 plan and keep the offline
         Houdini density VDB evidence intact.
 
+### [RUNTIME] Further Decompose Flow Lifecycle Orchestration
+
+- **Status:** Closed (2026-07-27)
+- **Severity:** Low (Navigation / Maintenance Cost)
+- **Resolution:**
+  - `app/flow/runtime.py` was reduced from 3,243 to approximately 1,360 lines.
+  - Temporal proof/authoring, performance sampling, and deep Kit-CAE
+    diagnostics now live in `temporal.py`, `performance.py`, and
+    `diagnostics.py` mixin owners respectively.
+  - `RuntimeController` remains the stable command facade; Attach/Detach,
+    re-attach safety, and existing focused tests retain their contracts.
+
 ### [RUNTIME] Backfill UI Control Contract Tests for Existing DTRS Controls
 
 - **Status:** Open

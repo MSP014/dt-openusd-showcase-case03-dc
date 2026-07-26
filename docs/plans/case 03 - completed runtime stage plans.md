@@ -654,3 +654,72 @@ be reviewed without manual USD edits.
 
 Stage 5 was accepted on 2026-07-19 and `DC-44` was moved to Done. The delivery
 commit is `d4331db` (`Deliver Stage 5 full-server DTRS review`).
+
+### Stage 6 - Cached Simulation Playback Slice
+
+Jira: `DC-45`
+
+Status: implemented and accepted on 2026-07-27.
+
+Release track: `0.4.0` (released on Stage 8 completion).
+
+Stage 6 delivers an honest runtime airflow visualisation from an externally
+produced Houdini velocity field. DTRS does not claim to generate the source
+simulation live. The completed runtime route is:
+
+```text
+Houdini airflow simulation
+  -> manifest-driven temporal VTI velocity dataset
+  -> Kit-CAE CaeDataSet / PointData/vel
+  -> CAE velocity / NanoVDB bridge
+  -> one NVIDIA Flow DataSetEmitter and FlowSimulation
+  -> real-time volumetric smoke tracer
+```
+
+Delivered runtime contract:
+
+- Dataset discovery is driven by `manifest.toml` beneath
+  `assets/_external/airflow_datasets/`, selected by manifest `scope` and
+  `state`, rather than by hardcoded folder names or VTI path arrays.
+- The accepted server / load_normal dataset has 80 unique VTI samples at a
+  source step of 10 frames and 50 source FPS. DTRS derives a 0.2 second / 5 Hz
+  runtime cadence and a 16 second loop from that manifest.
+- The VTI -> Kit-CAE -> Flow route validates VTI metadata, the manifest grid,
+  temporal consistency, origin compatibility, and DataSetEmitter readiness.
+  The narrow DTRS session-layer origin workaround preserves source VTI and
+  authored server USD unchanged.
+- `SMOKE_ONLY` remains the tracer contract: smoke is transported by imported
+  VTI velocity; fuel, temperature, burn, combustion, buoyancy, and collision
+  behaviour are not enabled by Stage 6.
+- Cloud rendering exposes persistent, Apply-based operator tuning for
+  appearance, dynamics, raymarch quality, vorticity, velocity multiplier, time
+  scale, and smoke colour. Pending dropdown or colour edits do not mutate Flow
+  before Apply succeeds.
+- The persistent emitter layout exposes columns, rows, depth, size, horizontal
+  margin, and vertical margin. It rebuilds only tracer emitters, keeps helper
+  geometry hidden, and retains imported VTI as the sole velocity source.
+- All operator overrides use the existing local runtime TOML with validation,
+  peer-preserving round trips, and atomic replacement.
+
+Validation and acceptance evidence:
+
+- Generic temporal proof records `N` unique assets and hashes, `N - 1` forward
+  transitions, one loop closure, continuous timeline, validated origin/grid,
+  and zero Flow resets. The accepted 80-sample dataset therefore proves 79
+  forward transitions and one loop transition.
+- Focused pure-Python tests cover manifest discovery and validation, temporal
+  timing, smoke tuning, transport scale, emitter layout, local override
+  persistence, and Flow no-reset semantics. The Stage 6 suite passed with 145
+  tests; flake8 and `git diff --check` also passed.
+- Manual Kit acceptance covered Attach, Play, temporal advancement, smoke and
+  layout Apply operations, Pause/Play, Detach, re-Attach, restart persistence,
+  and fixed-camera FPS comparison on the RTX 3080.
+
+The smoke presentation was tuned interactively through the shipped controls.
+Vorticity masks remain an internal implementation detail: further mask tuning
+was deliberately excluded because no remaining FPS budget justified it. The
+runtime exposes vorticity enable/strength but does not add a second user-facing
+mask control.
+
+Historical direct OpenVDB/RTX-IndeX and early diagnostic Flow experiments are
+closed evidence routes. They do not describe the shipped Stage 6 runtime path.

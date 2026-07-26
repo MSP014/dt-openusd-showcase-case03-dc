@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
-**Status**: Draft
-**Last Updated**: 2026-07-26
+**Status**: Active roadmap; Stage 6 complete
+**Last Updated**: 2026-07-27
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -11,8 +11,8 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and the first five completed Digital Twin Runtime Suite
-slices through the full-server runtime review milestone.
+external asset layout, and the first six completed Digital Twin Runtime Suite
+slices through cached airflow playback.
 
 Current decisions already made:
 
@@ -21,8 +21,8 @@ Current decisions already made:
 - The current runtime build is **Digital Twin Runtime Suite v0.4.0**.
 - DTRS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
   default through the `blackwell_rig_gb203` runtime asset entry.
-- The shared left sidebar now contains `Telemetry` and `Config` tabs without
-  changing the viewport footprint.
+- The shared left sidebar now contains `Telemetry`, `View`, and `Config` tabs
+  without changing the viewport footprint.
 - The Stage 3 provider produces config-driven latest-only snapshots at an
   independent runtime cadence for `Idle`, `Nominal`, `Surge`, and `Critical`.
 - The Telemetry tab exposes workload mode, refresh cadence, freeze/resume,
@@ -34,68 +34,38 @@ Current decisions already made:
   same runtime contract through 11 explicit config-backed bindings for the CPU
   cooler, three GPU blowers, PSU, motherboard NVMe fan, three front P120 fans,
   and two rear P8 Max fans.
-- Stage 5 applies a reversible session-layer `open_chassis` review override
-  that hides the top and side cover subtrees for full-server review. It does
-  not alter the complete Houdini/USD assembly.
-- Heavy USD, texture, VDB, HDRI, and future runtime assets stay outside the
-  source package and are hydrated through `assets/_external/`.
+- Stage 5 introduced reversible session-layer chassis presentation overrides
+  without altering the complete Houdini/USD assembly. Stage 6 persists the
+  operator-selected enclosure visibility groups and front-panel state.
+- Stage 6 delivers the cached airflow playback route from a Houdini velocity
+  field through manifest-driven VTI discovery, Kit-CAE, the CAE/NanoVDB bridge,
+  and one NVIDIA Flow simulation to a real-time volumetric smoke tracer.
+- The accepted `server / load_normal` dataset contains 80 VTI samples at 5 Hz.
+  Its 0.2 second cadence and 16 second loop are derived from the manifest,
+  rather than from hardcoded sample paths or sequence counts.
+- The tracer stays `SMOKE_ONLY`: imported VTI remains the sole velocity source;
+  fuel, temperature, burn, combustion, buoyancy, and collision behaviour remain
+  disabled.
+- The View tab provides persistent Apply-based smoke tuning, transport scale,
+  time scale, smoke colour, and parameterised emitter layout controls. They
+  preserve the dataset route and do not mutate Flow until an Apply succeeds.
+- The generic temporal proof validates all discovered samples, source hashes,
+  temporal continuity, origin/grid invariants, loop closure, and zero Flow
+  resets. The accepted 80-sample dataset yields 79 forward transitions and one
+  loop transition.
+- Fixed-camera performance comparison and the final Kit regression pass
+  covered Attach, Play, tuning/layout Apply, Pause/Play, Detach, re-Attach, and
+  restart persistence on the RTX 3080.
+- Vorticity strength remains operator-configurable. Its masks remain an
+  internal implementation detail because further mask tuning had no remaining
+  FPS budget.
+- The completed Stage 6 runtime contract and validation evidence are preserved
+  in the [Stage 6 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice).
+- Heavy USD, texture, HDRI, temporal VTI, and future runtime assets stay
+  outside the source package and are hydrated through `assets/_external/`.
 - The application source root is `src/digital_twin_runtime_suite/`.
 - The first Kit extension id is `msp.dtrs`.
 - The app should launch through Kit with a dedicated `.kit` application config.
-
-Jira tracking:
-
-- Runtime epic: `DC-38` - Digital Twin Runtime Suite Runtime.
-- Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
-- Completed implementation task: `DC-40` - Stage 1 DTRS v0.1 asset preview.
-- Completed implementation task: `DC-41` - Stage 2 Look Review Slice.
-- Completed implementation task: `DC-42` - Stage 3 Synthetic Telemetry Slice.
-- Completed implementation task: `DC-43` - Stage 4 Telemetry Driven Motion
-  Slice.
-- Completed implementation task: `DC-44` - Stage 5 Full Blackwell Rig server
-  review.
-- Active implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
-- When a delivery stage is completed, update the matching Jira task before
-  moving to the next stage: add a concise completion comment, log the actual
-  work time, move the task through Review to Done, run Jira sync, and mark the
-  next stage task In Progress when work on that stage starts.
-
-Stage 6 current checkpoint:
-
-- DTRS now uses the working airflow route:
-
-  ```text
-  Houdini airflow simulation
-    -> runtime-resampled temporal VTI velocity fields
-    -> Kit-CAE
-    -> CAE velocity / NanoVDB bridge
-    -> NVIDIA Flow
-    -> real-time volumetric smoke tracer
-  ```
-
-- The temporal dataset contains 16 unique VTI samples, `1001 -> 1051 -> ...
-  -> 1751 -> loop`, at a deliberate cadence of 50 Houdini source frames per
-  one second of DTRS playback.
-- **16-SAMPLE TEMPORAL VTI -> KIT-CAE -> FLOW LOOP PROOF: PASSED.** The proof
-  records 16 unique assets, 16 unique SHA-256 identities, 15 forward
-  transitions, one loop transition, `origin_match=True`, `grid_match=True`,
-  `timeline_continuous=True`, and `Flow resets=0`.
-- The front-intake tracer layout now uses seven emitters in one horizontal row.
-  Emitters 2, 4, and 6 align with the centres of the three front P120 fans.
-- The tracer has moved from the diagnostic fuel/temperature setup to
-  `SMOKE_ONLY`: fuel, temperature, burn, combustion, and buoyancy are OFF;
-  smoke is ON. DTRS renders it with Flow Volume Smoke Cloud.
-- The smoke now reads as a real-time volumetric tracer and is transported
-  through the server by the imported Houdini VTI velocity field.
-- The Airflow panel includes a live `Flow vorticity` checkbox, which toggles
-  without a Flow reset. Its strength behaviour remains part of the next
-  presentation and performance tuning pass.
-- RTX 3080 performance depends on camera coverage and the visible volume. The
-  current overview demonstration is around 30 FPS; optimisation remains part
-  of Stage 6 rather than a completed claim.
-- The smoke look is functional but not final. Density, light blue-grey colour,
-  detail/sharpness, meaningful vorticity strength and scale, and the final
-  performance baseline still require tuning.
 
 The local authoring and tooling environment still uses `case03-env`. Digital Twin Runtime Suite runtime code, however, runs inside Kit's Python environment
 when launched through `kit.exe`. Any Python dependency used by runtime code must
@@ -106,31 +76,34 @@ If a later stage introduces external service processes, automation, or a web
 control surface outside Kit, the project should define that environment
 deliberately and update README, ADRs, plans, and tooling references in one pass.
 
+## Jira Tracking
+
+- Runtime epic: `DC-38` - Digital Twin Runtime Suite Runtime.
+- Completed planning task: `DC-39` - Develop Case 03 staged runtime plan.
+- Completed implementation task: `DC-40` - Stage 1 DTRS v0.1 asset preview.
+- Completed implementation task: `DC-41` - Stage 2 Look Review Slice.
+- Completed implementation task: `DC-42` - Stage 3 Synthetic Telemetry Slice.
+- Completed implementation task: `DC-43` - Stage 4 Telemetry Driven Motion
+  Slice.
+- Completed implementation task: `DC-44` - Stage 5 Full Blackwell Rig server
+  review.
+- Completed implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
+- When a delivery stage is completed, update the matching Jira task before
+  moving to the next stage: add a concise completion comment, log the actual
+  work time, move the task through Review to Done, run Jira sync, and mark the
+  next stage task In Progress when work on that stage starts.
+
 ## Next Step
 
-The next Stage 6 session begins with **smoke presentation tuning**, not a new
-runtime architecture. Continue from the working `SMOKE_ONLY +
-VOLUME_SMOKE_CLOUD` route and evaluate changes in this order:
+The next runtime slice is Stage 7, Engineering X-Ray. Before implementation,
+confirm the RTX-compatible runtime material path for reversible chassis opacity
+and finalise the camera-local fade thresholds and hysteresis. Keep the accepted
+Stage 6 airflow contract intact: Stage 7 may reveal its internal targets but
+must not replace the VTI, Kit-CAE, Flow, smoke, or operator-persistence route.
 
-1. renderer-side density;
-2. light blue-grey smoke colour;
-3. smoke detail through second-order advection quality;
-4. vorticity strength and masks; and
-5. controlled FPS comparison with vorticity OFF versus ON.
-
-Do not change the temporal VTI pipeline, runtime grid, velocity coupling,
-emitter placement, or collision system during this tuning pass. Flow remains
-the runtime visualisation layer; the Houdini velocity field remains the source
-of the primary airflow physics.
-
-After the smoke presentation and controlled performance baseline are stable,
-choose the minimum VTI update frequency that preserves readable airflow. That
-cadence decision determines the number of VTI files and the Houdini export
-interval for the longer fixture.
-
-Do not expand Stage 6 into Engineering X-Ray, workload-to-cache state binding,
-velocity trails, heatmaps, automatic workload cycling, rack/data-hall
-navigation, or generated simulation. Those remain separate staged slices.
+Do not move `DC-48` to In Progress until active Stage 7 work begins. Publish
+the accepted Stage 6 change set through the normal validation and commit flow
+before that handoff.
 
 ---
 
@@ -316,14 +289,14 @@ from making future capabilities sound like v0.1 requirements.
 | Synthetic telemetry values | Stage 3 | Implemented |
 | Fan motion driven by telemetry | Stage 4 | Implemented |
 | Full server / Blackwell Rig stage | Stage 5 | Implemented |
-| Cached simulation visual layer | Stage 6 | In Progress |
+| Cached simulation visual layer | Stage 6 | Implemented |
 | Engineering X-Ray visual mode | Stage 7 | Future |
 | Workload-to-cache state binding | Stage 8 | Future |
 | Server velocity trail foundation | Stage 9 | Future |
 | Server heatmap foundation | Stage 10 | Future |
 | Server/rack/data hall navigation | Stage 11 | Future |
-| Camera bookmarks | Stage 11 | Future |
-| Scene group toggles | Stage 11 | Future |
+| Cross-scale camera bookmarks | Stage 11 | Future |
+| Cross-scale scene group toggles | Stage 11 | Future |
 | Multi-scale telemetry model | Stage 12 | Future |
 | Multi-scale velocity trail expansion | Stage 13 | Future |
 | Multi-scale heatmap expansion | Stage 14 | Future |
@@ -416,10 +389,11 @@ The first asset catalog entry is:
 - Path under asset root: `usd/cpu_fan/cpu_fan.usd`
 - Kind: `usd_stage`
 
-Heavy USD, VDB, texture, and HDRI payloads stay under `assets/_external/`. They
-must not be copied into `src/digital_twin_runtime_suite/`. The application code
-may keep a lightweight asset catalog, but that catalog only records ids, labels,
-relative paths, and metadata.
+Heavy USD, texture, HDRI, and temporal VTI payloads stay under
+`assets/_external/`. They must not be copied into
+`src/digital_twin_runtime_suite/`. The application code may keep a lightweight
+asset catalog, but that catalog only records ids, labels, relative paths, and
+metadata.
 
 The v0.1 source tree should not introduce separate `viewport/`, `stage/`, or
 `view/` packages. Stage opening and viewport-facing commands can live in
@@ -643,78 +617,12 @@ Detailed plans for completed runtime stages are preserved in
 | Stage 3 - Synthetic Telemetry | `DC-42` | Implemented | [Stage 3 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-3---synthetic-telemetry-slice) |
 | Stage 4 - Telemetry Driven Motion | `DC-43` | Implemented | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
 | Stage 5 - Server Review | `DC-44` | Implemented | [Stage 5 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-5---server-review-slice) |
+| Stage 6 - Cached Simulation Playback | `DC-45` | Implemented | [Stage 6 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice) |
 
 When a runtime stage is completed, move its detailed plan from this document to
 the completed-stage archive, update this table with a direct link, and keep only
 the active and future stage details here. Cross-stage contracts that still
 govern future work remain in this plan.
-
-### Stage 6 - Cached Simulation Playback Slice
-
-Jira: `DC-45`
-
-Release track: `0.4.0` (released on Stage 8 completion).
-
-Stage 6 establishes an honest runtime airflow visualisation from a Houdini
-velocity field. DTRS does not claim to generate the source simulation live.
-The working runtime contract is:
-
-```text
-Houdini airflow simulation
-  -> runtime-resampled temporal VTI velocity fields
-  -> Kit-CAE CaeDataSet / PointData/vel
-  -> CAE velocity / NanoVDB bridge
-  -> one NVIDIA Flow DataSetEmitter and FlowSimulation
-  -> real-time volumetric smoke tracer
-```
-
-#### Working Runtime Checkpoint - 2026-07-26
-
-Status: **working runtime proof; presentation and performance tuning in
-progress. Stage 6 is not delivered.**
-
-Completed:
-
-- VTI -> Kit-CAE -> Flow velocity ingestion.
-- Spatial/origin validation with the narrow DTRS session-layer compatibility
-  opinion; source VTI and authored server USD remain unchanged.
-- Temporal 16-sample playback at one second per sample:
-  `1001 -> 1051 -> ... -> 1751 -> 1001`.
-- Continuous Flow simulation with one DataSetEmitter and zero resets across 15
-  forward transitions and the loop closure.
-- Seven-source front-intake tracer layout, with emitters 2, 4, and 6 aligned to
-  the three front P120 fan centres.
-- Passive smoke-only tracer mode: fuel, temperature, burn, combustion, and
-  buoyancy are disabled; smoke is transported by the imported VTI velocity.
-- Real-time Flow Volume Smoke Cloud rendering.
-- Live vorticity toggle without a Flow reset.
-- Structured temporal validation/proof logging and low-frequency runtime
-  performance logging.
-
-The temporal proof is PASS only because it records 16 unique source assets and
-hashes, 15 forward transitions, one loop transition, `operator_ready_all=True`,
-`origin_match_all=True`, `grid_match_all=True`,
-`timeline_continuous=True`, `Flow resets=0`, and loop closure PASS.
-
-In progress:
-
-- Smoke density and light blue-grey presentation tuning.
-- Smoke detail and advection-quality tuning without reducing the runtime grid
-  cell size.
-- Meaningful vorticity strength and mask configuration.
-- Controlled vorticity OFF/ON performance benchmark at fixed overview and
-  close-up camera bookmarks.
-- Flow lifecycle reliability for Detach -> Attach, if later manual verification
-  exposes a regression.
-- Final Stage 6 performance baseline and the source-sampling cadence/storage
-  decision.
-
-Keep the temporal VTI pipeline, runtime grid, CAE -> Flow velocity coupling,
-front-intake emitter placement, and collision system unchanged while the smoke
-presentation is tuned.
-
-Historical direct OpenVDB/RTX-IndeX and early diagnostic Flow experiments are
-closed evidence routes. They do not describe the active Stage 6 runtime path.
 
 ### Stage 7 - Engineering X-Ray Visual Mode Slice
 
@@ -845,7 +753,7 @@ Jira: `DC-47`
 Release track: `0.6.0` (released on Stage 12 completion).
 
 Add deliberate navigation between supported scales: server, rack, and data
-hall. The exact camera bookmarks and scene group controls are deferred until
+hall. The exact cross-scale camera bookmarks and scene group controls are deferred until
 this stage because they depend on the final scene structure.
 
 Required scope:
@@ -1021,7 +929,7 @@ placement, interaction design, and presentation polish.
 Required scope:
 
 - review and settle the information architecture of the fixed left sidebar,
-  starting from the existing `Telemetry` and `Config` tabs;
+  starting from the existing `Telemetry`, `View`, and `Config` tabs;
 - place a global, mutually exclusive `Server | Rack | Data Hall` scale control
   outside the contextual sidebar, with the viewport toolbar as the current
   preferred location;
@@ -1142,8 +1050,8 @@ showing inside the application.
 
 ### Scene and Content Questions
 
-- Which camera bookmarks define the first presentation path?
-- Which scene groups need first-class visibility toggles?
+- Which cross-scale camera bookmarks define the first presentation path?
+- Which cross-scale scene groups need first-class visibility toggles?
 - Which key hardware assets need explicit focus or selection affordances?
 
 ### Runtime and Configuration Questions

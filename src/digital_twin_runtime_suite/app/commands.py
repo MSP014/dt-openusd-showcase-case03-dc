@@ -12,6 +12,7 @@ from typing import Callable
 from digital_twin_runtime_suite.app.config import (
     CameraConfig,
     ChassisPresentationConfig,
+    EmitterLayoutConfig,
     FacePanelConfig,
     FrontPanelIndicatorsConfig,
     GridConfig,
@@ -20,6 +21,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    chassis_presentation_with_operator_state,
     format_runtime_override,
 )
 from digital_twin_runtime_suite.app.front_panel_indicators import (
@@ -114,6 +116,11 @@ class RuntimeController(FlowRuntimeMixin):
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
         self._flow_airflow_simulate_path: str | None = None
+        self._flow_base_velocity_scale: float | None = None
+        self._flow_world_bounds: (
+            tuple[tuple[float, float, float], tuple[float, float, float]] | None
+        ) = None
+        self._flow_density_cell_size: float | None = None
         self._flow_lifecycle_state = "DETACHED"
         self._flow_temporal_asset_hashes: dict[Path, str] = {}
         self._flow_temporal_records: list[dict[str, object]] = []
@@ -137,6 +144,9 @@ class RuntimeController(FlowRuntimeMixin):
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
+        self._flow_base_velocity_scale = None
+        self._flow_world_bounds = None
+        self._flow_density_cell_size = None
         self._flow_lifecycle_state = "DETACHED"
         self._flow_temporal_asset_hashes = {}
         self._flow_temporal_records = []
@@ -163,12 +173,20 @@ class RuntimeController(FlowRuntimeMixin):
         camera: CameraConfig | None = None,
         grid: GridConfig | None = None,
         smoke_tuning: SmokeTuningConfig | None = None,
+        emitter_layout: EmitterLayoutConfig | None = None,
+        chassis_presentation: ChassisPresentationConfig | None = None,
     ) -> Path:
         """Persist local operator settings beside the base config."""
 
         active_camera = camera or self.config.camera
         active_grid = grid or self.config.grid
         active_smoke_tuning = smoke_tuning or self.config.simulation_cache.smoke_tuning
+        active_emitter_layout = (
+            emitter_layout or self.config.simulation_cache.emitter_layout
+        )
+        active_chassis_presentation = (
+            chassis_presentation or self.config.chassis_presentation
+        )
         local_path = RuntimeConfig.local_config_path_for(self._config_path)
         temporary_path = local_path.with_name(f"{local_path.name}.tmp")
         temporary_path.write_text(
@@ -177,6 +195,8 @@ class RuntimeController(FlowRuntimeMixin):
                 active_camera,
                 active_grid,
                 active_smoke_tuning,
+                active_emitter_layout,
+                active_chassis_presentation,
             ),
             encoding="utf-8",
         )
@@ -192,6 +212,41 @@ class RuntimeController(FlowRuntimeMixin):
             self.config.camera,
             self.config.grid,
             smoke_tuning,
+        )
+
+    def save_emitter_layout_override(
+        self,
+        emitter_layout: EmitterLayoutConfig,
+    ) -> Path:
+        """Persist a successfully applied tracer layout without losing peers."""
+
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            emitter_layout,
+        )
+
+    def save_chassis_presentation_override(
+        self,
+        visibility_by_group: dict[str, bool],
+        face_panel_open: bool | None,
+    ) -> Path:
+        """Persist validated enclosure controls without replacing peer overrides."""
+
+        presentation = chassis_presentation_with_operator_state(
+            self.config.chassis_presentation,
+            visibility_by_group,
+            face_panel_open,
+        )
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            presentation,
         )
 
     def save_lighting_override(self, lighting: LightingConfig) -> Path:
@@ -214,6 +269,8 @@ class RuntimeController(FlowRuntimeMixin):
                 None,
                 self.config.grid,
                 self.config.simulation_cache.smoke_tuning,
+                self.config.simulation_cache.emitter_layout,
+                self.config.chassis_presentation,
             ),
             encoding="utf-8",
         )

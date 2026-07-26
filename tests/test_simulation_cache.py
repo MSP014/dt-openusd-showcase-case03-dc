@@ -319,6 +319,7 @@ def test_kit_cae_smoke_only_tracer_setup_applies_cloud_tuning_without_reset():
     environment = define_prim("/DTRS_KitCAE/FlowSimulation")
     simulate = define_prim(f"{environment.GetPath()}/flowSimulate")
     define_attribute(simulate, "forceClear", Sdf.ValueTypeNames.Bool, False)
+    define_attribute(simulate, "timeScale", Sdf.ValueTypeNames.Float, 1.0)
     advection = define_prim(f"{simulate.GetPath()}/advection")
     smoke = define_prim(f"{advection.GetPath()}/smoke")
     vorticity = define_prim(f"{simulate.GetPath()}/vorticity")
@@ -373,6 +374,13 @@ def test_kit_cae_smoke_only_tracer_setup_applies_cloud_tuning_without_reset():
     ):
         define_attribute(vorticity, attribute_name, Sdf.ValueTypeNames.Float, 0.0)
     define_attribute(ray_march, "stepSizeScale", Sdf.ValueTypeNames.Float, 0.0)
+    dataset_emitter = define_prim("/DTRS_KitCAE/DataSetEmitter")
+    define_attribute(
+        dataset_emitter,
+        "velocityScale",
+        Sdf.ValueTypeNames.Float,
+        0.73,
+    )
 
     RuntimeController._configure_kit_cae_smoke_only_tracer_flow(
         stage,
@@ -416,13 +424,18 @@ def test_kit_cae_smoke_only_tracer_setup_applies_cloud_tuning_without_reset():
         fade=0.01,
         sharpness=0.5,
         vorticity=0.0,
+        velocity_scale_multiplier=4.0,
+        time_scale=2.0,
         raymarch_quality=0.75,
+        base_color=(0.2, 0.3, 0.4),
     )
 
     RuntimeController._author_kit_cae_smoke_tuning(
         stage,
         str(environment.GetPath()),
         custom_tuning,
+        dataset_emitter_path=str(dataset_emitter.GetPath()),
+        base_velocity_scale=0.73,
     )
 
     assert ray_march_cloud.GetAttribute("densityMultiplier").Get() == 1.5
@@ -431,16 +444,27 @@ def test_kit_cae_smoke_only_tracer_setup_applies_cloud_tuning_without_reset():
     assert tuple(
         ray_march_cloud.GetAttribute("attenuationMultiplier").Get()
     ) == pytest.approx((1.5, 1.5, 1.5))
+    assert tuple(
+        ray_march_cloud.GetAttribute("volumeBaseColor").Get()
+    ) == pytest.approx((0.2, 0.3, 0.4))
     assert smoke.GetAttribute("damping").Get() == pytest.approx(0.005)
     assert smoke.GetAttribute("fade").Get() == pytest.approx(0.01)
     assert smoke.GetAttribute("secondOrderBlendFactor").Get() == pytest.approx(0.5)
     assert vorticity.GetAttribute("enabled").Get() is False
     assert vorticity.GetAttribute("forceScale").Get() == 0.0
     assert ray_march.GetAttribute("stepSizeScale").Get() == pytest.approx(0.75)
+    assert dataset_emitter.GetAttribute("velocityScale").Get() == pytest.approx(2.92)
+    assert (
+        dataset_emitter.GetAttribute("velocityScale").GetCustomDataByKey(
+            "omni:kit:locked"
+        )
+        is True
+    )
+    assert simulate.GetAttribute("timeScale").Get() == pytest.approx(2.0)
     assert simulate.GetAttribute("forceClear").Get() is False
 
 
-def test_kit_cae_temporal_velocity_samples_author_sixteen_sparse_vti_frames(tmp_path):
+def test_kit_cae_temporal_velocity_samples_author_manifest_derived_cadence(tmp_path):
     from pxr import Sdf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateInMemory()
@@ -462,63 +486,35 @@ def test_kit_cae_temporal_velocity_samples_author_sixteen_sparse_vti_frames(tmp_
 
     paths = tuple(
         tmp_path / f"server_airflow_velocity_{frame}.vti"
-        for frame in (
-            1001,
-            1051,
-            1101,
-            1151,
-            1201,
-            1251,
-            1301,
-            1351,
-            1401,
-            1451,
-            1501,
-            1551,
-            1601,
-            1651,
-            1701,
-            1751,
-        )
+        for frame in range(1001, 1801, 10)
     )
     time_codes = RuntimeController._author_kit_cae_temporal_velocity_samples(
         field.GetPrim(),
         paths,
         50.0,
+        0.2,
         FakeCaeVtk,
         Sdf,
         Usd,
     )
 
-    assert time_codes == tuple(float(time_code) for time_code in range(0, 800, 50))
+    assert time_codes == tuple(float(time_code) for time_code in range(0, 800, 10))
+    assert time_codes[1] - time_codes[0] == pytest.approx(10.0)
+    assert (time_codes[1] - time_codes[0]) / 50.0 == pytest.approx(0.2)
+    assert (time_codes[-1] + (time_codes[-1] - time_codes[-2])) / 50.0 == pytest.approx(
+        16.0
+    )
     assert [
         file_names_attr.Get(Usd.TimeCode(time_code))[0].path for time_code in time_codes
     ] == [path.as_posix() for path in paths]
 
 
-def test_kit_cae_temporal_loop_proof_requires_sixteen_distinct_sources_and_closure(
+def test_kit_cae_temporal_loop_proof_requires_all_distinct_sources_and_closure(
     tmp_path,
 ):
     velocity_paths = tuple(
         tmp_path / f"server_airflow_velocity_{frame}.vti"
-        for frame in (
-            1001,
-            1051,
-            1101,
-            1151,
-            1201,
-            1251,
-            1301,
-            1351,
-            1401,
-            1451,
-            1501,
-            1551,
-            1601,
-            1651,
-            1701,
-            1751,
-        )
+        for frame in range(1001, 1801, 10)
     )
     records = []
     for index, asset in enumerate((*velocity_paths, velocity_paths[0])):
@@ -529,7 +525,9 @@ def test_kit_cae_temporal_loop_proof_requires_sixteen_distinct_sources_and_closu
                 "asset": asset.name,
                 "asset_hash": f"{index % len(velocity_paths):012x}",
                 "transition": (
-                    "INITIAL" if index == 0 else "LOOP" if index == 16 else "SWAP"
+                    "INITIAL"
+                    if index == 0
+                    else "LOOP" if index == len(velocity_paths) else "SWAP"
                 ),
                 "operator_ready": True,
                 "timeline_advancing": True,
@@ -545,11 +543,11 @@ def test_kit_cae_temporal_loop_proof_requires_sixteen_distinct_sources_and_closu
     )
 
     assert summary["passed"] is True
-    assert summary["forward_transitions"] == 15
+    assert summary["forward_transitions"] == 79
     assert summary["loop_transitions"] == 1
     assert summary["loop_closure"] is True
-    assert summary["unique_assets"] == 16
-    assert summary["unique_hashes"] == 16
+    assert summary["unique_assets"] == 80
+    assert summary["unique_hashes"] == 80
 
     incomplete_summary = RuntimeController._kit_cae_temporal_loop_proof_summary(
         records[:-1],
