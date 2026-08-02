@@ -16,9 +16,9 @@
     `omniverse-usd-performance-tuning`, `omniverse-realtime-viewer`, and,
     conditionally, `omniverse-cad-to-simready`.
 - **Why Deferred:**
-  - The current priority is completing the active DTRS milestone, and the
-    existing MCP-backed workflow already covers active USD, Kit, and OmniUI
-    development needs.
+  - Active DTRS runtime milestones are the current priority, and the existing
+    MCP-backed workflow already covers active USD, Kit, and OmniUI development
+    needs.
   - Installing skills without reviewing their triggers, workflow assumptions,
     overlap, and maintenance model could create ambiguous guidance without
     adding immediate project value.

@@ -1,29 +1,16 @@
-import math
-import os
-
-# Used only to launch a fixed local interpreter without shell expansion.
-import subprocess  # nosec B404
-import tempfile
-
 import hou
+import os
+import math
+import tempfile
+import subprocess
 import numpy as np
 
-CONDA_PYTHON = os.path.join(
-    os.path.expanduser("~"),
-    "anaconda3",
-    "envs",
-    "case03-env",
-    "python.exe",
-)
+
+CONDA_PYTHON = r"C:\Users\SpeLL\anaconda3\envs\case03-env\python.exe"
 
 EXPECTED_RESOLUTION = (184, 72, 232)
 EXPECTED_VOXEL_SIZE = 0.00255
 VOXEL_SIZE_TOLERANCE = 1e-5
-
-work_item = globals().get("work_item")
-
-if work_item is None:
-    raise RuntimeError("This script must run inside a Houdini PDG Python Script node.")
 
 
 # ============================================================
@@ -35,7 +22,8 @@ inputs = work_item.inputFiles
 
 if len(inputs) != 1:
     raise RuntimeError(
-        f"Frame {frame}: expected exactly 1 input file, " f"got {len(inputs)}"
+        f"Frame {frame}: expected exactly 1 input file, "
+        f"got {len(inputs)}"
     )
 
 input_path = inputs[0].local_path
@@ -53,7 +41,10 @@ if actual_name != expected_name:
     )
 
 if not os.path.isfile(input_path):
-    raise RuntimeError(f"Frame {frame}: input cache does not exist:\n" f"{input_path}")
+    raise RuntimeError(
+        f"Frame {frame}: input cache does not exist:\n"
+        f"{input_path}"
+    )
 
 
 # ============================================================
@@ -66,7 +57,9 @@ try:
     geo.loadFromFile(input_path)
 except Exception as exc:
     raise RuntimeError(
-        f"Frame {frame}: failed to load Houdini cache:\n" f"{input_path}\n\n" f"{exc}"
+        f"Frame {frame}: failed to load Houdini cache:\n"
+        f"{input_path}\n\n"
+        f"{exc}"
     ) from exc
 
 
@@ -81,7 +74,7 @@ for prim in geo.prims():
         try:
             name = prim.attribValue("name")
         except Exception:
-            name = None
+            continue
 
         if name == "vel":
             vel_prim = prim
@@ -89,7 +82,8 @@ for prim in geo.prims():
 
 if vel_prim is None:
     raise RuntimeError(
-        f"Frame {frame}: vector VDB 'vel' was not found in:\n" f"{input_path}"
+        f"Frame {frame}: vector VDB 'vel' was not found in:\n"
+        f"{input_path}"
     )
 
 
@@ -97,7 +91,9 @@ if vel_prim is None:
 # Validate Houdini-side runtime cache contract
 # ============================================================
 
-nx, ny, nz = tuple(int(v) for v in vel_prim.resolution())
+nx, ny, nz = tuple(
+    int(v) for v in vel_prim.resolution()
+)
 
 resolution = (nx, ny, nz)
 
@@ -109,12 +105,17 @@ if resolution != EXPECTED_RESOLUTION:
     )
 
 
-spacing = tuple(float(v) for v in vel_prim.voxelSize())
+spacing = tuple(
+    float(v) for v in vel_prim.voxelSize()
+)
 
 for axis, value in zip("XYZ", spacing):
 
     if not math.isfinite(value) or value <= 0.0:
-        raise RuntimeError(f"Frame {frame}: invalid voxel size on {axis}: " f"{value}")
+        raise RuntimeError(
+            f"Frame {frame}: invalid voxel size on {axis}: "
+            f"{value}"
+        )
 
     if abs(value - EXPECTED_VOXEL_SIZE) > VOXEL_SIZE_TOLERANCE:
         raise RuntimeError(
@@ -124,11 +125,17 @@ for axis, value in zip("XYZ", spacing):
         )
 
 
-origin = tuple(float(v) for v in vel_prim.indexToPos((0, 0, 0)))
+origin = tuple(
+    float(v)
+    for v in vel_prim.indexToPos((0, 0, 0))
+)
 
 for axis, value in zip("XYZ", origin):
     if not math.isfinite(value):
-        raise RuntimeError(f"Frame {frame}: invalid VDB origin on {axis}: " f"{value}")
+        raise RuntimeError(
+            f"Frame {frame}: invalid VDB origin on {axis}: "
+            f"{value}"
+        )
 
 
 # ============================================================
@@ -164,7 +171,11 @@ output_path = os.path.join(
 # Only a completely successful export gets the final .vti name.
 output_stem, output_ext = os.path.splitext(output_path)
 
-temp_output_path = output_stem + ".tmp" + output_ext
+temp_output_path = (
+    output_stem
+    + ".tmp"
+    + output_ext
+)
 
 
 # Remove debris from an interrupted earlier run.
@@ -250,7 +261,9 @@ if velocities.dtype != np.float32:
 # Houdini -> external case03-env / VTK bridge
 # ============================================================
 
-with tempfile.TemporaryDirectory(prefix=f"case03_velocity_{frame}_") as temp_dir:
+with tempfile.TemporaryDirectory(
+    prefix=f"case03_velocity_{frame}_"
+) as temp_dir:
 
     npy_path = os.path.join(
         temp_dir,
@@ -266,7 +279,8 @@ with tempfile.TemporaryDirectory(prefix=f"case03_velocity_{frame}_") as temp_dir
     # starting the VTK subprocess.
     del velocities
 
-    vtk_code = r"""
+
+    vtk_code = r'''
 import sys
 import os
 import numpy as np
@@ -497,7 +511,8 @@ print(
     f"dtype=float "
     f"bytes={file_size}"
 )
-"""
+'''
+
 
     # Houdini's embedded Python environment must not
     # contaminate the external Conda interpreter.
@@ -512,6 +527,7 @@ print(
         "PYTHONPATH",
         None,
     )
+
 
     subprocess_kwargs = {
         "args": [
@@ -533,18 +549,25 @@ print(
         "capture_output": True,
         "text": True,
         "env": env,
+
         # Generous safety ceiling.
         # Normal export currently takes roughly 2–3 min.
         "timeout": 1800,
     }
 
+
     # Prevent case03-env from opening a separate console
     # window for every PDG work item on Windows.
     if os.name == "nt":
-        subprocess_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        subprocess_kwargs["creationflags"] = (
+            subprocess.CREATE_NO_WINDOW
+        )
+
 
     try:
-        result = subprocess.run(**subprocess_kwargs)  # nosec B603
+        result = subprocess.run(
+            **subprocess_kwargs
+        )
 
     except subprocess.TimeoutExpired as exc:
 
@@ -552,15 +575,21 @@ print(
             os.remove(temp_output_path)
 
         raise RuntimeError(
-            f"Frame {frame}: VTI export exceeded " f"the 30-minute safety timeout."
+            f"Frame {frame}: VTI export exceeded "
+            f"the 30-minute safety timeout."
         ) from exc
+
 
     if result.returncode != 0:
 
         if os.path.isfile(temp_output_path):
             os.remove(temp_output_path)
 
-        raise RuntimeError(f"Frame {frame}: VTK export failed:\n\n" f"{result.stderr}")
+        raise RuntimeError(
+            f"Frame {frame}: VTK export failed:\n\n"
+            f"{result.stderr}"
+        )
+
 
     if "VALID" not in result.stdout:
 
@@ -580,18 +609,24 @@ print(
 
 if not os.path.isfile(temp_output_path):
     raise RuntimeError(
-        f"Frame {frame}: temporary VTI was not created:\n" f"{temp_output_path}"
+        f"Frame {frame}: temporary VTI was not created:\n"
+        f"{temp_output_path}"
     )
 
 
-temp_size = os.path.getsize(temp_output_path)
+temp_size = os.path.getsize(
+    temp_output_path
+)
 
 if temp_size <= 0:
 
-    os.remove(temp_output_path)
+    os.remove(
+        temp_output_path
+    )
 
     raise RuntimeError(
-        f"Frame {frame}: temporary VTI is empty:\n" f"{temp_output_path}"
+        f"Frame {frame}: temporary VTI is empty:\n"
+        f"{temp_output_path}"
     )
 
 
@@ -614,7 +649,9 @@ except Exception as exc:
         os.remove(temp_output_path)
 
     raise RuntimeError(
-        f"Frame {frame}: failed to publish final VTI:\n" f"{output_path}\n\n" f"{exc}"
+        f"Frame {frame}: failed to publish final VTI:\n"
+        f"{output_path}\n\n"
+        f"{exc}"
     ) from exc
 
 
@@ -624,16 +661,22 @@ except Exception as exc:
 
 if not os.path.isfile(output_path):
     raise RuntimeError(
-        f"Frame {frame}: final VTI is missing after publish:\n" f"{output_path}"
+        f"Frame {frame}: final VTI is missing after publish:\n"
+        f"{output_path}"
     )
 
 
 if os.path.getsize(output_path) <= 0:
-    raise RuntimeError(f"Frame {frame}: final VTI is empty:\n" f"{output_path}")
+    raise RuntimeError(
+        f"Frame {frame}: final VTI is empty:\n"
+        f"{output_path}"
+    )
 
 
 # ============================================================
 # Register validated artifact with PDG
 # ============================================================
 
-work_item.addOutputFile(output_path)
+work_item.addOutputFile(
+    output_path
+)
