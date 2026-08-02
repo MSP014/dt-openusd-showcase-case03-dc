@@ -2,6 +2,40 @@
 
 ## 1. Unresolved Technical Debt
 
+### [TOOLING] Evaluate NVIDIA Agent Skills for Case 03 Development
+
+- **Status:** Deferred
+- **Severity:** Low (Developer Workflow / Optional Capability)
+- **Description:**
+  - The project currently uses local NVIDIA USD Code, Kit, and OmniUI MCP
+    servers through the repository helpers under `tools/mcp/`.
+  - The official [NVIDIA Agent Skills](https://github.com/NVIDIA/skills)
+    catalog is a separate capability layer and has not been evaluated or
+    integrated into the Case 03 development workflow.
+  - The currently relevant candidates appear to be
+    `omniverse-usd-performance-tuning`, `omniverse-realtime-viewer`, and,
+    conditionally, `omniverse-cad-to-simready`.
+- **Why Deferred:**
+  - The current priority is completing the active DTRS milestone, and the
+    existing MCP-backed workflow already covers active USD, Kit, and OmniUI
+    development needs.
+  - Installing skills without reviewing their triggers, workflow assumptions,
+    overlap, and maintenance model could create ambiguous guidance without
+    adding immediate project value.
+- **Action Plan:**
+  - [ ] Read the candidate `SKILL.md`, skill card, benchmark, references, and
+        declared boundaries.
+  - [ ] Compare each candidate with the existing MCP helper workflow and
+        current Case 03 project conventions.
+  - [ ] Select only skills that add a distinct, relevant capability; do not
+        install the entire NVIDIA catalog by default.
+  - [ ] Define routing and ownership where an official skill overlaps USD,
+        Kit, OmniUI, performance, or asset-preparation guidance.
+  - [ ] Install selected skills for the intended agent scope and validate them
+        on a bounded Case 03 task.
+  - [ ] Document the chosen update, provenance, and signature-verification
+        process without making Agent Skills a DTRS runtime dependency.
+
 ### [RUNTIME] Investigate Kit-CAE VTI Origin Loss and Retire Compatibility Shim
 
 - **Status:** Open
