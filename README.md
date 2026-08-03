@@ -7,10 +7,10 @@
 
 ## 📋 Project Overview
 
-**Digital Twin Runtime Suite** is the Case 03 runtime and technical showreel
-application for presenting a high-density Blackwell inference data hall through
-hydrated OpenUSD assets, synthetic telemetry, and staged Omniverse runtime
-capabilities.
+**Digital Twin Runtime Suite** is an interactive Omniverse application and the
+third project in a broader four-case technical showreel. It presents a
+high-density Blackwell inference data hall through hydrated OpenUSD assets,
+synthetic telemetry, and staged runtime capabilities.
 
 A **Reproducible Tech Pack** demonstrating a portfolio-grade **L1 Digital Twin** visualisation prototype of an AI Inference Farm.
 The current repository exercises authored geometry and Houdini velocity-field
@@ -49,7 +49,9 @@ velocity playback through Kit-CAE and NVIDIA Flow.*
 | ![Digital Twin Runtime Suite 0.4.0 - Runtime configuration](docs/img/dtrs_0.4.0/dtrs_0.4.0_03.png) | ![Digital Twin Runtime Suite 0.4.0 - Telemetry overview](docs/img/dtrs_0.4.0/dtrs_0.4.0_04.png) |
 | *Config tab with runtime asset, lighting, grid, camera, and telemetry-provider controls* | *Full-server telemetry hierarchy with a live synthetic Nominal workload state* |
 
-→ [Watch the server assembly preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
+→ [Watch the Digital Twin Runtime Suite preview](https://youtu.be/BeOx61VVE4I)
+
+→ [Watch the Blackwell Rig server assembly preview](https://youtu.be/W5ttjDyuSXk)
 
 ### Runtime Performance & Rendering Trade-offs
 
@@ -79,7 +81,7 @@ The Flow consumer is intentionally separated from source selection. This PoC
 proves VTI temporal substitution inside the runtime; it does not yet implement
 telemetry-to-cache state binding or an external live feed.
 
-→ [Watch the airflow preview video](https://youtu.be/lDswlLGkTQ8?si=JAtLdAwG9q-KcYMw)
+→ [Watch the Houdini airflow simulation preview](https://youtu.be/lDswlLGkTQ8)
 
 → See also: [Rack Airflow Budget](./docs/knowledge_base/rack_airflow_budget.md)
 
