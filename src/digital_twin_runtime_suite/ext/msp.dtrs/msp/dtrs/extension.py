@@ -205,7 +205,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
         self._controller = RuntimeController(config_path)
         telemetry_config_path = (
-            source_root / "configs" / "telemetry_provider.toml"
+            config_path.parent / "telemetry_provider.toml"
         ).resolve()
         self._telemetry_config_path = telemetry_config_path
         telemetry_config = TelemetryConfig.load(telemetry_config_path)

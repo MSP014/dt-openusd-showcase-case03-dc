@@ -185,7 +185,7 @@ Stage 3 implementation map:
 | `src/digital_twin_runtime_suite/app/telemetry/model.py` | `TelemetrySnapshot`, metric value model, workload/health constants, and Stage 3 metric ids. |
 | `src/digital_twin_runtime_suite/app/telemetry/config.py` | Load and merge `telemetry_provider.toml` with `telemetry_provider.local.toml`. |
 | `src/digital_twin_runtime_suite/app/telemetry/provider.py` | Synthetic provider, fixed provider tick, interpolation, jitter, freeze-independent latest snapshot state. |
-| `src/digital_twin_runtime_suite/configs/telemetry_provider.toml` | Packaged read-only base targets, ranges, jitter, default mode, and allowed refresh intervals. |
+| `configs/telemetry_provider.toml` | Read-only base targets, ranges, jitter, default mode, and allowed refresh intervals. |
 | `tests/test_telemetry_config.py` | Pure-Python tests for provider config loading, override merge, defaults, and invalid values. |
 | `tests/test_telemetry_provider.py` | Pure-Python tests for provider snapshots, cadence semantics, mode changes, freeze/resume display behaviour, deterministic seeded output, and range clamping. |
 
