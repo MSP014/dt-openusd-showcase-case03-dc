@@ -28,8 +28,9 @@ Current decisions already made:
 - The Telemetry tab exposes workload mode, refresh cadence, freeze/resume,
   hardware-grouped node metrics, derived power and thermal values, and
   intermittent Critical-mode throttling.
-- Packaged telemetry defaults remain read-only; operator tuning is persisted to
-  the ignored `telemetry_provider.local.toml` override.
+- Telemetry defaults remain read-only in `configs/telemetry_provider.toml`;
+  operator tuning is persisted to the ignored sibling
+  `configs/telemetry_provider.local.toml` override.
 - Stage 4 delivered topology-validated CPU fan motion. Stage 5 extends the
   same runtime contract through 11 explicit config-backed bindings for the CPU
   cooler, three GPU blowers, PSU, motherboard NVMe fan, three front P120 fans,

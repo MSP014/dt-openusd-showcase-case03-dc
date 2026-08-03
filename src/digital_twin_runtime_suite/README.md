@@ -30,10 +30,11 @@ Stage 5 config-backed server fan motion, and Stage 6 cached airflow playback.
 - `docs/` explains the architecture, contracts, and implementation decisions.
 - `assets/_external/` contains the heavy hydrated assets outside version
   control.
-- `configs/digital_twin_runtime_suite.toml` holds the current runtime
-  asset and lighting config.
-- `src/digital_twin_runtime_suite/configs/telemetry_provider.toml` holds the
-  packaged synthetic telemetry targets, ranges, jitter, and cadence.
+- `configs/digital_twin_runtime_suite.toml` holds the current runtime asset,
+  presentation, and airflow config.
+- `configs/telemetry_provider.toml` holds the synthetic telemetry targets,
+  ranges, jitter, and cadence. Both configs keep their ignored local overrides
+  beside the tracked defaults.
 - `tools/mcp/` provides a small NVIDIA Omniverse USD/Kit MCP helper for
   development-time API lookup.
 - External NVIDIA repositories such as `kit-usd-agents` remain outside this

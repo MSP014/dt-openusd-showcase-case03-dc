@@ -9,7 +9,7 @@ from digital_twin_runtime_suite.app.telemetry.config import (
     TelemetryConfig,
 )
 
-CONFIG_PATH = Path("src/digital_twin_runtime_suite/configs/telemetry_provider.toml")
+CONFIG_PATH = Path("configs/telemetry_provider.toml")
 
 
 def test_packaged_telemetry_config_loads_all_modes_and_metrics():

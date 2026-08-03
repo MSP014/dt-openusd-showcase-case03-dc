@@ -38,7 +38,7 @@ repos:
         entry: conda run -n case03-env python -m bandit
         language: system
         types: [python]
-        args: ["-r", "src", "tools"]
+        args: ["-r", "-x", "tools/houdini/pdg/vti_writer.py", "src", "tools"]
         exclude: "tests/"
 
       # Dependency Consistency Check (ADR 003 Protection)

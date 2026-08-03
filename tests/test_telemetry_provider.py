@@ -12,7 +12,7 @@ from digital_twin_runtime_suite.app.telemetry.provider import SyntheticTelemetry
 
 # isort: on
 
-CONFIG_PATH = Path("src/digital_twin_runtime_suite/configs/telemetry_provider.toml")
+CONFIG_PATH = Path("configs/telemetry_provider.toml")
 
 
 class AdvancingClock:
