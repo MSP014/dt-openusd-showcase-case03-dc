@@ -6,6 +6,7 @@ import asyncio
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event, Lock
 from typing import Callable
 
 # isort: off
@@ -28,6 +29,8 @@ from digital_twin_runtime_suite.app.front_panel_indicators import (
     front_panel_indicator_state,
 )
 from digital_twin_runtime_suite.app.flow.performance import FlowPerformanceSample
+from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
+from digital_twin_runtime_suite.app.flow.validation_cache import SessionValidationCache
 from digital_twin_runtime_suite.app.flow.runtime import (
     FlowRuntimeMixin,
     SimulationCacheResult,
@@ -82,6 +85,8 @@ class RuntimeController(FlowRuntimeMixin):
     FLOW_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
     FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS = 30.0
     FLOW_DETACH_SETTLE_UPDATE_COUNT = 3
+    FLOW_DETACH_OPERATOR_QUIESCE_SECONDS = 0.75
+    FLOW_DETACH_OPERATOR_QUIESCE_TIMEOUT_SECONDS = 5.0
     KIT_CAE_FRONT_INTAKE_BINDING_IDS = frozenset(
         {"front_p120_01", "front_p120_02", "front_p120_03"}
     )
@@ -122,11 +127,19 @@ class RuntimeController(FlowRuntimeMixin):
         ) = None
         self._flow_density_cell_size: float | None = None
         self._flow_lifecycle_state = "DETACHED"
+        self._flow_attach_cancel_event: Event | None = None
+        self._flow_kit_cae_operator_lock = Lock()
+        self._flow_kit_cae_active_operator_paths: set[str] = set()
+        self._flow_kit_cae_operator_subscriptions: tuple[object, ...] = ()
         self._flow_temporal_asset_hashes: dict[Path, str] = {}
         self._flow_temporal_records: list[dict[str, object]] = []
         self._flow_temporal_failure: dict[str, str] | None = None
         self._flow_temporal_end_time_code: float | None = None
         self._flow_temporal_sample_time_codes: tuple[float, ...] = ()
+        self._flow_temporal_proof_task: asyncio.Task | None = None
+        self._flow_temporal_proof_generation = 0
+        self._flow_temporal_progress = TemporalProofProgress()
+        self._flow_validation_cache = SessionValidationCache()
         self._flow_performance_task: asyncio.Task | None = None
         self._flow_performance_session_id = 0
         self._flow_performance_attached_at: float | None = None
@@ -140,6 +153,8 @@ class RuntimeController(FlowRuntimeMixin):
         """Reload and return the current runtime config."""
 
         self._stop_flow_performance_sampler()
+        self._stop_kit_cae_operator_tracking()
+        self._flow_validation_cache.clear()
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
@@ -148,6 +163,7 @@ class RuntimeController(FlowRuntimeMixin):
         self._flow_world_bounds = None
         self._flow_density_cell_size = None
         self._flow_lifecycle_state = "DETACHED"
+        self._flow_attach_cancel_event = None
         self._flow_temporal_asset_hashes = {}
         self._flow_temporal_records = []
         self._flow_temporal_failure = None
@@ -326,6 +342,7 @@ class RuntimeController(FlowRuntimeMixin):
             if status_callback:
                 status_callback(message)
 
+        import carb
         import omni.kit.app
         import omni.usd
 
@@ -367,6 +384,14 @@ class RuntimeController(FlowRuntimeMixin):
             preflight_result = run_usd_preflight(stage, self.config)
             preflight_message = f"; {preflight_result.format_summary()}"
             if preflight_result.has_errors:
+                # The sidebar is intentionally compact; write every finding to the
+                # startup log so a missing composition asset is immediately actionable.
+                carb.log_error(
+                    preflight_result.format_diagnostics(
+                        asset_path=asset_path,
+                        root_identifier=root_identifier,
+                    )
+                )
                 set_status(preflight_result.format_summary())
                 return LoadResult(
                     success=False,

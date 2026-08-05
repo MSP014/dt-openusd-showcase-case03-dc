@@ -1,6 +1,10 @@
 from pathlib import Path
 
+import pytest
+
+from digital_twin_runtime_suite.app.flow import temporal
 from digital_twin_runtime_suite.app.flow.temporal import (
+    TemporalVtiValidationCancelled,
     kit_cae_temporal_loop_proof_summary,
     kit_cae_vti_source_frame,
 )
@@ -37,3 +41,31 @@ def test_temporal_loop_proof_requires_sixteen_distinct_sources_and_closure(
     assert summary["forward_transitions"] == 15
     assert summary["loop_transitions"] == 1
     assert summary["loop_closure"] is True
+
+
+def test_temporal_vti_validation_stops_between_completed_samples(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A Detach request must not make the worker read the remaining VTI assets."""
+
+    velocity_paths = tuple(tmp_path / f"velocity_{index}.vti" for index in range(3))
+    read_assets: list[Path] = []
+
+    def read_metadata(path: Path, _field_name: str) -> dict[str, object]:
+        read_assets.append(path)
+        return {
+            "dimensions": (2, 2, 2),
+            "spacing": (1.0, 1.0, 1.0),
+            "vti_header_origin": (0.0, 0.0, 0.0),
+        }
+
+    monkeypatch.setattr(temporal, "read_kit_cae_vti_metadata", read_metadata)
+
+    with pytest.raises(TemporalVtiValidationCancelled):
+        temporal.validate_kit_cae_temporal_vti_contract(
+            velocity_paths,
+            "vel",
+            cancel_requested=lambda: len(read_assets) >= 1,
+        )
+
+    assert read_assets == [velocity_paths[0]]

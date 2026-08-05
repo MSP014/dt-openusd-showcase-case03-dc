@@ -56,6 +56,31 @@ class UsdPreflightResult:
 
         return not self.has_errors
 
+    def format_diagnostics(
+        self,
+        asset_path: Path | str = "",
+        root_identifier: str = "",
+    ) -> str:
+        """Format every preflight finding for startup diagnostics, not the UI."""
+
+        lines = [
+            "=== DTRS / USD PREFLIGHT ===",
+            f"Result:                 {self.format_summary()}",
+        ]
+        if asset_path:
+            lines.append(f"Asset:                  {asset_path}")
+        if root_identifier:
+            lines.append(f"Root layer:             {root_identifier}")
+        lines.append("Findings:")
+        for finding in self.findings:
+            lines.append(
+                f"  {finding.severity.upper()} | {finding.code} | {finding.message}"
+            )
+            if finding.path:
+                lines.append(f"    Path: {finding.path}")
+        lines.append("=" * 63)
+        return "\n".join(lines)
+
     def format_summary(self) -> str:
         """Return a compact operator-facing summary."""
 

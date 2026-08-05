@@ -1,6 +1,6 @@
 # Pre-commit Guardrails - Case 03 (Data Center)
 # Houdini PDG Script-node source is stored verbatim and validated in Houdini.
-exclude: ^tools/houdini/pdg/vti_writer\.py$
+# exclude: ^tools/houdini/pdg/vti_writer\.py$
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

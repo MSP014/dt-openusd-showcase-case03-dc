@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -509,6 +512,62 @@ def test_kit_cae_temporal_velocity_samples_author_manifest_derived_cadence(tmp_p
     ] == [path.as_posix() for path in paths]
 
 
+def test_kit_cae_temporal_velocity_samples_yield_between_batches(tmp_path):
+    from pxr import Sdf, Usd, UsdGeom
+
+    from digital_twin_runtime_suite.app.flow.temporal import (
+        author_kit_cae_temporal_velocity_samples_in_batches,
+    )
+
+    stage = Usd.Stage.CreateInMemory()
+    field = UsdGeom.Xform.Define(stage, "/DTRS_HoudiniVelocity/PointData/vel")
+    file_names_attr = field.GetPrim().CreateAttribute(
+        "fileNames",
+        Sdf.ValueTypeNames.AssetArray,
+    )
+
+    class FakeFieldArray:
+        def __init__(self, prim):
+            self._prim = prim
+
+        def GetFileNamesAttr(self):
+            return self._prim.GetAttribute("fileNames")
+
+    class FakeCaeVtk:
+        FieldArray = FakeFieldArray
+
+    paths = tuple(
+        tmp_path / f"server_airflow_velocity_{index}.vti" for index in range(5)
+    )
+    yields = []
+    progress = []
+
+    async def next_update():
+        yields.append("update")
+
+    time_codes = asyncio.run(
+        author_kit_cae_temporal_velocity_samples_in_batches(
+            field.GetPrim(),
+            paths,
+            50.0,
+            0.2,
+            FakeCaeVtk,
+            Sdf,
+            Usd,
+            next_update,
+            2,
+            lambda completed, total: progress.append((completed, total)),
+        )
+    )
+
+    assert time_codes == (0.0, 10.0, 20.0, 30.0, 40.0)
+    assert yields == ["update", "update"]
+    assert progress == [(2, 5), (4, 5)]
+    assert [
+        file_names_attr.Get(Usd.TimeCode(time_code))[0].path for time_code in time_codes
+    ] == [path.as_posix() for path in paths]
+
+
 def test_kit_cae_temporal_loop_proof_requires_all_distinct_sources_and_closure(
     tmp_path,
 ):
@@ -596,3 +655,248 @@ def test_kit_cae_vti_origin_compatibility_opinion_uses_session_layer():
 
 def test_legacy_flow_presentation_path_is_removed():
     assert not hasattr(RuntimeController, "_author_kit_cae_flow_presentation")
+
+
+def _temporal_progress_controller():
+    from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
+
+    controller = object.__new__(RuntimeController)
+    controller._flow_temporal_proof_generation = 7
+    controller._flow_temporal_proof_task = None
+    controller._flow_temporal_progress = TemporalProofProgress(generation_id=7)
+    return controller
+
+
+def test_temporal_proof_progress_uses_real_sample_percentage():
+    from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
+
+    progress = TemporalProofProgress(validated_sample_count=37, total_sample_count=80)
+
+    assert progress.percentage == 46
+
+
+def test_temporal_proof_progress_ignores_stale_generation():
+    from digital_twin_runtime_suite.app.flow.progress import TemporalProofState
+
+    controller = _temporal_progress_controller()
+    started_at = time.monotonic()
+
+    assert (
+        controller._update_temporal_proof_progress(
+            generation_id=6,
+            state=TemporalProofState.RUNNING,
+            total_sample_count=80,
+            validated_sample_count=37,
+            current_asset_name="server_airflow_velocity_1371.vti",
+            started_at=started_at,
+        )
+        is False
+    )
+    assert controller.temporal_proof_progress().validated_sample_count == 0
+
+    assert (
+        controller._update_temporal_proof_progress(
+            generation_id=7,
+            state=TemporalProofState.RUNNING,
+            total_sample_count=80,
+            validated_sample_count=37,
+            current_asset_name="server_airflow_velocity_1371.vti",
+            started_at=started_at,
+        )
+        is True
+    )
+    assert controller.temporal_proof_progress().validated_sample_count == 37
+
+
+def test_temporal_proof_progress_is_cancelled_on_teardown():
+    from digital_twin_runtime_suite.app.flow.progress import TemporalProofState
+
+    controller = _temporal_progress_controller()
+    controller._set_temporal_proof_progress(
+        state=TemporalProofState.RUNNING,
+        generation_id=7,
+        total_sample_count=80,
+        validated_sample_count=18,
+        current_asset_name="server_airflow_velocity_1181.vti",
+        started_at=time.monotonic(),
+    )
+
+    controller._cancel_kit_cae_temporal_proof()
+
+    progress = controller.temporal_proof_progress()
+    assert progress.state is TemporalProofState.CANCELLED
+    assert progress.validated_sample_count == 18
+    assert progress.generation_id == 8
+
+
+def test_temporal_vti_validation_wrapper_forwards_worker_progress(
+    monkeypatch,
+    tmp_path,
+):
+    from digital_twin_runtime_suite.app.flow import temporal
+
+    paths = (tmp_path / "server_airflow_velocity_1001.vti",)
+    from queue import SimpleQueue
+
+    progress_queue = SimpleQueue()
+
+    received_cancel_requested = []
+
+    def validate(
+        velocity_paths,
+        field_name,
+        progress_callback,
+        cancel_requested=None,
+    ):
+        received_cancel_requested.append(cancel_requested)
+        progress_callback(1, 1, velocity_paths[0].name)
+        return {"dimensions": (1, 1, 1)}, True
+
+    monkeypatch.setattr(temporal, "validate_kit_cae_temporal_vti_contract", validate)
+
+    metadata, grid_match = RuntimeController._validate_kit_cae_temporal_vti_contract(
+        paths,
+        "vel",
+        lambda completed, total, asset_name: progress_queue.put(
+            (completed, total, asset_name)
+        ),
+    )
+
+    assert metadata["dimensions"] == (1, 1, 1)
+    assert grid_match is True
+    assert progress_queue.get_nowait() == (1, 1, "server_airflow_velocity_1001.vti")
+    assert received_cancel_requested == [None]
+
+
+def _write_airflow_validation_dataset(tmp_path: Path):
+    from digital_twin_runtime_suite.app.airflow_dataset import (
+        AirflowDatasetSelector,
+        discover_airflow_dataset,
+    )
+
+    directory = tmp_path / "airflows" / "server" / "load_normal"
+    directory.mkdir(parents=True)
+    (directory / "manifest.toml").write_text(
+        "\n".join(
+            (
+                'scope = "server"',
+                'state = "load_normal"',
+                "source_fps = 50",
+                "sample_step_frames = 10",
+                "sample_rate_hz = 5",
+                "sample_count = 2",
+                "grid = [2, 2, 2]",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    for frame, content in ((1001, b"first"), (1011, b"second")):
+        (directory / f"server_airflow_velocity_{frame}.vti").write_bytes(content)
+    selector = AirflowDatasetSelector(
+        root="airflows",
+        scope="server",
+        state="load_normal",
+    )
+    return discover_airflow_dataset(tmp_path, selector)
+
+
+def test_session_validation_signature_tracks_manifest_and_vti_metadata(tmp_path):
+    from digital_twin_runtime_suite.app.airflow_dataset import (
+        AirflowDatasetSelector,
+        discover_airflow_dataset,
+    )
+    from digital_twin_runtime_suite.app.flow.validation_cache import (
+        build_dataset_validation_signature,
+    )
+
+    dataset = _write_airflow_validation_dataset(tmp_path)
+    initial = build_dataset_validation_signature(dataset, "vel")
+    unchanged = build_dataset_validation_signature(dataset, "vel")
+    assert unchanged == initial
+
+    first_sample = dataset.velocity_vti_sequence_paths[0]
+    first_sample.write_bytes(b"first sample changed")
+    changed_sample = build_dataset_validation_signature(dataset, "vel")
+    assert changed_sample != initial
+
+    dataset.manifest_path.write_text(
+        dataset.manifest_path.read_text(encoding="utf-8") + "# changed\n",
+        encoding="utf-8",
+    )
+    changed_manifest = build_dataset_validation_signature(dataset, "vel")
+    assert changed_manifest != changed_sample
+    assert build_dataset_validation_signature(dataset, "velocity") != changed_manifest
+
+    rediscovered = discover_airflow_dataset(
+        tmp_path,
+        AirflowDatasetSelector(root="airflows", scope="server", state="load_normal"),
+    )
+    assert build_dataset_validation_signature(rediscovered, "vel") != initial
+
+
+def test_session_validation_cache_reuses_only_successful_receipts(tmp_path):
+    from digital_twin_runtime_suite.app.flow.validation_cache import (
+        SessionValidationCache,
+        build_dataset_validation_signature,
+    )
+
+    dataset = _write_airflow_validation_dataset(tmp_path)
+    signature = build_dataset_validation_signature(dataset, "vel")
+    cache = SessionValidationCache()
+
+    miss = cache.lookup(signature)
+    assert miss.result == "MISS"
+    assert miss.preflight is None
+    assert miss.temporal_proof is None
+
+    cache.store_preflight(signature, {"dimensions": (2, 2, 2)}, grid_match=True)
+    preflight_hit = cache.lookup(signature)
+    assert preflight_hit.result == "HIT"
+    assert preflight_hit.preflight is not None
+    assert preflight_hit.temporal_proof is None
+
+    cache.store_temporal_proof(
+        signature, validated_sample_count=2, duration_seconds=1.2
+    )
+    full_hit = cache.lookup(signature)
+    assert full_hit.temporal_proof is not None
+    assert full_hit.temporal_proof.validated_sample_count == 2
+
+    dataset.velocity_vti_sequence_paths[1].write_bytes(b"changed second sample")
+    invalidated_signature = build_dataset_validation_signature(dataset, "vel")
+    invalidated = cache.lookup(invalidated_signature)
+    assert invalidated.result == "INVALIDATED"
+    assert invalidated.preflight is None
+    assert invalidated.temporal_proof is None
+
+    cache.clear()
+    assert cache.lookup(invalidated_signature).result == "MISS"
+
+
+def test_attach_cancellation_request_sets_only_the_active_generation() -> None:
+    """The UI may request cancellation while a background VTI preflight is running."""
+
+    controller = RuntimeController("configs/digital_twin_runtime_suite.toml")
+    controller._flow_lifecycle_state = "ATTACHING"
+    controller._flow_attach_cancel_event = Event()
+
+    assert controller.request_flow_attach_cancellation() is True
+    assert controller._flow_attach_cancel_event.is_set() is True
+
+    controller._flow_lifecycle_state = "DETACHED"
+    assert controller.request_flow_attach_cancellation() is False
+
+
+def test_kit_cae_operator_event_path_uses_single_argument_event_get() -> None:
+    """Carbonite events accept only the key argument in Event.get()."""
+
+    class SingleArgumentEvent:
+        def get(self, key_name: str):
+            assert key_name == "prim_path"
+            return "/DTRS_KitCAE/DataSetEmitter"
+
+    assert (
+        RuntimeController._kit_cae_operator_event_path(SingleArgumentEvent())
+        == "/DTRS_KitCAE/DataSetEmitter"
+    )
