@@ -7,6 +7,8 @@ import json
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
+from queue import Empty, SimpleQueue
+from threading import Event
 from typing import Callable
 
 from digital_twin_runtime_suite.app.airflow_dataset import (
@@ -26,7 +28,17 @@ from digital_twin_runtime_suite.app.flow.diagnostics import FlowDiagnosticsMixin
 from digital_twin_runtime_suite.app.flow.performance import (
     FlowPerformanceMixin,
 )
+from digital_twin_runtime_suite.app.flow.progress import (
+    TemporalProofProgress,
+    TemporalProofResultSource,
+    TemporalProofState,
+)
 from digital_twin_runtime_suite.app.flow.temporal import FlowTemporalMixin
+from digital_twin_runtime_suite.app.flow.validation_cache import (
+    DatasetValidationSignature,
+    ValidationCacheLookup,
+    build_dataset_validation_signature,
+)
 from digital_twin_runtime_suite.app.kit_cae_flow_parity import (
     capture_flow_scene,
     write_flow_snapshot,
@@ -51,6 +63,256 @@ class FlowRuntimeMixin(
     """Own Flow lifecycle methods while RuntimeController keeps the public facade."""
 
     EMITTER_REBUILD_SETTLE_UPDATES = 3
+    TEMPORAL_AUTHORING_BATCH_SIZE = 8
+
+    @staticmethod
+    def _log_kit_cae_attach_phase(carb, phase: str, started_at: float) -> None:
+        """Record a measured Attach phase without affecting runtime state."""
+
+        elapsed_ms = (time.monotonic() - started_at) * 1000.0
+        carb.log_warn(f"DTRS FLOW ATTACH PHASE | {phase} | {elapsed_ms:.0f} ms")
+
+    def _log_dataset_validation_cache(
+        self,
+        carb,
+        lookup: ValidationCacheLookup,
+    ) -> None:
+        """Record the cache decision without enumerating all VTI paths."""
+
+        carb.log_warn(
+            self._format_flow_log_block(
+                "DATASET VALIDATION CACHE",
+                (
+                    (
+                        "",
+                        (
+                            ("Selector:", lookup.signature.selector),
+                            ("Result:", lookup.result),
+                            ("Reason:", lookup.reason),
+                            ("Signature:", lookup.signature.compact_digest),
+                            ("Preflight:", "REUSED" if lookup.preflight else "RUN"),
+                            (
+                                "Temporal proof:",
+                                "REUSED" if lookup.temporal_proof else "RUN",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def temporal_proof_progress(self) -> TemporalProofProgress:
+        """Return the latest plain-data temporal validation snapshot."""
+
+        return self._flow_temporal_progress
+
+    def _set_temporal_proof_progress(
+        self,
+        *,
+        state: TemporalProofState,
+        generation_id: int,
+        total_sample_count: int,
+        validated_sample_count: int = 0,
+        current_sample_index: int | None = None,
+        current_asset_name: str | None = None,
+        started_at: float | None = None,
+        loop_closure_state: str | None = None,
+        failure_reason: str | None = None,
+        result_source: TemporalProofResultSource = TemporalProofResultSource.LIVE,
+    ) -> None:
+        """Replace progress atomically with values safe for OmniUI polling."""
+
+        now = time.monotonic()
+        self._flow_temporal_progress = TemporalProofProgress(
+            state=state,
+            result_source=result_source,
+            validated_sample_count=validated_sample_count,
+            total_sample_count=total_sample_count,
+            current_sample_index=current_sample_index,
+            current_asset_name=current_asset_name,
+            elapsed_seconds=(now - started_at) if started_at is not None else 0.0,
+            loop_closure_state=loop_closure_state,
+            failure_reason=failure_reason,
+            generation_id=generation_id,
+            last_progress_at=now,
+        )
+
+    def _update_temporal_proof_progress(
+        self,
+        *,
+        generation_id: int,
+        state: TemporalProofState,
+        total_sample_count: int,
+        validated_sample_count: int,
+        current_asset_name: str | None,
+        started_at: float,
+        loop_closure_state: str | None = None,
+    ) -> bool:
+        """Ignore stale proof tasks before they can replace current DTRS state."""
+
+        if generation_id != self._flow_temporal_proof_generation:
+            return False
+        self._set_temporal_proof_progress(
+            state=state,
+            generation_id=generation_id,
+            total_sample_count=total_sample_count,
+            validated_sample_count=validated_sample_count,
+            current_sample_index=validated_sample_count - 1,
+            current_asset_name=current_asset_name,
+            started_at=started_at,
+            loop_closure_state=loop_closure_state,
+        )
+        return True
+
+    def _cancel_kit_cae_temporal_proof(self) -> None:
+        """Invalidate and cancel the proof bound to the previous Flow session."""
+
+        self._flow_temporal_proof_generation += 1
+        previous_progress = self._flow_temporal_progress
+        if previous_progress.state in {
+            TemporalProofState.RUNNING,
+            TemporalProofState.CHECKING_LOOP_CLOSURE,
+        }:
+            self._flow_temporal_progress = replace(
+                previous_progress,
+                state=TemporalProofState.CANCELLED,
+                generation_id=self._flow_temporal_proof_generation,
+                last_progress_at=time.monotonic(),
+            )
+        task = self._flow_temporal_proof_task
+        self._flow_temporal_proof_task = None
+        if task and not task.done():
+            task.cancel()
+
+    def _schedule_kit_cae_temporal_proof(
+        self,
+        *,
+        app,
+        carb,
+        stage,
+        timeline,
+        velocity_paths: tuple[Path, ...],
+        field_prim,
+        dataset_emitter,
+        flow_environment_path: str,
+        dataset_emitter_path: str,
+        origin_match: bool,
+        grid_match: bool,
+        cae_vtk,
+        Usd,
+        status_callback: StatusCallback | None,
+        dataset_signature: DatasetValidationSignature,
+    ) -> None:
+        """Keep the full Stage 6 proof available without extending Attach."""
+
+        self._cancel_kit_cae_temporal_proof()
+        generation = self._flow_temporal_proof_generation
+        started_at = time.monotonic()
+        self._set_temporal_proof_progress(
+            state=TemporalProofState.RUNNING,
+            generation_id=generation,
+            total_sample_count=len(velocity_paths),
+            validated_sample_count=1,
+            current_sample_index=0,
+            current_asset_name=velocity_paths[0].name,
+            started_at=started_at,
+        )
+
+        def update_progress(validated_count, asset, checking_loop) -> None:
+            if generation != self._flow_temporal_proof_generation:
+                return
+            self._update_temporal_proof_progress(
+                generation_id=generation,
+                state=(
+                    TemporalProofState.CHECKING_LOOP_CLOSURE
+                    if checking_loop
+                    else TemporalProofState.RUNNING
+                ),
+                total_sample_count=len(velocity_paths),
+                validated_sample_count=validated_count,
+                current_asset_name=asset.name,
+                started_at=started_at,
+                loop_closure_state=("CHECKING" if checking_loop else None),
+            )
+
+        async def monitor() -> None:
+            try:
+                passed = await self._monitor_kit_cae_temporal_proof(
+                    app=app,
+                    carb=carb,
+                    stage=stage,
+                    timeline=timeline,
+                    velocity_paths=velocity_paths,
+                    field_prim=field_prim,
+                    dataset_emitter=dataset_emitter,
+                    flow_environment_path=flow_environment_path,
+                    dataset_emitter_path=dataset_emitter_path,
+                    origin_match=origin_match,
+                    grid_match=grid_match,
+                    cae_vtk=cae_vtk,
+                    Usd=Usd,
+                    progress_callback=update_progress,
+                )
+            except asyncio.CancelledError:
+                carb.log_info("DTRS FLOW TEMPORAL PROOF | cancelled")
+                raise
+            except Exception as error:  # noqa: BLE001
+                carb.log_error(f"DTRS FLOW TEMPORAL PROOF | failed: {error}")
+                if generation == self._flow_temporal_proof_generation:
+                    self._flow_temporal_failure = {"reason": str(error)}
+                    self._set_temporal_proof_progress(
+                        state=TemporalProofState.FAILED,
+                        generation_id=generation,
+                        total_sample_count=len(velocity_paths),
+                        failure_reason=str(error),
+                    )
+                    if status_callback:
+                        status_callback("Airflow active · Validation failed")
+                return
+            finally:
+                if generation == self._flow_temporal_proof_generation:
+                    self._flow_temporal_proof_task = None
+
+            if (
+                generation != self._flow_temporal_proof_generation
+                or self._flow_lifecycle_state != "ATTACHED"
+            ):
+                return
+            self._set_temporal_proof_progress(
+                state=(
+                    TemporalProofState.PASSED if passed else TemporalProofState.FAILED
+                ),
+                generation_id=generation,
+                total_sample_count=len(velocity_paths),
+                validated_sample_count=len(velocity_paths),
+                current_sample_index=len(velocity_paths) - 1,
+                current_asset_name=velocity_paths[-1].name,
+                started_at=started_at,
+                loop_closure_state=("PASSED" if passed else "FAILED"),
+                failure_reason=None if passed else "See temporal validation log.",
+            )
+            if passed:
+                # Store only after the task survived generation/lifecycle checks above;
+                # a cancelled or stale proof must never certify a later Attach.
+                receipt = self._flow_validation_cache.store_temporal_proof(
+                    dataset_signature,
+                    validated_sample_count=len(velocity_paths),
+                    duration_seconds=time.monotonic() - started_at,
+                )
+                carb.log_warn(
+                    "DTRS FLOW DATASET VALIDATION CACHE | "
+                    "Temporal receipt stored | signature="
+                    + receipt.signature.compact_digest
+                )
+            carb.log_info(
+                "DTRS FLOW TEMPORAL VALIDATION | " + ("passed" if passed else "failed")
+            )
+            if status_callback:
+                status_callback(
+                    "Airflow active · Validation " + ("passed" if passed else "failed")
+                )
+
+        self._flow_temporal_proof_task = asyncio.ensure_future(monitor())
 
     async def _attach_kit_cae_airflow_in_kit(
         self,
@@ -131,6 +393,8 @@ class FlowRuntimeMixin(
             return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
 
         self._flow_lifecycle_state = "ATTACHING"
+        self._flow_attach_cancel_event = Event()
+        self._start_kit_cae_operator_tracking()
         self._stop_flow_performance_sampler()
         self._log_flow_performance_event(
             carb,
@@ -155,24 +419,115 @@ class FlowRuntimeMixin(
         session_layer = stage.GetSessionLayer()
         session_layer.timeCodesPerSecond = float(stage.GetTimeCodesPerSecond())
         stage.SetEditTarget(session_layer)
+        temporal_proof_ready = False
+        dataset_signature = None
+        validation_cache_lookup = None
         try:
+            dataset_signature = build_dataset_validation_signature(
+                airflow_dataset,
+                cache.velocity_field_name,
+            )
+            validation_cache_lookup = self._flow_validation_cache.lookup(
+                dataset_signature
+            )
+            self._log_dataset_validation_cache(carb, validation_cache_lookup)
+            if validation_cache_lookup.preflight:
+                metadata = dict(validation_cache_lookup.preflight.metadata)
+                grid_match = validation_cache_lookup.preflight.grid_match
+                if status_callback:
+                    status_callback(
+                        "Preparing airflow · Verified this session"
+                        if validation_cache_lookup.temporal_proof
+                        else "Preparing airflow · Preflight reused"
+                    )
+                preflight_started_at = time.monotonic()
+                self._log_kit_cae_attach_phase(
+                    carb,
+                    "VTI preflight | session cache hit",
+                    preflight_started_at,
+                )
+            else:
+                if status_callback:
+                    status_callback(
+                        f"Preparing airflow · VTI 0/{len(velocity_paths)} · 0%"
+                    )
+                preflight_started_at = time.monotonic()
+                preflight_updates = SimpleQueue()
+
+                # The worker sends only plain VTI facts. The Kit coroutine owns
+                # status updates and cache mutation after the result is accepted.
+                preflight_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._validate_kit_cae_temporal_vti_contract,
+                        velocity_paths,
+                        cache.velocity_field_name,
+                        lambda completed, total, asset_name: preflight_updates.put(
+                            (completed, total, asset_name)
+                        ),
+                        cancel_requested=self._flow_attach_cancel_event.is_set,
+                    )
+                )
+                while not preflight_task.done():
+                    try:
+                        completed, total, _asset_name = preflight_updates.get_nowait()
+                        if status_callback:
+                            status_callback(
+                                f"Preparing airflow · VTI {completed}/{total} · "
+                                f"{round(100 * completed / total)}%"
+                            )
+                    except Empty:
+                        pass
+                    await app.next_update_async()
+                metadata, grid_match = await preflight_task
+                while not preflight_updates.empty():
+                    completed, total, _asset_name = preflight_updates.get_nowait()
+                    if status_callback:
+                        status_callback(
+                            f"Preparing airflow · VTI {completed}/{total} · "
+                            f"{round(100 * completed / total)}%"
+                        )
+                validate_airflow_dataset_grid(
+                    airflow_dataset,
+                    tuple(metadata["dimensions"]),
+                )
+                receipt = self._flow_validation_cache.store_preflight(
+                    dataset_signature,
+                    metadata,
+                    grid_match,
+                )
+                carb.log_warn(
+                    "DTRS FLOW DATASET VALIDATION CACHE | "
+                    "Preflight receipt stored | "
+                    f"signature={receipt.signature.compact_digest} | "
+                    f"samples={len(velocity_paths)}"
+                )
+                self._log_kit_cae_attach_phase(
+                    carb,
+                    "VTI preflight",
+                    preflight_started_at,
+                )
+            if status_callback:
+                status_callback("Importing Houdini velocity VTI through Kit-CAE")
+            import_started_at = time.monotonic()
             if stage.GetPrimAtPath(runtime_root).IsValid():
                 stage.RemovePrim(runtime_root)
             await import_to_stage(str(velocity_path), import_root)
             await app.next_update_async()
+            self._log_kit_cae_attach_phase(
+                carb,
+                "initial VTI import",
+                import_started_at,
+            )
 
-            metadata, grid_match = self._validate_kit_cae_temporal_vti_contract(
-                velocity_paths,
-                cache.velocity_field_name,
-            )
-            validate_airflow_dataset_grid(
-                airflow_dataset,
-                tuple(metadata["dimensions"]),
-            )
             dataset_prim = stage.GetPrimAtPath(dataset_path)
             field_prim = stage.GetPrimAtPath(field_path)
+            if status_callback:
+                status_callback(
+                    f"Activating airflow · USD 0/{len(velocity_paths)} · 0%"
+                )
+            authoring_started_at = time.monotonic()
             self._flow_temporal_sample_time_codes = (
-                self._author_kit_cae_temporal_velocity_samples(
+                await flow_temporal.author_kit_cae_temporal_velocity_samples_in_batches(
                     field_prim,
                     velocity_paths,
                     stage.GetTimeCodesPerSecond(),
@@ -180,7 +535,25 @@ class FlowRuntimeMixin(
                     cae_vtk,
                     Sdf,
                     Usd,
+                    app.next_update_async,
+                    self.TEMPORAL_AUTHORING_BATCH_SIZE,
+                    (
+                        lambda completed, total: (
+                            status_callback(
+                                "Activating airflow · USD "
+                                f"{completed}/{total} · "
+                                f"{round(100 * completed / total)}%"
+                            )
+                            if status_callback
+                            else None
+                        )
+                    ),
                 )
+            )
+            self._log_kit_cae_attach_phase(
+                carb,
+                "temporal USD authoring",
+                authoring_started_at,
             )
             self._flow_temporal_end_time_code = (
                 self._flow_temporal_sample_time_codes[-1]
@@ -211,7 +584,8 @@ class FlowRuntimeMixin(
             )
 
             if status_callback:
-                status_callback("Creating Kit-CAE Flow environment")
+                status_callback("Activating airflow · Waiting for Flow")
+            flow_readiness_started_at = time.monotonic()
             await execute_command(
                 "CreateCaeVizBoundingBox",
                 dataset_paths=[dataset_path],
@@ -348,6 +722,11 @@ class FlowRuntimeMixin(
             for _ in range(12):
                 await app.next_update_async()
             timeline_time_after = float(timeline.get_current_time())
+            self._log_kit_cae_attach_phase(
+                carb,
+                "initial Flow readiness",
+                flow_readiness_started_at,
+            )
             origin_match = self._kit_cae_vectors_match(
                 metadata["vti_header_origin"],
                 origin_after_dtrs_composition["origin"],
@@ -412,23 +791,8 @@ class FlowRuntimeMixin(
                     grid_match=grid_match,
                     verbose=cache.temporal_debug_logging,
                 )
-                temporal_proof_passed = await self._monitor_kit_cae_temporal_proof(
-                    app=app,
-                    carb=carb,
-                    stage=stage,
-                    timeline=timeline,
-                    velocity_paths=velocity_paths,
-                    field_prim=field_prim,
-                    dataset_emitter=emitter_prim,
-                    flow_environment_path=flow_environment_path,
-                    dataset_emitter_path=dataset_emitter_path,
-                    origin_match=origin_match,
-                    grid_match=grid_match,
-                    cae_vtk=cae_vtk,
-                    Usd=Usd,
-                )
+                temporal_proof_ready = True
             else:
-                temporal_proof_passed = False
                 dav_origin_trace = (
                     await flow_validation.trace_kit_cae_dav_velocity_dataset(
                         emitter_prim,
@@ -480,6 +844,12 @@ class FlowRuntimeMixin(
                 boundary_emitter_path=boundary_emitter_path,
                 dataset_emitter_path=dataset_emitter_path,
             )
+        except flow_temporal.TemporalVtiValidationCancelled:
+            # The worker has returned before any importer or Flow prim is authored.
+            # Keep session validation receipts untouched because no full preflight ran.
+            carb.log_info("DTRS FLOW ATTACH | cancelled during VTI preflight")
+            self._clear_flow_runtime_state()
+            return SimulationCacheResult(False, "Airflow preparation cancelled.")
         except Exception as error:
             carb.log_error(f"DTRS Kit-CAE Flow probe failed: {error}")
             self._flow_airflow_simulate_path = None
@@ -505,6 +875,7 @@ class FlowRuntimeMixin(
             await app.next_update_async()
             return SimulationCacheResult(False, f"Kit-CAE airflow failed: {error}")
         finally:
+            self._flow_attach_cancel_event = None
             stage.SetEditTarget(previous_target)
 
         self._simulation_cache_contract = None
@@ -512,16 +883,55 @@ class FlowRuntimeMixin(
         self._flow_airflow_simulate_path = f"{flow_environment_path}/flowSimulate"
         self._flow_lifecycle_state = "ATTACHED"
         self._start_flow_performance_sampler()
-        if not temporal_proof_passed:
+        if not temporal_proof_ready:
             return SimulationCacheResult(
                 False,
-                "Kit-CAE Flow remains attached, but the temporal proof failed; "
+                "Kit-CAE Flow remains attached, but initial readiness validation "
+                "failed; "
                 "expanded diagnostics were logged.",
             )
+        if validation_cache_lookup.temporal_proof:
+            receipt = validation_cache_lookup.temporal_proof
+            # Flow is recreated above on every Attach. Only the already completed
+            # VTI proof is reused, so this status never pretends a new proof ran.
+            self._set_temporal_proof_progress(
+                state=TemporalProofState.PASSED,
+                result_source=TemporalProofResultSource.SESSION_CACHE,
+                generation_id=self._flow_temporal_proof_generation,
+                total_sample_count=len(velocity_paths),
+                validated_sample_count=receipt.validated_sample_count,
+                current_sample_index=len(velocity_paths) - 1,
+                current_asset_name=velocity_paths[-1].name,
+                loop_closure_state="PASSED",
+            )
+            if status_callback:
+                status_callback("Airflow active · Validation reused")
+            return SimulationCacheResult(
+                True,
+                "Kit-CAE Flow initial readiness passed; temporal validation "
+                "was reused from this DTRS session.",
+            )
+        self._schedule_kit_cae_temporal_proof(
+            app=app,
+            carb=carb,
+            stage=stage,
+            timeline=timeline,
+            velocity_paths=velocity_paths,
+            field_prim=field_prim,
+            dataset_emitter=emitter_prim,
+            flow_environment_path=flow_environment_path,
+            dataset_emitter_path=dataset_emitter_path,
+            origin_match=origin_match,
+            grid_match=grid_match,
+            cae_vtk=cae_vtk,
+            Usd=Usd,
+            status_callback=status_callback,
+            dataset_signature=dataset_signature,
+        )
         return SimulationCacheResult(
             True,
-            "Kit-CAE Flow temporal loop proof passed: "
-            f"PointData/{cache.velocity_field_name} Vector3 drives live smoke.",
+            "Kit-CAE Flow initial readiness passed; temporal loop proof is running "
+            f"in the background for PointData/{cache.velocity_field_name}.",
         )
 
     def apply_kit_cae_smoke_tuning_in_kit(
@@ -1027,6 +1437,20 @@ class FlowRuntimeMixin(
             for _ in range(self.FLOW_DETACH_SETTLE_UPDATE_COUNT):
                 await app.next_update_async()
 
+            # Kit-CAE publishes begin/end events for external synchronization.
+            # Disable new emissions first, but keep FlowSimulation active until
+            # each in-flight emitter has finished reading its relation targets.
+            # Inactivating the parent earlier turns those targets into null USD
+            # attributes while FlowNanoVDBEmitter is still executing.
+            operators_quiesced = await self._await_kit_cae_operator_quiescence(
+                app, carb
+            )
+            if not operators_quiesced:
+                carb.log_warn(
+                    "DTRS FLOW DETACH | Kit-CAE operator quiesce timed out; "
+                    "continuing teardown."
+                )
+
             flow_environment = stage.GetPrimAtPath("/DTRS_KitCAE/FlowSimulation")
             if flow_environment and flow_environment.IsValid():
                 flow_environment.SetActive(False)
@@ -1109,14 +1533,106 @@ class FlowRuntimeMixin(
             "Airflow cache detached from the session layer.",
         )
 
+    def clear_flow_validation_cache(self) -> None:
+        """Drop session receipts only when configuration or DTRS shuts down."""
+
+        self._flow_validation_cache.clear()
+
+    def request_flow_attach_cancellation(self) -> bool:
+        """Ask the worker preflight to stop without crossing the Kit thread boundary."""
+
+        event = self._flow_attach_cancel_event
+        if self._flow_lifecycle_state != "ATTACHING" or event is None:
+            return False
+        event.set()
+        return True
+
     def stop_flow_runtime_callbacks(self) -> None:
         """Stop DTRS-owned asynchronous Flow diagnostics before teardown."""
 
+        if self._flow_attach_cancel_event is not None:
+            self._flow_attach_cancel_event.set()
+        self._cancel_kit_cae_temporal_proof()
         self._stop_flow_performance_sampler()
+
+    @staticmethod
+    def _kit_cae_operator_event_path(event) -> str:
+        """Read Kit's single-argument Event.get contract without callback errors."""
+
+        return str(event.get("prim_path") or "")
+
+    def _start_kit_cae_operator_tracking(self) -> None:
+        """Track DTRS Kit-CAE operator lifetimes using its synchronization events."""
+
+        from carb.eventdispatcher import get_eventdispatcher
+
+        self._stop_kit_cae_operator_tracking()
+        dispatcher = get_eventdispatcher()
+
+        def update_active_paths(event, is_begin: bool) -> None:
+            prim_path = self._kit_cae_operator_event_path(event)
+            if not prim_path.startswith("/DTRS_KitCAE/"):
+                return
+            # Event dispatch can originate outside the UI callback path, so the
+            # teardown coroutine reads this plain set under the same lock.
+            with self._flow_kit_cae_operator_lock:
+                if is_begin:
+                    self._flow_kit_cae_active_operator_paths.add(prim_path)
+                else:
+                    self._flow_kit_cae_active_operator_paths.discard(prim_path)
+
+        self._flow_kit_cae_operator_subscriptions = (
+            dispatcher.observe_event(
+                event_name="omni.cae.viz@operator_begin",
+                on_event=lambda event: update_active_paths(event, True),
+                observer_name="DTRS Flow operator begin tracking",
+            ),
+            dispatcher.observe_event(
+                event_name="omni.cae.viz@operator_end",
+                on_event=lambda event: update_active_paths(event, False),
+                observer_name="DTRS Flow operator end tracking",
+            ),
+        )
+
+    def _stop_kit_cae_operator_tracking(self) -> None:
+        """Release only DTRS observer guards after Flow has quiesced or failed."""
+
+        subscriptions = self._flow_kit_cae_operator_subscriptions
+        self._flow_kit_cae_operator_subscriptions = ()
+        for subscription in subscriptions:
+            reset = getattr(subscription, "reset", None)
+            if reset:
+                reset()
+        with self._flow_kit_cae_operator_lock:
+            self._flow_kit_cae_active_operator_paths.clear()
+
+    async def _await_kit_cae_operator_quiescence(self, app, carb) -> bool:
+        """Wait for tracked Kit-CAE work without freezing the Kit update loop."""
+
+        deadline = time.monotonic() + self.FLOW_DETACH_OPERATOR_QUIESCE_TIMEOUT_SECONDS
+        quiet_since = None
+        while True:
+            with self._flow_kit_cae_operator_lock:
+                active_paths = tuple(self._flow_kit_cae_active_operator_paths)
+            now = time.monotonic()
+            if active_paths:
+                quiet_since = None
+            else:
+                quiet_since = quiet_since or now
+                if now - quiet_since >= self.FLOW_DETACH_OPERATOR_QUIESCE_SECONDS:
+                    return True
+            if now >= deadline:
+                carb.log_warn(
+                    "DTRS FLOW DETACH | active Kit-CAE operators at timeout: "
+                    + ", ".join(active_paths)
+                )
+                return False
+            await app.next_update_async()
 
     def _clear_flow_runtime_state(self) -> None:
         """Forget DTRS Flow handles only after teardown or shutdown cancellation."""
 
+        self._stop_kit_cae_operator_tracking()
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
@@ -1124,6 +1640,7 @@ class FlowRuntimeMixin(
         self._flow_world_bounds = None
         self._flow_density_cell_size = None
         self._flow_lifecycle_state = "DETACHED"
+        self._flow_attach_cancel_event = None
         self._flow_temporal_records = []
         self._flow_temporal_failure = None
         self._flow_temporal_end_time_code = None
@@ -1212,12 +1729,16 @@ class FlowRuntimeMixin(
         cls,
         velocity_paths: tuple[Path, ...],
         field_name: str,
+        progress_callback=None,
+        cancel_requested=None,
     ) -> tuple[dict[str, object], bool]:
-        """Delegate temporal grid consistency checks to the shared helper."""
+        """Delegate VTI checks and plain-data worker progress to the shared helper."""
 
         return flow_temporal.validate_kit_cae_temporal_vti_contract(
             velocity_paths,
             field_name,
+            progress_callback=progress_callback,
+            cancel_requested=cancel_requested,
         )
 
     @staticmethod

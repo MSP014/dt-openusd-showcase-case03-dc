@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import time
 from dataclasses import replace
@@ -60,9 +61,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._asset_label = None
         self._load_task = None
         self._airflow_task = None
+        self._airflow_detach_requested = False
         self._view_task = None
         self._auxiliary_windows_task = None
-        self._airflow_status_label = None
         self._smoke_tuning_combos = {}
         self._show_flow_debug_overlays_model = None
         self._flow_camera_bookmarks = {}
@@ -161,6 +162,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._telemetry_task = None
         if self._controller:
             self._controller.stop_flow_runtime_callbacks()
+            self._controller.clear_flow_validation_cache()
         if self._motion_controller:
             self._motion_controller.reset()
             self._motion_controller = None
@@ -758,11 +760,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             height=26,
             width=ui.Percent(100),
         )
-        self._airflow_status_label = ui.Label(
-            "Not attached",
-            height=34,
-            elided_text=True,
-        )
 
     def _build_lighting_config_controls(self, config) -> None:
         self._lighting_status_label = ui.Label(
@@ -1321,6 +1318,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
                 if now >= self._next_telemetry_ui_update:
                     self._update_telemetry_labels(displayed)
+                    self._update_airflow_temporal_validation_status()
                     if self._controller:
                         self._controller.apply_qled_display_snapshot_in_kit(displayed)
                     self._next_telemetry_ui_update = now + latest.refresh_interval_s
@@ -1465,10 +1463,67 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._lighting_status_label.text = _compact_text(message)
             self._lighting_status_label.tooltip = message
 
-    def _set_airflow_status(self, message: str) -> None:
-        if self._airflow_status_label:
-            self._airflow_status_label.text = _compact_text(message)
-            self._airflow_status_label.tooltip = message
+    def _update_airflow_temporal_validation_status(self) -> None:
+        """Render the DTRS-owned proof snapshot without reading Kit-CAE internals."""
+
+        if not self._controller:
+            return
+        progress = self._controller.temporal_proof_progress()
+        state = progress.state.value
+        if state == "IDLE":
+            return
+        if state == "RUNNING":
+            message = (
+                "Airflow active · Validation "
+                f"{progress.validated_sample_count}/{progress.total_sample_count} · "
+                f"{progress.percentage or 0}%"
+            )
+        elif state == "CHECKING_LOOP_CLOSURE":
+            message = "Airflow active · Checking loop"
+        elif state == "PASSED":
+            message = (
+                "Airflow active · Validation reused"
+                if progress.result_source.value == "SESSION_CACHE"
+                else "Airflow active · Validation passed"
+            )
+        elif state == "CANCELLED":
+            message = "Airflow detached"
+        else:
+            message = "Airflow active · Validation failed"
+        detail = (
+            "Background temporal validation: "
+            f"{progress.validated_sample_count} of {progress.total_sample_count} "
+            f"samples passed. Current source: "
+            f"{progress.current_asset_name or 'unavailable'}."
+        )
+        self._set_airflow_status(message, tooltip=detail)
+
+    def _set_airflow_status(self, message: str, tooltip: str | None = None) -> None:
+        """Publish compact DTRS airflow state to Kit's shared lower status bar."""
+
+        import omni.kit.app
+
+        compact_message = " ".join(str(message).splitlines()).strip()
+        match = re.search(
+            r"(?:VTI|USD|Validation) (\d+)/(\d+).*?(\d+)%",
+            compact_message,
+        )
+        progress = -1.0
+        if match:
+            completed, total, _percentage = (int(value) for value in match.groups())
+            progress = completed / total if total else -1.0
+
+        # This bar is shared with Kit-CAE. DTRS reports only its own logical
+        # preparation/proof progress and never reads or mutates Kit-CAE's internal
+        # ProgressContext stack behind the separate "Fetching array" activity.
+        omni.kit.app.queue_event(
+            "omni.kit.window.status_bar@activity",
+            payload={"text": compact_message},
+        )
+        omni.kit.app.queue_event(
+            "omni.kit.window.status_bar@progress",
+            payload={"progress": progress},
+        )
 
     @staticmethod
     def _asset_loaded_status(message: str) -> str:
@@ -1498,6 +1553,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _schedule_detach_airflow(self) -> None:
         if self._airflow_task and not self._airflow_task.done():
+            if self._airflow_detach_requested:
+                self._set_airflow_status("Cancelling airflow preparation…")
+                return
+            if self._controller.request_flow_attach_cancellation():
+                active_attach_task = self._airflow_task
+                self._airflow_detach_requested = True
+                self._set_airflow_status("Cancelling airflow preparation…")
+                self._airflow_task = asyncio.ensure_future(
+                    self._cancel_attach_then_detach(active_attach_task)
+                )
+                return
             self._set_airflow_status("Airflow operation is already in progress.")
             return
         self._airflow_task = asyncio.ensure_future(self._detach_airflow())
@@ -1771,6 +1837,21 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             status_callback=self._set_airflow_status,
         )
         self._set_airflow_status(result.message)
+
+    async def _cancel_attach_then_detach(self, attach_task) -> None:
+        """Serialize Detach behind the cooperative preflight cancellation result."""
+
+        try:
+            await attach_task
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            import carb
+
+            carb.log_error(f"DTRS airflow Attach cancellation task failed: {error}")
+        finally:
+            self._airflow_detach_requested = False
+        await self._detach_airflow()
 
     async def _detach_airflow(self) -> None:
         try:

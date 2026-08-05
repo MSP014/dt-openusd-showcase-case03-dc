@@ -281,6 +281,28 @@ class FlowPerformanceMixin:
         except asyncio.CancelledError:
             return
 
+    def _temporal_validation_log_fields(self) -> tuple[tuple[str, str], ...]:
+        """Expose proof progress to diagnostics without owning its lifecycle."""
+
+        progress = self.temporal_proof_progress()
+        percentage = progress.percentage
+        fields = [
+            ("State:", progress.state.value),
+            ("Result source:", progress.result_source.value),
+            (
+                "Samples validated:",
+                f"{progress.validated_sample_count} / {progress.total_sample_count}"
+                + (f" ({percentage}%)" if percentage is not None else ""),
+            ),
+            ("Current source:", progress.current_asset_name or "unavailable"),
+            ("Validation elapsed:", f"{progress.elapsed_seconds:.1f} s"),
+        ]
+        if progress.loop_closure_state:
+            fields.append(("Loop closure:", progress.loop_closure_state))
+        if progress.failure_reason:
+            fields.append(("Failure reason:", progress.failure_reason))
+        return tuple(fields)
+
     def _log_flow_performance_interval(
         self,
         carb,
@@ -369,6 +391,7 @@ class FlowPerformanceMixin:
                             ("Flow attached:", bool(self._flow_airflow_simulate_path)),
                         ),
                     ),
+                    ("Temporal validation", self._temporal_validation_log_fields()),
                 ),
             )
         )

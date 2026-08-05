@@ -27,15 +27,33 @@ def kit_cae_vectors_match(expected, actual, tolerance: float = 1e-6) -> bool:
         return False
 
 
+class TemporalVtiValidationCancelled(RuntimeError):
+    """Signal cooperative cancellation of the worker-only VTI preflight."""
+
+
 def validate_kit_cae_temporal_vti_contract(
     velocity_paths: tuple[Path, ...],
     field_name: str,
+    progress_callback=None,
+    cancel_requested=None,
 ) -> tuple[dict[str, object], bool]:
-    """Require each Stage 6 temporal fixture to share the imported grid contract."""
+    """Require each Stage 6 temporal fixture to share the imported grid contract.
 
-    metadata_by_path = [
-        (path, read_kit_cae_vti_metadata(path, field_name)) for path in velocity_paths
-    ]
+    The callback deliberately receives plain path/count values only. This helper
+    runs in a worker during Attach and must never reach USD, Kit, or OmniUI.
+    """
+
+    metadata_by_path = []
+    for completed_count, path in enumerate(velocity_paths, start=1):
+        # This worker owns only plain VTI metadata. Check between samples so a
+        # Detach never waits for the full dataset and never touches Kit objects.
+        if cancel_requested and cancel_requested():
+            raise TemporalVtiValidationCancelled("VTI preflight cancelled")
+        metadata_by_path.append((path, read_kit_cae_vti_metadata(path, field_name)))
+        if progress_callback:
+            progress_callback(completed_count, len(velocity_paths), path.name)
+        if cancel_requested and cancel_requested():
+            raise TemporalVtiValidationCancelled("VTI preflight cancelled")
     primary_path, primary_metadata = metadata_by_path[0]
     for path, metadata in metadata_by_path[1:]:
         for key in ("dimensions", "spacing", "vti_header_origin"):
@@ -165,6 +183,51 @@ def author_kit_cae_temporal_velocity_samples(
             [Sdf.AssetPath(velocity_path.as_posix())],
             Usd.TimeCode(time_code),
         )
+    return time_codes
+
+
+async def author_kit_cae_temporal_velocity_samples_in_batches(
+    field_prim,
+    velocity_paths: tuple[Path, ...],
+    time_codes_per_second: float,
+    sample_interval_seconds: float,
+    cae_vtk,
+    Sdf,
+    Usd,
+    next_update,
+    batch_size: int,
+    progress_callback=None,
+) -> tuple[float, ...]:
+    """Author temporal samples in bounded Kit-update batches."""
+
+    file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+    if not file_names_attr or not file_names_attr.IsValid():
+        raise RuntimeError("Kit-CAE velocity field is missing fileNames.")
+    if time_codes_per_second <= 0 or sample_interval_seconds <= 0:
+        raise RuntimeError(
+            "Temporal time-code rate and sample interval must be positive."
+        )
+    if not velocity_paths:
+        raise RuntimeError("Temporal mapping requires at least one VTI sample.")
+    if batch_size <= 0:
+        raise RuntimeError("Temporal authoring batch size must be positive.")
+
+    time_code_step = float(time_codes_per_second) * float(sample_interval_seconds)
+    time_codes = tuple(
+        float(index) * time_code_step for index in range(len(velocity_paths))
+    )
+    for index, (time_code, velocity_path) in enumerate(
+        zip(time_codes, velocity_paths),
+        start=1,
+    ):
+        file_names_attr.Set(
+            [Sdf.AssetPath(velocity_path.as_posix())],
+            Usd.TimeCode(time_code),
+        )
+        if index < len(time_codes) and index % batch_size == 0:
+            if progress_callback:
+                progress_callback(index, len(time_codes))
+            await next_update()
     return time_codes
 
 
@@ -738,6 +801,7 @@ class FlowTemporalMixin:
         grid_match: bool,
         cae_vtk,
         Usd,
+        progress_callback=None,
     ) -> bool:
         """Observe all sparse VTI swaps and the closing loop in one Flow session."""
 
@@ -839,6 +903,12 @@ class FlowTemporalMixin:
                 verbose=self.config.simulation_cache.temporal_debug_logging,
             )
             if frame_evidence_valid:
+                if progress_callback:
+                    progress_callback(
+                        sequence_index + 1,
+                        active_asset or expected_asset,
+                        False,
+                    )
                 return True
 
             self._log_kit_cae_temporal_failure_details(
@@ -899,6 +969,8 @@ class FlowTemporalMixin:
                 self._log_kit_cae_temporal_proof(carb, velocity_paths)
                 return False
 
+        if progress_callback:
+            progress_callback(len(velocity_paths), velocity_paths[-1], True)
         loop_deadline = time.monotonic() + 8.0
         previous_time = float(timeline.get_current_time())
         loop_time_before = previous_time

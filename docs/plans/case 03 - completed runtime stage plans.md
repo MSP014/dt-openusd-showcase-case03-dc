@@ -723,3 +723,52 @@ mask control.
 
 Historical direct OpenVDB/RTX-IndeX and early diagnostic Flow experiments are
 closed evidence routes. They do not describe the shipped Stage 6 runtime path.
+
+#### Post-acceptance hotfix - responsive VTI Attach
+
+This hotfix addresses a measured interaction defect in the accepted Stage 6
+route. It does not reopen the delivered simulation contract or begin Stage 7.
+The current `server/load_normal` dataset contains 80 VTI samples totalling
+approximately 2.33 GiB. Runtime logs show Attach durations of 47--113 seconds.
+In one representative run, 33.5 seconds elapsed between the start of VTK import
+and Flow construction, and the full temporal proof began a further 28.6 seconds
+after the initial Flow-ready evidence.
+
+The confirmed causes are local to DTRS orchestration:
+
+- full VTI metadata validation currently performs all VTK reader updates on the
+  Kit update thread;
+- sparse USD `fileNames` time samples are authored in one uninterrupted loop;
+- Attach awaits the complete 80-sample temporal proof before returning to the
+  UI, even though the first visualised sample is already ready.
+
+The hotfix will retain the existing manifest, VTI, origin-session workaround,
+Kit-CAE/Flow route, rollback behaviour, and `SMOKE_ONLY` contract. It will:
+
+1. log monotonic timings for dataset discovery, VTI preflight, initial import,
+   temporal USD authoring, Flow readiness, first visual activation, and the
+   full proof, so before/after responsiveness is measurable;
+2. run VTI-only metadata preflight outside the Kit update thread, after a
+   targeted runtime safety check. The worker must not access USD, Kit, or Omni
+   APIs; a failed preflight leaves the currently attached airflow untouched;
+3. author temporal `fileNames` samples in small main-thread batches, yielding a
+   Kit update between batches and publishing progress through the existing
+   airflow status channel;
+4. return Attach success after the initial VTI, grid, origin, DataSetEmitter,
+   and first-visual readiness checks pass, then retain the complete temporal
+   loop proof as a separately tracked, cancellable diagnostic task;
+5. cancel or invalidate that proof on Detach, shutdown, or a newer Attach
+   generation, so a stale result cannot overwrite current airflow state.
+
+The hotfix is accepted only when fan motion, telemetry updates, the DTRS panel,
+and viewport navigation remain responsive while preparation runs; a failed
+preflight or import preserves the prior stable airflow state; and the complete
+80-sample forward-and-loop proof remains available in logs without blocking
+initial Attach completion. Validation will include focused pure-Python tests,
+an interactive Kit Attach/Detach/re-Attach pass, and repeated Attach runs with
+recorded phase timings.
+
+Prepared switching between distinct airflow states is deliberately not included
+until valid manifests and VTI datasets for those states exist. It will be a
+follow-up slice with its own prepared-state, cancellation, and rollback
+acceptance evidence.
