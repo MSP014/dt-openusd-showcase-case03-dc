@@ -22,7 +22,101 @@ def test_runtime_usd_preflight_accepts_configured_full_rig_contract():
     assert result.format_summary() == "preflight passed"
 
 
+def test_runtime_usd_preflight_repairs_bound_materialx_texture_in_session_layer():
+    from pxr import Sdf, UsdGeom, UsdShade
+
+    stage = _make_contract_stage()
+    mesh = UsdGeom.Mesh.Define(stage, "/blackwell_rig/server")
+    material = UsdShade.Material.Define(stage, "/blackwell_rig/materials/server")
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
+
+    preview = UsdShade.Shader.Define(stage, "/blackwell_rig/materials/server/preview")
+    preview.CreateIdAttr("UsdPreviewSurface")
+    material.CreateSurfaceOutput().ConnectToSource(
+        preview.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+    )
+    metalness = UsdShade.Shader.Define(
+        stage,
+        "/blackwell_rig/materials/server/metalness_map",
+    )
+    metalness.CreateIdAttr("ND_tiledimage_float")
+    metalness.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
+        Sdf.AssetPath("textures/server_metalness.png")
+    )
+
+    result = run_usd_preflight(stage, _minimal_config())
+
+    assert result.success is True
+    repairs = [
+        (repair.map_role, repair.preview_input, repair.texture_path)
+        for repair in result.material_repairs
+    ]
+    assert repairs == [("metallic", "metallic", "textures/server_metalness.png")]
+    assert preview.GetInput("metallic").GetAttr().GetConnections() == [
+        Sdf.Path("/blackwell_rig/materials/server/dtrs_preflight_metallic.outputs:r")
+    ]
+    assert stage.GetSessionLayer().GetPrimAtPath(
+        "/blackwell_rig/materials/server/dtrs_preflight_metallic"
+    )
+    assert not stage.GetRootLayer().GetPrimAtPath(
+        "/blackwell_rig/materials/server/dtrs_preflight_metallic"
+    )
+    assert (
+        "Asset:                  blackwell_rig_gb203"
+        in result.format_material_repairs("blackwell_rig_gb203")
+    )
+
+    repeated_result = run_usd_preflight(stage, _minimal_config())
+
+    assert repeated_result.material_repairs == ()
+
+
+def test_normal_map_scale_changes_only_preview_surface_normal_textures():
+    from pxr import Gf, Sdf, UsdShade
+
+    from digital_twin_runtime_suite.app.commands import RuntimeController
+
+    stage = _make_contract_stage()
+    preview = UsdShade.Shader.Define(stage, "/blackwell_rig/materials/server/preview")
+    preview.CreateIdAttr("UsdPreviewSurface")
+    normal = UsdShade.Shader.Define(stage, "/blackwell_rig/materials/server/normal")
+    normal.CreateIdAttr("UsdUVTexture")
+    normal.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+        Gf.Vec4f(2.0, 2.0, 2.0, 1.0)
+    )
+    normal_output = normal.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+    preview.CreateInput("normal", Sdf.ValueTypeNames.Normal3f).ConnectToSource(
+        normal_output
+    )
+    unrelated = UsdShade.Shader.Define(
+        stage,
+        "/blackwell_rig/materials/server/unrelated",
+    )
+    unrelated.CreateIdAttr("UsdUVTexture")
+    unrelated.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+        Gf.Vec4f(7.0, 7.0, 7.0, 1.0)
+    )
+
+    updated_count = RuntimeController._apply_normal_map_scale(
+        stage,
+        1.25,
+        Gf,
+        Sdf,
+        UsdShade,
+    )
+
+    assert updated_count == 1
+    assert normal.GetInput("scale").Get() == Gf.Vec4f(
+        1.25,
+        1.25,
+        1.25,
+        1.0,
+    )
+    assert unrelated.GetInput("scale").Get() == Gf.Vec4f(7.0, 7.0, 7.0, 1.0)
+
+
 def test_runtime_usd_preflight_reports_stage_contract_mismatches():
+
     from pxr import Usd, UsdGeom
 
     config = _minimal_config()

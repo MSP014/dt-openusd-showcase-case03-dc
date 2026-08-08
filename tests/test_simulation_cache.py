@@ -900,3 +900,76 @@ def test_kit_cae_operator_event_path_uses_single_argument_event_get() -> None:
         RuntimeController._kit_cae_operator_event_path(SingleArgumentEvent())
         == "/DTRS_KitCAE/DataSetEmitter"
     )
+
+
+@pytest.mark.parametrize("state", ("ATTACHING", "ATTACHED", "DETACHING"))
+def test_reload_config_rejects_active_airflow_without_clearing_receipts(
+    tmp_path: Path,
+    state: str,
+) -> None:
+    """Reload must not invalidate a live Flow session or its accepted receipts."""
+
+    from digital_twin_runtime_suite.app.flow.validation_cache import (
+        build_dataset_validation_signature,
+    )
+
+    controller = RuntimeController("configs/digital_twin_runtime_suite.toml")
+    signature = build_dataset_validation_signature(
+        _write_airflow_validation_dataset(tmp_path), "vel"
+    )
+    controller._flow_validation_cache.store_preflight(
+        signature,
+        {"dimensions": (2, 2, 2)},
+        grid_match=True,
+    )
+    original_config = controller.config
+    controller._flow_lifecycle_state = state
+
+    with pytest.raises(RuntimeError, match="Detach airflow before reloading config"):
+        controller.reload_config()
+
+    assert controller._flow_lifecycle_state == state
+    assert controller.config is original_config
+    assert controller._flow_validation_cache.lookup(signature).preflight is not None
+
+
+def test_reload_config_starts_a_new_detached_validation_session(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Detached reload stops callbacks, reloads config, and drops session receipts."""
+
+    from digital_twin_runtime_suite.app.flow.validation_cache import (
+        build_dataset_validation_signature,
+    )
+
+    controller = RuntimeController("configs/digital_twin_runtime_suite.toml")
+    signature = build_dataset_validation_signature(
+        _write_airflow_validation_dataset(tmp_path), "vel"
+    )
+    controller._flow_validation_cache.store_preflight(
+        signature,
+        {"dimensions": (2, 2, 2)},
+        grid_match=True,
+    )
+    callback_stops = []
+    loaded_paths = []
+    expected_config = controller.config
+
+    def stop_callbacks() -> None:
+        callback_stops.append(True)
+
+    def load_config(path: Path) -> RuntimeConfig:
+        loaded_paths.append(path)
+        return expected_config
+
+    monkeypatch.setattr(controller, "stop_flow_runtime_callbacks", stop_callbacks)
+    monkeypatch.setattr(RuntimeConfig, "load", staticmethod(load_config))
+
+    reloaded = controller.reload_config()
+
+    assert callback_stops == [True]
+    assert loaded_paths == [controller._config_path]
+    assert reloaded is expected_config
+    assert controller._flow_lifecycle_state == "DETACHED"
+    assert controller._flow_validation_cache.lookup(signature).result == "MISS"

@@ -1336,3 +1336,15 @@ def _write_runtime_config(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return config_path
+
+
+def test_runtime_controller_saves_normal_map_scale_override(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+
+    local_path = controller.save_normal_map_scale_override(1.25)
+    reloaded = RuntimeConfig.load(config_path)
+
+    assert local_path.exists()
+    assert reloaded.chassis_presentation.materials.normal_map_scale == 1.25
+    assert "[chassis_presentation.materials]" in local_path.read_text(encoding="utf-8")

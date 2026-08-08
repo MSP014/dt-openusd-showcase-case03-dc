@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Lock
 from typing import Callable
@@ -64,6 +64,15 @@ class LightingResult:
     success: bool
     message: str
     hdri_path: Path
+
+
+@dataclass(frozen=True)
+class NormalMapScaleResult:
+    """Result of applying the temporary renderer-facing normal-map scale."""
+
+    success: bool
+    message: str
+    texture_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -150,9 +159,14 @@ class RuntimeController(FlowRuntimeMixin):
         ) = None
 
     def reload_config(self) -> RuntimeConfig:
-        """Reload and return the current runtime config."""
+        """Reload configuration only after the current Flow session is detached."""
 
-        self._stop_flow_performance_sampler()
+        if self._flow_lifecycle_state != "DETACHED":
+            raise RuntimeError("Detach airflow before reloading config.")
+
+        # A new configuration defines a new validation session. Stop every
+        # DTRS-owned callback before discarding plain-data validation receipts.
+        self.stop_flow_runtime_callbacks()
         self._stop_kit_cae_operator_tracking()
         self._flow_validation_cache.clear()
         self.config = RuntimeConfig.load(self._config_path)
@@ -265,6 +279,27 @@ class RuntimeController(FlowRuntimeMixin):
             presentation,
         )
 
+    def save_normal_map_scale_override(self, normal_map_scale: float) -> Path:
+        """Persist the temporary material-tuning value with appearance controls."""
+
+        if not 0.0 <= normal_map_scale <= 4.0:
+            raise ValueError("Normal map scale must be between 0 and 4.")
+        presentation = replace(
+            self.config.chassis_presentation,
+            materials=replace(
+                self.config.chassis_presentation.materials,
+                normal_map_scale=normal_map_scale,
+            ),
+        )
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            presentation,
+        )
+
     def save_lighting_override(self, lighting: LightingConfig) -> Path:
         """Persist local operator lighting settings beside the base config."""
 
@@ -345,6 +380,7 @@ class RuntimeController(FlowRuntimeMixin):
         import carb
         import omni.kit.app
         import omni.usd
+        from pxr import Gf, Sdf, UsdShade
 
         usd_context = omni.usd.get_context()
         app = omni.kit.app.get_app()
@@ -383,6 +419,25 @@ class RuntimeController(FlowRuntimeMixin):
             set_status("Running USD preflight")
             preflight_result = run_usd_preflight(stage, self.config)
             preflight_message = f"; {preflight_result.format_summary()}"
+            if preflight_result.material_repairs:
+                carb.log_info(
+                    preflight_result.format_material_repairs(
+                        self.config.default_asset_id
+                    )
+                )
+            normal_map_count = self._apply_normal_map_scale(
+                stage,
+                self.config.chassis_presentation.materials.normal_map_scale,
+                Gf,
+                Sdf,
+                UsdShade,
+            )
+            if normal_map_count:
+                carb.log_info(
+                    "DTRS normal-map scale applied to "
+                    f"{normal_map_count} renderer-facing texture(s): "
+                    f"{self.config.chassis_presentation.materials.normal_map_scale:g}"
+                )
             if preflight_result.has_errors:
                 # The sidebar is intentionally compact; write every finding to the
                 # startup log so a missing composition asset is immediately actionable.
@@ -1064,6 +1119,89 @@ class RuntimeController(FlowRuntimeMixin):
         )
         material_output.AddConnection(shader_output.GetAttr().GetPath())
         UsdShade.MaterialBindingAPI.Apply(volume_prim).Bind(material)
+
+    def apply_normal_map_scale_in_kit(
+        self,
+        normal_map_scale: float,
+    ) -> NormalMapScaleResult:
+        """Apply the temporary normal-map scale to renderer-facing texture nodes."""
+
+        import omni.usd
+        from pxr import Gf, Sdf, UsdShade
+
+        if not 0.0 <= normal_map_scale <= 4.0:
+            return NormalMapScaleResult(
+                success=False,
+                message="Normal map scale must be between 0 and 4.",
+            )
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return NormalMapScaleResult(
+                success=False,
+                message="Normal map scale skipped: no open stage.",
+            )
+        texture_count = self._apply_normal_map_scale(
+            stage,
+            normal_map_scale,
+            Gf,
+            Sdf,
+            UsdShade,
+        )
+        if not texture_count:
+            return NormalMapScaleResult(
+                success=True,
+                message="No renderer-facing normal maps are connected.",
+            )
+        return NormalMapScaleResult(
+            success=True,
+            message=(
+                f"Normal-map scale {normal_map_scale:g} applied to "
+                f"{texture_count} texture(s)."
+            ),
+            texture_count=texture_count,
+        )
+
+    @staticmethod
+    def _apply_normal_map_scale(
+        stage,
+        normal_map_scale: float,
+        Gf,
+        Sdf,
+        UsdShade,
+    ) -> int:
+        """Set only UV textures directly connected to PreviewSurface normal inputs."""
+
+        texture_paths: set[str] = set()
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            for prim in stage.Traverse():
+                shader = UsdShade.Shader(prim)
+                if shader.GetIdAttr().Get() != "UsdPreviewSurface":
+                    continue
+                normal_input = shader.GetInput("normal")
+                if not normal_input:
+                    continue
+                for connection in normal_input.GetAttr().GetConnections():
+                    texture = UsdShade.Shader(
+                        stage.GetPrimAtPath(connection.GetPrimPath())
+                    )
+                    if texture.GetIdAttr().Get() != "UsdUVTexture":
+                        continue
+                    texture_paths.add(str(texture.GetPath()))
+            for texture_path in texture_paths:
+                texture = UsdShade.Shader(stage.GetPrimAtPath(texture_path))
+                texture.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(
+                    Gf.Vec4f(
+                        normal_map_scale,
+                        normal_map_scale,
+                        normal_map_scale,
+                        1.0,
+                    )
+                )
+        finally:
+            stage.SetEditTarget(previous_target)
+        return len(texture_paths)
 
     @staticmethod
     def _enable_index_compositing(stage, cache, carb) -> None:

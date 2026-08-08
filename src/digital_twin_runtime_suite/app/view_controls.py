@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import colorsys
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -58,6 +59,15 @@ def float_model_value(model: Any) -> float:
         value = getattr(model, "as_float")
         return float(value() if callable(value) else value)
     return float(model)
+
+
+def normal_map_scale_from_model(model: Any) -> float:
+    """Read the temporary normal-map scale control in a safe range."""
+
+    value = float_model_value(model)
+    if not math.isfinite(value) or not 0.0 <= value <= 4.0:
+        raise ValueError("Normal map scale must be between 0 and 4.")
+    return value
 
 
 def rgb_to_hex(color: tuple[float, float, float]) -> str:

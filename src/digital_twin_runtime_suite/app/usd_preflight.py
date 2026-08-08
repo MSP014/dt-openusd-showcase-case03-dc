@@ -14,6 +14,14 @@ EXPECTED_UP_AXIS = "Y"
 MAX_TIME_SAMPLED_ATTRIBUTES = 8
 USD_LAYER_SUFFIXES = {".usd", ".usda", ".usdc", ".usdz"}
 VDB_SUFFIX = ".vdb"
+MATERIAL_TEXTURE_ROLES = (
+    ("basecolor", "diffuseColor", ("basecolor", "base_color", "albedo")),
+    ("roughness", "roughness", ("roughness",)),
+    ("metallic", "metallic", ("metallic", "metalness")),
+    ("normal", "normal", ("normal", "normalmap", "normal_map")),
+    ("opacity", "opacity", ("opacity", "alpha", "transparency")),
+    ("emission", "emissiveColor", ("emission", "emissive")),
+)
 
 
 @dataclass(frozen=True)
@@ -27,10 +35,21 @@ class UsdPreflightFinding:
 
 
 @dataclass(frozen=True)
+class UsdMaterialRepair:
+    """One renderer-facing material input repaired in the session layer."""
+
+    material_path: str
+    map_role: str
+    texture_path: str
+    preview_input: str
+
+
+@dataclass(frozen=True)
 class UsdPreflightResult:
     """Collected preflight findings for a loaded USD stage."""
 
     findings: tuple[UsdPreflightFinding, ...]
+    material_repairs: tuple[UsdMaterialRepair, ...] = ()
 
     @property
     def error_count(self) -> int:
@@ -90,14 +109,37 @@ class UsdPreflightResult:
                 f"{self.warning_count} warning(s)"
             )
         if self.warning_count:
-            return f"preflight passed with {self.warning_count} warning(s)"
-        return "preflight passed"
+            base = f"preflight passed with {self.warning_count} warning(s)"
+        else:
+            base = "preflight passed"
+        if self.material_repairs:
+            return f"{base}; repaired {len(self.material_repairs)} material input(s)"
+        return base
+
+    def format_material_repairs(self, asset_id: str) -> str:
+        """Format the material changes that were actually authored."""
+
+        lines = [
+            "=== DTRS / USD MATERIAL REPAIR ===",
+            f"Asset:                  {asset_id}",
+        ]
+        for repair in self.material_repairs:
+            lines.extend(
+                (
+                    "  REPAIRED"
+                    f" | {repair.map_role} -> {repair.preview_input}"
+                    f" | {repair.texture_path}",
+                    f"    Material: {repair.material_path}",
+                )
+            )
+        lines.append("=" * 63)
+        return "\n".join(lines)
 
 
 def run_usd_preflight(stage, config: RuntimeConfig) -> UsdPreflightResult:
     """Validate the loaded runtime USD stage before visual review."""
 
-    from pxr import Sdf, UsdGeom
+    from pxr import Sdf, UsdGeom, UsdShade
 
     findings: list[UsdPreflightFinding] = []
     expected_root_path = _infer_expected_root_path(config) or EXPECTED_ROOT_PATH
@@ -106,8 +148,190 @@ def run_usd_preflight(stage, config: RuntimeConfig) -> UsdPreflightResult:
     _check_configured_prims(stage, config, findings)
     _check_layer_dependencies(stage, Sdf, findings)
     _check_time_sampled_content(stage, findings)
+    material_repairs = _repair_renderer_material_inputs(
+        stage,
+        Sdf,
+        UsdGeom,
+        UsdShade,
+    )
 
-    return UsdPreflightResult(tuple(findings))
+    return UsdPreflightResult(tuple(findings), tuple(material_repairs))
+
+
+def _repair_renderer_material_inputs(
+    stage,
+    Sdf,
+    UsdGeom,
+    UsdShade,
+) -> list[UsdMaterialRepair]:
+    """Bridge Houdini MaterialX maps omitted from bound PreviewSurface shaders."""
+
+    repairs: list[UsdMaterialRepair] = []
+    previous_target = stage.GetEditTarget()
+    stage.SetEditTarget(stage.GetSessionLayer())
+    try:
+        for material in _bound_materials(stage, UsdGeom, UsdShade):
+            preview = _find_preview_surface(material, UsdShade)
+            if not preview:
+                continue
+            source_textures = _materialx_texture_maps(material, UsdShade)
+            for map_role, preview_input, _tokens in MATERIAL_TEXTURE_ROLES:
+                source_texture = source_textures.get(map_role)
+                if source_texture is None or _input_has_connection(
+                    preview,
+                    preview_input,
+                ):
+                    continue
+                texture_path = _create_preview_texture_connection(
+                    material,
+                    preview,
+                    map_role,
+                    preview_input,
+                    source_texture,
+                    Sdf,
+                    UsdShade,
+                )
+                repairs.append(
+                    UsdMaterialRepair(
+                        material_path=str(material.GetPath()),
+                        map_role=map_role,
+                        texture_path=texture_path,
+                        preview_input=preview_input,
+                    )
+                )
+    finally:
+        stage.SetEditTarget(previous_target)
+    return repairs
+
+
+def _bound_materials(stage, UsdGeom, UsdShade):
+    """Return each material actually bound to a mesh, once."""
+
+    seen: set[str] = set()
+    for prim in stage.Traverse():
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        material, _relationship = UsdShade.MaterialBindingAPI(
+            prim
+        ).ComputeBoundMaterial()
+        if not material or not material.GetPrim().IsValid():
+            continue
+        path = str(material.GetPath())
+        if path in seen:
+            continue
+        seen.add(path)
+        yield material
+
+
+def _find_preview_surface(material, UsdShade):
+    for prim in _descendant_prims(material.GetPrim()):
+        shader = UsdShade.Shader(prim)
+        if shader and shader.GetIdAttr().Get() == "UsdPreviewSurface":
+            return shader
+    return None
+
+
+def _descendant_prims(prim):
+    for child in prim.GetChildren():
+        yield child
+        yield from _descendant_prims(child)
+
+
+def _materialx_texture_maps(material, UsdShade) -> dict[str, object]:
+    textures: dict[str, object] = {}
+    for prim in _descendant_prims(material.GetPrim()):
+        shader = UsdShade.Shader(prim)
+        if not shader or not str(shader.GetIdAttr().Get() or "").startswith("ND_"):
+            continue
+        file_input = shader.GetInput("file")
+        asset = file_input.Get() if file_input else None
+        texture_path = _asset_path_string(asset)
+        if not texture_path:
+            continue
+        role = _texture_role(f"{prim.GetPath()} {texture_path}")
+        if role:
+            textures.setdefault(role, asset)
+    return textures
+
+
+def _texture_role(value: str) -> str | None:
+    normalized = value.lower().replace("-", "_")
+    for map_role, _preview_input, tokens in MATERIAL_TEXTURE_ROLES:
+        if any(token in normalized for token in tokens):
+            return map_role
+    return None
+
+
+def _session_asset_path(asset, Sdf):
+    """Anchor copied texture inputs in the session layer."""
+
+    resolved_path = str(getattr(asset, "resolvedPath", "") or "")
+    return Sdf.AssetPath(resolved_path) if resolved_path else asset
+
+
+def _asset_path_string(asset) -> str:
+    if hasattr(asset, "path"):
+        return str(asset.path)
+    return str(asset or "")
+
+
+def _input_has_connection(shader, input_name: str) -> bool:
+    shader_input = shader.GetInput(input_name)
+    return bool(shader_input and shader_input.GetAttr().GetConnections())
+
+
+def _create_preview_texture_connection(
+    material,
+    preview,
+    map_role: str,
+    preview_input: str,
+    asset,
+    Sdf,
+    UsdShade,
+) -> str:
+    material_path = material.GetPath()
+    stage = material.GetPrim().GetStage()
+    st_reader = UsdShade.Shader.Define(
+        stage,
+        material_path.AppendChild("dtrs_preflight_st"),
+    )
+    st_reader.CreateIdAttr("UsdPrimvarReader_float2")
+    st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+    st_output = st_reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+
+    texture = UsdShade.Shader.Define(
+        stage,
+        material_path.AppendChild(f"dtrs_preflight_{map_role}"),
+    )
+    texture.CreateIdAttr("UsdUVTexture")
+    texture.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
+        _session_asset_path(asset, Sdf)
+    )
+    texture.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(st_output)
+    if map_role == "normal":
+        texture.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("raw")
+        texture.CreateInput(
+            "scale",
+            Sdf.ValueTypeNames.Float4,
+        ).Set((2.0, 2.0, 2.0, 1.0))
+        texture.CreateInput(
+            "bias",
+            Sdf.ValueTypeNames.Float4,
+        ).Set((-1.0, -1.0, -1.0, 0.0))
+    elif map_role not in {"basecolor", "emission"}:
+        texture.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("raw")
+
+    scalar_roles = {"roughness", "metallic", "opacity"}
+    output_name = "r" if map_role in scalar_roles else "rgb"
+    output_type = (
+        Sdf.ValueTypeNames.Float
+        if map_role in scalar_roles
+        else Sdf.ValueTypeNames.Float3
+    )
+    output = texture.CreateOutput(output_name, output_type)
+    input_type = Sdf.ValueTypeNames.Normal3f if map_role == "normal" else output_type
+    preview.CreateInput(preview_input, input_type).ConnectToSource(output)
+    return _asset_path_string(asset)
 
 
 def _check_stage_metadata(stage, UsdGeom, root_path: str, findings) -> None:
