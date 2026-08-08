@@ -629,6 +629,19 @@ govern future work remain in this plan.
 
 Jira: `DC-48`
 
+#### Stage 7.0 - Material recovery and temporary normal-map tuning
+
+0. Record this agreed plan before implementation of the X-Ray Visual Mode slice.
+1. During USD preflight, inspect only materials bound to server meshes. Where a Houdini-exported MaterialX texture map is present but the bound `UsdPreviewSurface` omits the equivalent renderer-facing input, create the missing connection in the session layer. Support base colour, roughness, metallic, normal, opacity and emission maps; never fabricate a map that the asset does not contain.
+2. Keep the master USD untouched. Log every actual repair with the asset id, material path, map role, texture filename and repaired `UsdPreviewSurface` input. Re-running preflight must not duplicate a repair or its log entry.
+3. In `View`, add a permanent `Server Appearance` section. Move the existing `Server enclosure` controls inside it and add a permanent `Materials` subsection.
+4. Inside `Materials`, add only one temporary debug subsection: `Normal Map Scale`. Its single control adjusts the `scale` input of renderer-facing normal-map texture nodes after the material-recovery pass has connected them.
+5. After the intended normal-map values are established, remove or hide only the `Normal Map Scale` debug subsection; retain `Materials`.
+6. Cover the material repair and normal-map scale control with focused automated tests, then perform scoped Kit validation.
+
+
+#### Stage 7.1 - Engineering X-Ray Visual Mode Slice
+
 Release track: `0.4.0` (released on Stage 8 completion).
 
 Introduce a manually controlled, reversible runtime visual override that lets

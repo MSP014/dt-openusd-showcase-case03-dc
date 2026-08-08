@@ -82,6 +82,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._view_tab_button = None
         self._config_tab_button = None
         self._chassis_visibility_models = {}
+        self._normal_map_scale_model = None
         self._face_panel_open_model = None
         self._face_panel_action_label = None
         self._face_panel_open_state = False
@@ -348,8 +349,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         ):
             with ui.VStack(spacing=6, content_clipping=True):
                 self._build_config_section(
-                    "Server enclosure",
-                    lambda: self._build_server_view_controls(
+                    "Server Appearance",
+                    lambda: self._build_server_appearance_controls(
                         config.chassis_presentation
                     ),
                 )
@@ -357,6 +358,43 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     "Airflow cache",
                     self._build_airflow_cache_controls,
                 )
+
+    def _build_server_appearance_controls(self, presentation) -> None:
+        with ui.VStack(spacing=6, content_clipping=True):
+            self._build_config_section(
+                "Server enclosure",
+                lambda: self._build_server_view_controls(presentation),
+            )
+            self._build_config_section(
+                "Materials",
+                lambda: self._build_material_controls(presentation.materials),
+            )
+
+    def _build_material_controls(self, materials) -> None:
+        self._build_config_section(
+            "Normal Map Scale",
+            lambda: self._build_normal_map_scale_controls(materials),
+            collapsed=True,
+        )
+
+    def _build_normal_map_scale_controls(self, materials) -> None:
+        if self._normal_map_scale_model is None:
+            self._normal_map_scale_model = ui.SimpleFloatModel(
+                materials.normal_map_scale
+            )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Scale", width=SERVER_VIEW_LABEL_WIDTH, elided_text=True)
+            ui.FloatDrag(
+                model=self._normal_map_scale_model,
+                width=ui.Fraction(1),
+                precision=2,
+            )
+        ui.Button(
+            "Apply",
+            clicked_fn=self._apply_normal_map_scale,
+            height=26,
+            width=ui.Percent(100),
+        )
 
     def _build_server_view_controls(self, presentation) -> None:
         face_panel = presentation.face_panel
@@ -1428,7 +1466,11 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
 
     def _reload_config(self) -> None:
-        config = self._controller.reload_config()
+        try:
+            config = self._controller.reload_config()
+        except RuntimeError:
+            self._set_status("Detach airflow before reloading config")
+            return
         if self._motion_controller:
             self._motion_controller.reset()
         # Motion bindings are config-backed; rebuild them after a runtime config reload.
@@ -1602,6 +1644,30 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._apply_flow_camera_bookmark(name)
         )
 
+    def _apply_normal_map_scale(self) -> None:
+        from digital_twin_runtime_suite.app.view_controls import (
+            normal_map_scale_from_model,
+        )
+
+        if not self._normal_map_scale_model:
+            self._set_status("Normal Map Scale control is unavailable.")
+            return
+        try:
+            scale = normal_map_scale_from_model(self._normal_map_scale_model)
+        except ValueError as error:
+            self._set_status(f"Normal Map Scale is invalid: {error}")
+            return
+        result = self._controller.apply_normal_map_scale_in_kit(scale)
+        if not result.success:
+            self._set_status(result.message)
+            return
+        try:
+            self._controller.save_normal_map_scale_override(scale)
+        except OSError as error:
+            self._set_status(f"Normal Map Scale was applied but not saved: {error}")
+            return
+        self._set_status(f"{result.message} Saved to local config.")
+
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
             self._apply_chassis_visibility_controls()
@@ -1673,6 +1739,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 model.set_value(group.default_visible)
         if self._face_panel_open_model:
             self._face_panel_open_model.set_value(presentation.face_panel.default_open)
+        if self._normal_map_scale_model:
+            self._normal_map_scale_model.set_value(
+                presentation.materials.normal_map_scale
+            )
         self._face_panel_open_state = presentation.face_panel.default_open
         self._set_face_panel_action_label(self._face_panel_open_state)
 

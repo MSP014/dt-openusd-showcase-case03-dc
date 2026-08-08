@@ -30,6 +30,9 @@ enabled = true
 open_chassis = false
 cover_paths = []
 
+[chassis_presentation.materials]
+normal_map_scale = 2.0
+
 [chassis_presentation.visibility_groups.top_cover]
 label = "Top cover"
 default_visible = false

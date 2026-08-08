@@ -179,6 +179,13 @@ class FrontPanelIndicatorsConfig:
 
 
 @dataclass(frozen=True)
+class MaterialPresentationConfig:
+    """Runtime material presentation settings for the server appearance."""
+
+    normal_map_scale: float = 2.0
+
+
+@dataclass(frozen=True)
 class ChassisPresentationConfig:
     """Runtime-only presentation state for the server enclosure."""
 
@@ -188,6 +195,7 @@ class ChassisPresentationConfig:
     face_panel: FacePanelConfig = FacePanelConfig()
     qled_display: QledDisplayConfig = QledDisplayConfig()
     front_panel_indicators: FrontPanelIndicatorsConfig = FrontPanelIndicatorsConfig()
+    materials: MaterialPresentationConfig = MaterialPresentationConfig()
 
 
 @dataclass(frozen=True)
@@ -542,6 +550,12 @@ def format_runtime_override(
                 f"{_toml_bool(group.default_visible)}\n"
                 for group in chassis_presentation.visibility_groups
             )
+    if chassis_presentation:
+        text += (
+            "\n[chassis_presentation.materials]\n"
+            "normal_map_scale = "
+            f"{chassis_presentation.materials.normal_map_scale:.6g}\n"
+        )
     return text
 
 
@@ -648,6 +662,15 @@ def _merge_runtime_override(
                 updated_face_panel = dict(face_panel)
                 updated_face_panel["default_open"] = face_panel_open
                 chassis["face_panel"] = updated_face_panel
+        local_materials = local_chassis.get("materials")
+        if isinstance(local_materials, dict) and "normal_map_scale" in local_materials:
+            materials = dict(chassis.get("materials", {}))
+            materials["normal_map_scale"] = local_materials["normal_map_scale"]
+            chassis["materials"] = materials
+        elif local_materials is not None and not isinstance(local_materials, dict):
+            LOGGER.warning(
+                "Ignoring chassis materials local override: expected a table."
+            )
         data["chassis_presentation"] = chassis
 
     local_simulation_cache = local_data.get("simulation_cache")
@@ -724,7 +747,7 @@ def _parse_chassis_presentation_config(data: Any) -> ChassisPresentationConfig:
         return ChassisPresentationConfig()
 
     raw_paths = data.get("cover_paths", ())
-    if not isinstance(raw_paths, list):
+    if not isinstance(raw_paths, (list, tuple)):
         raise ValueError("chassis_presentation.cover_paths must be an array.")
 
     cover_paths = tuple(str(path).strip() for path in raw_paths if str(path).strip())
@@ -740,7 +763,18 @@ def _parse_chassis_presentation_config(data: Any) -> ChassisPresentationConfig:
         front_panel_indicators=_parse_front_panel_indicators_config(
             data.get("front_panel_indicators")
         ),
+        materials=_parse_material_presentation_config(data.get("materials")),
     )
+
+
+def _parse_material_presentation_config(data: Any) -> MaterialPresentationConfig:
+    if not isinstance(data, dict):
+        return MaterialPresentationConfig()
+
+    normal_map_scale = float(data.get("normal_map_scale", 2.0))
+    if not 0.0 <= normal_map_scale <= 4.0:
+        raise ValueError("materials.normal_map_scale must be between 0 and 4.")
+    return MaterialPresentationConfig(normal_map_scale=normal_map_scale)
 
 
 def chassis_presentation_with_operator_state(
@@ -971,7 +1005,7 @@ def _parse_visibility_groups(data: Any) -> tuple[VisibilityGroupConfig, ...]:
             continue
         label = str(entry.get("label", group_id)).strip()
         raw_paths = entry.get("paths", ())
-        if not isinstance(raw_paths, list):
+        if not isinstance(raw_paths, (list, tuple)):
             raise ValueError(
                 f"chassis_presentation.visibility_groups.{group_id}.paths "
                 "must be an array."
