@@ -158,7 +158,7 @@ The streamline visualisation pass exposes the velocity-field behaviour more dire
 | **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
 | **The Silent Heat (Node)** | **Thermal Behaviour Visualisation:** Represents estimated waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
 | **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
-| **Hybrid Visualisation** | Planned switching between the standard runtime presentation and an Engineering X-Ray / Flow view. The X-Ray mode is not implemented yet. |
+| **Hybrid Visualisation** | The runtime includes a non-persistent Custom MDL Fresnel probe for Engineering X-Ray material review; a Flow view remains planned. |
 
 ---
 
