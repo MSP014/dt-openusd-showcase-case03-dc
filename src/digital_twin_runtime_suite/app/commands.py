@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -138,22 +139,28 @@ class RuntimeController(FlowRuntimeMixin):
     XRAY_CHASSIS_ROOT_PATH = "/blackwell_rig/chassis"
     XRAY_SOURCE_MATERIAL_PATH = "/blackwell_rig/chassis/mtl/base_lod00_mat"
     XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/xray_material"
-    XRAY_ISOLATION_PART_A_COLOR = (1.0, 1.0, 0.0)
-    XRAY_ISOLATION_PART_B_COLOR = (0.0, 0.0, 1.0)
-    XRAY_ISOLATION_ROUGHNESS = 0.4
-    XRAY_ISOLATION_BLEND_BIAS = 5.0
-    XRAY_SURFACE_FALLOFF_PROBES = {
-        1: (0.0, 0.0, "Part A selection", "yellow", "PartB"),
-        2: (1.0, 1.0, "Part B selection", "blue", "PartB"),
-        3: (0.0, 1.0, "Surface Falloff", "yellow face / blue edge", "PartB"),
-        4: (1.0, 1.0, "Blend input control", "yellow", "PartA"),
-    }
-    _xray_diagnostic_baseline: dict[str, str] | None = None
-    _xray_diagnostic_representative_path: str | None = None
-    _xray_diagnostic_baseline_root_dirty: bool | None = None
+    XRAY_PROBE_ROOT_PATH = "/DTRS_Runtime/Debug/XRayProbe01"
+    XRAY_PROBE_MATERIAL_PATH = "/DTRS_Runtime/Debug/Looks/FresnelProbe01"
+    XRAY_PROBE_SERVER_PATH = "/blackwell_rig"
+    # Probe 01 is deliberately derived only from the server extent.  It must
+    # stay large enough to inspect in the unchanged review-camera framing, but
+    # must never fall back to a hard-coded world-space size.
+    XRAY_PROBE_SIZE_FRACTION = 0.64
+    # The imported server carries its geometry under render/proxy purposes;
+    # default alone produces an empty BBoxCache range for this asset.
+    XRAY_PROBE_BOUND_PURPOSES = (
+        "default_",
+        "render",
+        "proxy",
+        "guide",
+    )
+    XRAY_PROBE_SPHERE_LONGITUDE_SEGMENTS = 64
+    XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS = 32
 
     def __init__(self, config_path: Path | str):
         self._config_path = Path(config_path)
+        self._xray_probe_visibility_state: tuple[bool, object | None] | None = None
+        self._xray_probe_server_bbox_snapshot = None
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
@@ -1211,96 +1218,8 @@ class RuntimeController(FlowRuntimeMixin):
     def apply_xray_material_in_kit(
         self,
         xray: XRayMaterialConfig,
-        surface_falloff_probe: int | None = None,
     ) -> XRayApplyResult:
-        """Apply the temporary Surface Falloff isolation graph in the session layer."""
-
-        import omni.usd
-        from pxr import Gf, Sdf, Usd, UsdShade
-
-        stage = omni.usd.get_context().get_stage()
-        if not stage:
-            return XRayApplyResult(False, "X-Ray skipped: no open stage.")
-
-        previous_target = stage.GetEditTarget()
-        stage.SetEditTarget(stage.GetSessionLayer())
-        self._xray_last_authoring_edit_target = (
-            stage.GetEditTarget().GetLayer().identifier
-        )
-        try:
-            if not xray.chassis_selected:
-                removed_count = self._clear_xray_session_overrides(
-                    stage,
-                    Usd,
-                    UsdShade,
-                )
-                return XRayApplyResult(
-                    True,
-                    "X-Ray removed; original chassis materials restored.",
-                    removed_count,
-                )
-
-            root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
-            if not root or not root.IsValid():
-                return XRayApplyResult(
-                    False,
-                    "X-Ray skipped: Chassis - SilverStone RM44 was not found.",
-                )
-            self._clear_xray_session_overrides(stage, Usd, UsdShade)
-            probe = surface_falloff_probe or 3
-            facing_weight, edge_weight, _name, _expected, blend_part = (
-                self._xray_surface_falloff_probe(probe)
-            )
-            material = self._define_xray_material(
-                stage,
-                (facing_weight, edge_weight),
-                blend_part,
-                Gf,
-                Sdf,
-                UsdShade,
-            )
-            target_count = self._bind_xray_material_to_chassis(
-                stage,
-                root,
-                material,
-                Usd,
-                UsdShade,
-            )
-        finally:
-            stage.SetEditTarget(previous_target)
-
-        if not target_count:
-            return XRayApplyResult(
-                False,
-                "X-Ray skipped: no chassis mesh targets were found.",
-            )
-        return XRayApplyResult(
-            True,
-            "X-Ray Surface Falloff isolation probe "
-            f"{probe} applied to {target_count} chassis mesh target(s).",
-            target_count,
-        )
-
-    @classmethod
-    def _xray_surface_falloff_probe(
-        cls,
-        probe: int,
-    ) -> tuple[float, float, str, str, str]:
-        """Return the fixed, non-persistent weights for one isolation probe."""
-
-        try:
-            return cls.XRAY_SURFACE_FALLOFF_PROBES[probe]
-        except KeyError as error:
-            raise ValueError(
-                f"Unknown Surface Falloff isolation probe: {probe}"
-            ) from error
-
-    def log_xray_surface_falloff_probe(
-        self,
-        probe: int,
-        result: XRayApplyResult,
-    ) -> None:
-        """Log the actual composed state immediately after a probe click."""
+        """Apply the X-Ray lifecycle boundary without authoring rejected shading."""
 
         import carb
         import omni.usd
@@ -1308,421 +1227,699 @@ class RuntimeController(FlowRuntimeMixin):
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
+            return XRayApplyResult(False, "X-Ray skipped: no open stage.")
+
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            if not xray.chassis_selected:
+                removed_count = self._clear_xray_session_overrides(stage, Usd, UsdShade)
+                carb.log_warn(
+                    self._format_xray_action_state(
+                        stage,
+                        Usd,
+                        UsdShade,
+                        action="Apply / X-Ray OFF",
+                        requested_selected=False,
+                        result=(
+                            f"removed_session_xray_bindings={removed_count}; "
+                            "original bindings compose naturally"
+                        ),
+                    )
+                )
+                return XRayApplyResult(
+                    True,
+                    "X-Ray removed; original chassis materials restored.",
+                    removed_count,
+                )
             carb.log_warn(
-                "DTRS X-Ray SurfaceFalloff isolation\n"
-                f"  Probe {probe}: stage=<none>\n"
-                f"  result: {result.message}"
+                self._format_xray_action_state(
+                    stage,
+                    Usd,
+                    UsdShade,
+                    action="Apply / X-Ray ON",
+                    requested_selected=True,
+                    result=(
+                        "rejected shader is unavailable; "
+                        "no runtime material mutation"
+                    ),
+                )
             )
-            return
-        carb.log_warn(
-            self._format_xray_surface_falloff_isolation_state(
-                stage,
-                probe,
-                result,
-                Usd,
-                UsdShade,
+            return XRayApplyResult(
+                False,
+                "X-Ray shading unavailable: alternative shader pending validation.",
             )
-        )
-        if probe == 4 and result.success:
-            asyncio.ensure_future(
-                self._log_xray_surface_falloff_neuray_backend_after_renderer_update()
-            )
+        finally:
+            stage.SetEditTarget(previous_target)
 
-    async def _log_xray_surface_falloff_neuray_backend_after_renderer_update(
+    def apply_xray_fresnel_probe_in_kit(
         self,
-    ) -> None:
-        """Inspect the active RTX MDL call after its renderer update."""
-
-        import carb
-        import omni.kit.app
-
-        for _ in range(3):
-            await omni.kit.app.get_app().next_update_async()
-        carb.log_warn(self._format_xray_surface_falloff_neuray_backend())
-
-    @classmethod
-    def _format_xray_surface_falloff_neuray_backend(cls) -> str:
-        """Read only the five runtime arguments of SurfaceFalloff's active MDL call."""
-
-        import omni.mdl.neuraylib
-        import omni.mdl.pymdlsdk as pymdlsdk
-
-        entity = None
-        snapshot = None
-        transaction = None
-        path = f"{cls.XRAY_MATERIAL_PATH}/SurfaceFalloff"
-        try:
-            neuraylib = omni.mdl.neuraylib.get_neuraylib()
-            entity = neuraylib.createMdlEntity(path)
-            entity_valid = bool(entity and entity.valid())
-            lines = [
-                "DTRS X-Ray Neuray SurfaceFalloff backend",
-                f"  prim: {path}",
-                "  entity: "
-                f"valid={entity_valid}; "
-                f"dbScopeName={getattr(entity, 'dbScopeName', '<missing>')}; "
-                "simpleNameWithSignature="
-                f"{getattr(entity, 'simpleNameWithSignature', '<missing>')}",
-            ]
-            if not entity_valid:
-                lines.append("  snapshot: NOT CREATED (entity invalid)")
-                return "\n".join(lines)
-
-            snapshot = neuraylib.createMdlEntitySnapshot(entity)
-            # MdlEntitySnapshot in this Kit build has no valid() method.  A
-            # non-null snapshot is the supported success condition; its DB
-            # identifiers name the renderer-side material call to inspect.
-            snapshot_valid = snapshot is not None
-            lines.append(
-                "  snapshot: "
-                f"returned={snapshot_valid}; "
-                f"dbScopeName={getattr(snapshot, 'dbScopeName', '<missing>')}; "
-                f"dbName={getattr(snapshot, 'dbName', '<missing>')}; "
-                "simpleNameWithSignature="
-                f"{getattr(snapshot, 'simpleNameWithSignature', '<missing>')}"
-            )
-            if not snapshot_valid:
-                return "\n".join(lines)
-
-            transaction_handle = neuraylib.createReadingTransaction(
-                snapshot.dbScopeName
-            )
-            transaction = pymdlsdk.attach_itransaction(transaction_handle)
-            # Keep all DB-interface handles in this helper's local scope. It
-            # drops them before the outer finally aborts the read transaction.
-            lines.extend(
-                cls._read_xray_surface_falloff_backend_values(
-                    transaction,
-                    snapshot.dbName,
-                    pymdlsdk,
-                )
-            )
-            return "\n".join(lines)
-        except Exception as error:
-            return (
-                "DTRS X-Ray Neuray SurfaceFalloff backend\n"
-                f"  prim: {path}\n"
-                f"  inspection_failed: {error}"
-            )
-        finally:
-            if transaction and transaction.is_open():
-                transaction.abort()
-            if snapshot is not None:
-                neuraylib.destroyMdlEntitySnapshot(snapshot)
-            if entity is not None:
-                neuraylib.destroyMdlEntity(entity)
-
-    @classmethod
-    def _read_xray_surface_falloff_backend_values(
-        cls,
-        transaction,
-        falloff_db_name: str,
-        pymdlsdk,
-    ) -> list[str]:
-        """Read primitive diagnostics, then drop all MDL DB handles before abort."""
-
-        falloff_call = None
-        falloff_arguments = None
-        part_a_call = None
-        part_a_arguments = None
-        try:
-            falloff_call = transaction.access_as(
-                pymdlsdk.IFunction_call, falloff_db_name
-            )
-            if not falloff_call or not falloff_call.is_valid_interface():
-                return ["  function_call: <invalid>"]
-
-            falloff_arguments = falloff_call.get_arguments()
-            lines = ["  backend_arguments:"]
-            base_reference = "<none>"
-            for name in (
-                "base",
-                "blend",
-                "facing_weight",
-                "edge_weight",
-                "blend_bias",
-            ):
-                details = cls._xray_neuray_expression_details(
-                    falloff_arguments.get_expression(name), pymdlsdk
-                )
-                if name == "base":
-                    base_reference = details["reference"]
-                lines.append(cls._xray_neuray_details_line(name, details))
-
-            if base_reference == "<none>":
-                lines.append("  shared_part_a: <not a call>")
-                return lines
-
-            part_a_call = transaction.access_as(pymdlsdk.IFunction_call, base_reference)
-            if not part_a_call or not part_a_call.is_valid_interface():
-                lines.append("  shared_part_a: <invalid>")
-                return lines
-
-            part_a_arguments = part_a_call.get_arguments()
-            lines.append(f"  shared_part_a: {base_reference}")
-            for name in ("diffuse_reflection_color", "enable_opacity"):
-                details = cls._xray_neuray_expression_details(
-                    part_a_arguments.get_expression(name), pymdlsdk
-                )
-                lines.append(
-                    cls._xray_neuray_details_line(name, details, indent="    ")
-                )
-            return lines
-        finally:
-            # Explicitly discard all transaction-backed handles before its
-            # abort in the caller. The SWIG wrappers release their references
-            # when these local references disappear.
-            part_a_arguments = None
-            part_a_call = None
-            falloff_arguments = None
-            falloff_call = None
-
-    @classmethod
-    def _xray_neuray_expression_details(cls, expression, pymdlsdk) -> dict[str, object]:
-        """Convert the small supported MDL expression set to plain Python data."""
-
-        if not expression or not expression.is_valid_interface():
-            return {"kind": "<missing>", "reference": "<none>", "constant": "<none>"}
-
-        kind = expression.get_kind()
-        reference = "<none>"
-        constant: object = "<not a constant>"
-        call_expression = expression.get_interface(pymdlsdk.IExpression_call)
-        if call_expression and call_expression.is_valid_interface():
-            reference = call_expression.get_call()
-        else:
-            direct_call = expression.get_interface(pymdlsdk.IExpression_direct_call)
-            if direct_call and direct_call.is_valid_interface():
-                reference = direct_call.get_definition()
-            else:
-                constant_expression = expression.get_interface(
-                    pymdlsdk.IExpression_constant
-                )
-                if constant_expression and constant_expression.is_valid_interface():
-                    value = constant_expression.get_value()
-                    constant = cls._xray_neuray_value_to_python(value, pymdlsdk)
-        return {"kind": kind, "reference": reference, "constant": constant}
-
-    @staticmethod
-    def _xray_neuray_value_to_python(value, pymdlsdk) -> object:
-        """Decode only the float, color, and bool values used by Probe 4."""
-
-        if not value or not value.is_valid_interface():
-            return "<invalid>"
-        float_value = value.get_interface(pymdlsdk.IValue_float)
-        if float_value and float_value.is_valid_interface():
-            return float(float_value.get_value())
-        bool_value = value.get_interface(pymdlsdk.IValue_bool)
-        if bool_value and bool_value.is_valid_interface():
-            return bool(bool_value.get_value())
-        color_value = value.get_interface(pymdlsdk.IValue_color)
-        if color_value and color_value.is_valid_interface():
-            components = []
-            for index in range(3):
-                component = color_value.get_value(index)
-                component_float = component.get_interface(pymdlsdk.IValue_float)
-                components.append(float(component_float.get_value()))
-            return tuple(components)
-        return f"<unsupported {value.get_kind()}>"
-
-    @staticmethod
-    def _xray_neuray_details_line(
-        name: str,
-        details: dict[str, object],
+        values: tuple[
+            tuple[float, float, float],
+            tuple[float, float, float],
+            float,
+            float,
+            float,
+        ],
         *,
-        indent: str = "    ",
-    ) -> str:
-        return (
-            f"{indent}{name}: kind={details['kind']}; "
-            f"reference={details['reference']}; constant={details['constant']}"
-        )
+        rebuild: bool,
+    ) -> XRayApplyResult:
+        """Author or update the non-persistent Custom MDL Fresnel probe."""
+        import carb
+        import omni.usd
+        from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
-    @classmethod
-    def _format_xray_surface_falloff_isolation_state(
-        cls,
-        stage,
-        probe: int,
-        result: XRayApplyResult,
-        Usd,
-        UsdShade,
-    ) -> str:
-        """Format one compact post-Apply state proof; never dump all meshes."""
-
-        facing_weight, edge_weight, name, expected, _blend_part = (
-            cls._xray_surface_falloff_probe(probe)
-        )
-        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
-        representative = cls._xray_diagnostic_representative_mesh(
-            stage, root, Usd, UsdShade
-        )
-        aggregate = cls._xray_binding_aggregate(root, Usd, UsdShade)
-        material = UsdShade.Material.Get(stage, cls.XRAY_MATERIAL_PATH)
-        part_a = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartA")
-        part_b = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartB")
-        falloff = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/SurfaceFalloff")
-        representative_binding = "<none>"
-        binding_owner = "<none>"
-        if representative:
-            binding_api = UsdShade.MaterialBindingAPI(representative)
-            bound_material, _binding = binding_api.ComputeBoundMaterial()
-            representative_binding = (
-                str(bound_material.GetPath()) if bound_material else "<none>"
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return XRayApplyResult(False, "Fresnel probe skipped: no open stage.")
+        server = stage.GetPrimAtPath(self.XRAY_PROBE_SERVER_PATH)
+        if not server or not server.IsValid():
+            return XRayApplyResult(
+                False, "Fresnel probe skipped: server root not found."
             )
-            binding_owner = cls._xray_property_owners(binding_api.GetDirectBindingRel())
-        session = stage.GetSessionLayer()
-        registry_inspection = cls._format_xray_surface_falloff_registry(falloff)
-        authored_ports = cls._xray_surface_falloff_authored_port_lines(
-            material, part_a, falloff
-        )
-        probe_status = (
-            f"  Probe {probe} [{facing_weight:g}/{edge_weight:g}] "
-            f"— {name}: AWAITING VISUAL RESULT"
-        )
-        material_defined = bool(material and material.GetPrim().IsValid())
-        direct_bindings = f"{aggregate['xray_direct_count']}/{aggregate['mesh_count']}"
-        representative_path = representative.GetPath() if representative else "<none>"
-        terminal = cls._xray_connection(
-            material.GetSurfaceOutput("mdl") if material else None
-        )
-        part_a_emission = bool(part_a.GetInput("emission_color")) if part_a else False
-        part_b_emission = bool(part_b.GetInput("emission_color")) if part_b else False
-        falloff_base = cls._xray_connection(
-            falloff.GetInput("base") if falloff else None
-        )
-        falloff_blend = cls._xray_connection(
-            falloff.GetInput("blend") if falloff else None
-        )
-        session_representative = (
-            bool(session.GetPrimAtPath(representative.GetPath()))
-            if representative
-            else False
-        )
-        from pxr import Sdf
-
-        material_fragment = cls._xray_session_fragment(stage, None, Sdf)
-        return "\n".join(
-            (
-                "DTRS X-Ray SurfaceFalloff isolation",
-                "  configured: "
-                "PartA=yellow opaque; PartB=blue opaque; roughness=0.4; emission=off",
-                probe_status,
-                f"  expected: {expected}",
-                "  after_apply:",
-                f"    xray_material_defined: {material_defined}",
-                f"    xray_direct_bindings: {direct_bindings}",
-                f"    representative: {representative_path}",
-                f"    representative_binding: {representative_binding}",
-                f"    representative_binding_owner: {binding_owner}",
-                f"    terminal: {terminal}",
-                "    PartA: "
-                f"color={cls._xray_input_value(part_a, 'diffuse_reflection_color')}; "
-                f"opacity_enabled={cls._xray_input_value(part_a, 'enable_opacity')}; "
-                f"emission_input={part_a_emission}",
-                "    PartB: "
-                f"color={cls._xray_input_value(part_b, 'diffuse_reflection_color')}; "
-                f"opacity_enabled={cls._xray_input_value(part_b, 'enable_opacity')}; "
-                f"emission_input={part_b_emission}",
-                "    SurfaceFalloff: "
-                f"asset={cls._xray_shader_asset(falloff)}; "
-                f"base={falloff_base}; "
-                f"blend={falloff_blend}; "
-                f"facing={cls._xray_input_value(falloff, 'facing_weight')}; "
-                f"edge={cls._xray_input_value(falloff, 'edge_weight')}; "
-                f"bias={cls._xray_input_value(falloff, 'blend_bias')}",
-                registry_inspection,
-                "    authored_ports:",
-                *authored_ports,
-                "    authored_usda:",
-                material_fragment,
-                "    session_owns: "
-                f"material={bool(session.GetPrimAtPath(cls.XRAY_MATERIAL_PATH))}; "
-                f"representative={session_representative}",
-                f"  result: {result.message}",
-            )
-        )
-
-    @classmethod
-    def _format_xray_surface_falloff_registry(cls, falloff, UsdMdl=None) -> str:
-        """Return the narrow registry/type diagnostic for Surface Falloff."""
-
-        if not falloff:
-            return "    registry: surface_falloff=<missing>"
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
         try:
-            if UsdMdl is None:
-                import omni.UsdMdl as UsdMdl
-
-            node = UsdMdl.RegistryUtils.GetShaderNodeForPrim(falloff.GetPrim())
-            if not node:
-                return "    registry: surface_falloff=<unresolved>"
-            resolved = (
-                f"module={node.GetModuleUsdIdentifier()}; "
-                f"subIdentifier={node.GetSubIdentifier()}; "
-                f"signature={node.GetNameWithSignature()}"
+            camera_position = None
+            if rebuild or not stage.GetPrimAtPath(self.XRAY_PROBE_ROOT_PATH):
+                camera_position = self._xray_fresnel_probe_camera_position(
+                    stage, Usd, UsdGeom
+                )
+                if camera_position is None:
+                    return XRayApplyResult(
+                        False, "Fresnel probe skipped: review camera not found."
+                    )
+                self._clear_xray_fresnel_probe(stage)
+                # BBoxCache prunes a subtree with resolved visibility=invisible.
+                # Snapshot bounds before the probe's Session Layer hides the server.
+                bbox = self._xray_fresnel_probe_server_bbox(server, Usd, UsdGeom)
+                if bbox is None:
+                    return XRayApplyResult(
+                        False, "Fresnel probe skipped: server bounds are unavailable."
+                    )
+                self._xray_probe_server_bbox_snapshot = bbox
+                self._capture_and_hide_xray_probe_server(stage, Usd, UsdGeom)
+                # The review camera is already framed for the server. Keep the
+                # isolated objects small enough to fit that existing framing;
+                # Probe 01 must not move the camera after sampling it for MDL.
+                cube, sphere = self._define_xray_fresnel_probe_geometry(
+                    stage, bbox, Gf, UsdGeom
+                )
+                material = self._define_xray_fresnel_probe_material(
+                    stage, Sdf, UsdShade
+                )
+                for prim in (cube.GetPrim(), sphere.GetPrim()):
+                    UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+            self._set_xray_fresnel_probe_values(
+                stage,
+                values,
+                Gf,
+                Sdf,
+                UsdShade,
+                camera_position=camera_position,
             )
-            lines = [f"    registry: {resolved}"]
-            for name, definition, authored in (
-                ("base", node.GetShaderInput("base"), falloff.GetInput("base")),
-                ("blend", node.GetShaderInput("blend"), falloff.GetInput("blend")),
-                ("out", node.GetShaderOutput("out"), falloff.GetOutput("out")),
-            ):
-                declared_type = (
-                    cls._sdf_type_from_sdr_property(definition)
-                    if definition
+            self._log_xray_fresnel_probe_diagnostic(
+                carb,
+                action="Probe 01" if rebuild else "Apply Probe Parameters",
+                formatter=lambda: self._format_xray_fresnel_probe_state(
+                    stage,
+                    Usd,
+                    UsdGeom,
+                    UsdShade,
+                    action="Probe 01" if rebuild else "Apply Probe Parameters",
+                    values=values,
+                ),
+            )
+            return XRayApplyResult(True, "Custom MDL Fresnel Probe 01 ready.", 2)
+        finally:
+            stage.SetEditTarget(previous_target)
+
+    def clear_xray_fresnel_probe_in_kit(self) -> XRayApplyResult:
+        import carb
+        import omni.usd
+        from pxr import Usd, UsdGeom, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return XRayApplyResult(True, "Fresnel probe is inactive; no open stage.")
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            prior_visibility_state = self._xray_probe_visibility_state
+            camera_before_clear = self._xray_fresnel_probe_camera_snapshot(
+                stage, Usd, UsdGeom, UsdShade
+            )
+            self._clear_xray_fresnel_probe(stage)
+            review_camera_after_clear = self._xray_probe_diagnostic_value(
+                lambda: self._xray_fresnel_probe_camera_position(stage, Usd, UsdGeom)
+            )
+            self._log_xray_fresnel_probe_diagnostic(
+                carb,
+                action="Clear Probe",
+                formatter=lambda: self._format_xray_fresnel_probe_clear_state(
+                    stage,
+                    Usd,
+                    UsdGeom,
+                    UsdShade,
+                    prior_visibility_state=prior_visibility_state,
+                    camera_before_clear=camera_before_clear,
+                    review_camera_after_clear=review_camera_after_clear,
+                ),
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+        return XRayApplyResult(True, "Custom MDL Fresnel Probe cleared.")
+
+    @staticmethod
+    def _log_xray_fresnel_probe_diagnostic(carb, *, action: str, formatter) -> None:
+        """Diagnostics must not alter the result of an already-authored probe."""
+
+        try:
+            carb.log_warn(formatter())
+        except Exception as error:
+            carb.log_warn(
+                "DTRS Custom MDL Fresnel Probe 01\n"
+                f"  action: {action}\n"
+                f"  diagnostic: <inspection failed: {error}>"
+            )
+
+    @staticmethod
+    def _xray_probe_diagnostic_value(reader):
+        try:
+            return reader()
+        except Exception as error:
+            return f"<inspection failed: {error}>"
+
+    def _capture_and_hide_xray_probe_server(self, stage, Usd, UsdGeom) -> None:
+        server = stage.GetPrimAtPath(self.XRAY_PROBE_SERVER_PATH)
+        visibility = UsdGeom.Imageable(server).GetVisibilityAttr()
+        spec = stage.GetSessionLayer().GetPropertyAtPath(visibility.GetPath())
+        self._xray_probe_visibility_state = (
+            spec is not None,
+            visibility.Get() if spec is not None else None,
+        )
+        visibility.Set(UsdGeom.Tokens.invisible)
+        self._xray_probe_light_visibility_states = []
+        for prim in Usd.PrimRange(server):
+            if not prim.GetTypeName().endswith("Light"):
+                continue
+            light_visibility = UsdGeom.Imageable(prim).GetVisibilityAttr()
+            light_spec = stage.GetSessionLayer().GetPropertyAtPath(
+                light_visibility.GetPath()
+            )
+            self._xray_probe_light_visibility_states.append(
+                (str(prim.GetPath()), light_spec is not None, light_visibility.Get())
+            )
+            light_visibility.Set(UsdGeom.Tokens.inherited)
+
+    @classmethod
+    def _xray_fresnel_probe_camera_position(cls, stage, Usd, UsdGeom):
+        """Return the ReviewCamera world-space position for the static MDL probe."""
+
+        camera = stage.GetPrimAtPath("/DTRS_Runtime/ReviewCamera")
+        if not camera or not camera.IsValid():
+            return None
+        matrix = UsdGeom.XformCache(Usd.TimeCode.Default()).GetLocalToWorldTransform(
+            camera
+        )
+        position = matrix.ExtractTranslation()
+        return (float(position[0]), float(position[1]), float(position[2]))
+
+    @classmethod
+    def _xray_fresnel_probe_layout(cls, bbox):
+        """Return a non-overlapping cube/sphere layout within the server scale."""
+
+        size = (
+            max(float(component) for component in bbox.GetSize())
+            * cls.XRAY_PROBE_SIZE_FRACTION
+        )
+        center = (bbox.GetMin() + bbox.GetMax()) * 0.5
+        gap = size * 0.25
+        # Cube half-width + sphere radius + visible gap.
+        distance = size * 0.5 + size * 0.5 + gap
+        return size, center, distance, gap
+
+    @classmethod
+    def _define_xray_fresnel_probe_geometry(cls, stage, bbox, Gf, UsdGeom):
+        """Author probe geometry from server bounds without moving the camera."""
+
+        size, center, distance, _gap = cls._xray_fresnel_probe_layout(bbox)
+        cube = UsdGeom.Cube.Define(stage, f"{cls.XRAY_PROBE_ROOT_PATH}/Cube")
+        cube.CreateSizeAttr(size)
+        sphere = cls._define_xray_fresnel_probe_sphere(
+            stage,
+            f"{cls.XRAY_PROBE_ROOT_PATH}/Sphere",
+            size * 0.5,
+            Gf,
+            UsdGeom,
+        )
+        cube.AddTranslateOp().Set(
+            Gf.Vec3d(center[0] - distance * 0.5, center[1], center[2])
+        )
+        sphere.AddTranslateOp().Set(
+            Gf.Vec3d(center[0] + distance * 0.5, center[1], center[2])
+        )
+        return cube, sphere
+
+    @staticmethod
+    def _xray_fresnel_probe_server_bbox(server, Usd, UsdGeom):
+        """Return valid server bounds without depending on composed visibility."""
+
+        purposes = [
+            getattr(UsdGeom.Tokens, name)
+            for name in RuntimeController.XRAY_PROBE_BOUND_PURPOSES
+        ]
+        bbox = (
+            UsdGeom.BBoxCache(
+                Usd.TimeCode.Default(),
+                purposes,
+                useExtentsHint=True,
+                ignoreVisibility=True,
+            )
+            .ComputeWorldBound(server)
+            .ComputeAlignedBox()
+        )
+        extent = bbox.GetSize()
+        max_extent = max(float(component) for component in extent)
+        return bbox if math.isfinite(max_extent) and max_extent > 0.0 else None
+
+    def _xray_fresnel_probe_geometry_state(self, stage, Usd, UsdGeom) -> dict:
+        """Read the authored Probe 01 dimensions for a compact operator log."""
+
+        bbox = self._xray_probe_server_bbox_snapshot
+        if bbox is None:
+            raise ValueError("pre-hide server bounds were not captured")
+        bbox_min = bbox.GetMin()
+        bbox_max = bbox.GetMax()
+        bbox_extent = bbox.GetSize()
+        max_extent = max(float(component) for component in bbox_extent)
+        cube = UsdGeom.Cube.Get(stage, f"{self.XRAY_PROBE_ROOT_PATH}/Cube")
+        sphere = UsdGeom.Mesh.Get(stage, f"{self.XRAY_PROBE_ROOT_PATH}/Sphere")
+        cube_size = float(cube.GetSizeAttr().Get())
+        sphere_points = sphere.GetPointsAttr().Get() or []
+        sphere_radius = max(
+            (
+                math.sqrt(
+                    float(point[0]) ** 2 + float(point[1]) ** 2 + float(point[2]) ** 2
+                )
+                for point in sphere_points
+            ),
+            default=0.0,
+        )
+        xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+        cube_center = xform_cache.GetLocalToWorldTransform(
+            cube.GetPrim()
+        ).ExtractTranslation()
+        sphere_center = xform_cache.GetLocalToWorldTransform(
+            sphere.GetPrim()
+        ).ExtractTranslation()
+        center_distance = math.sqrt(
+            sum(
+                (float(sphere_center[index]) - float(cube_center[index])) ** 2
+                for index in range(3)
+            )
+        )
+        return {
+            "server_bbox_min": tuple(float(value) for value in bbox_min),
+            "server_bbox_max": tuple(float(value) for value in bbox_max),
+            "server_bbox_extent": tuple(float(value) for value in bbox_extent),
+            "server_bbox_max_extent": max_extent,
+            "probe_size": max_extent * self.XRAY_PROBE_SIZE_FRACTION,
+            "cube_size": cube_size,
+            "sphere_radius": sphere_radius,
+            "cube_center": tuple(float(value) for value in cube_center),
+            "sphere_center": tuple(float(value) for value in sphere_center),
+            "center_distance": center_distance,
+            "gap": center_distance - cube_size * 0.5 - sphere_radius,
+        }
+
+    def _xray_fresnel_probe_camera_snapshot(self, stage, Usd, UsdGeom, UsdShade):
+        """Collect camera diagnostics without allowing inspection to affect cleanup."""
+
+        shader = UsdShade.Shader.Get(stage, f"{self.XRAY_PROBE_MATERIAL_PATH}/Shader")
+        camera_input = shader.GetInput("camera_position") if shader else None
+        return {
+            "review_camera_position": self._xray_probe_diagnostic_value(
+                lambda: self._xray_fresnel_probe_camera_position(stage, Usd, UsdGeom)
+            ),
+            "camera_position_input": self._xray_probe_diagnostic_value(
+                lambda: (
+                    camera_input.Get()
+                    if camera_input and camera_input.GetAttr().HasAuthoredValue()
                     else "<missing>"
                 )
-                declared_sdr_type = definition.GetType() if definition else "<missing>"
-                declared_metadata = definition.GetMetadata() if definition else {}
-                authored_type = authored.GetTypeName() if authored else "<missing>"
-                authored_metadata = (
-                    authored.GetAttr().GetMetadata("sdrMetadata") if authored else {}
+            ),
+        }
+
+    @staticmethod
+    def _xray_probe_camera_positions_match(current, authored, tolerance=1.0e-4):
+        if current is None or authored is None:
+            raise ValueError("camera position is missing")
+        return all(
+            abs(float(current[index]) - float(authored[index])) <= tolerance
+            for index in range(3)
+        )
+
+    def _clear_xray_fresnel_probe(self, stage) -> None:
+        from pxr import UsdGeom
+
+        stage.RemovePrim(self.XRAY_PROBE_ROOT_PATH)
+        stage.RemovePrim(self.XRAY_PROBE_MATERIAL_PATH)
+        server = stage.GetPrimAtPath(self.XRAY_PROBE_SERVER_PATH)
+        prior = getattr(self, "_xray_probe_visibility_state", None)
+        if server and server.IsValid() and prior is not None:
+            had_session_spec, value = prior
+            visibility = server.GetAttribute("visibility")
+            if had_session_spec:
+                visibility.Set(value)
+            else:
+                server.RemoveProperty("visibility")
+                self._remove_xray_probe_session_property_spec(
+                    stage, visibility.GetPath()
                 )
-                lines.append(
-                    f"      {name}: registry_sdf={declared_type}; "
-                    f"registry_sdr={declared_sdr_type}; "
-                    f"registry_sdrMetadata={declared_metadata}; "
-                    f"authored_sdf={authored_type}; "
-                    f"authored_sdrMetadata={authored_metadata}"
+        for path, had_session_spec, value in getattr(
+            self, "_xray_probe_light_visibility_states", []
+        ):
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                continue
+            if had_session_spec:
+                UsdGeom.Imageable(prim).GetVisibilityAttr().Set(value)
+            else:
+                prim.RemoveProperty("visibility")
+                self._remove_xray_probe_session_property_spec(
+                    stage, UsdGeom.Imageable(prim).GetVisibilityAttr().GetPath()
                 )
-            return "\n".join(lines)
-        except Exception as error:
-            return f"    registry: inspection_failed={error}"
+        self._xray_probe_visibility_state = None
+        self._xray_probe_light_visibility_states = []
+        self._xray_probe_server_bbox_snapshot = None
+
+    @staticmethod
+    def _remove_xray_probe_session_property_spec(stage, property_path) -> None:
+        """Remove a probe-owned property spec if the Usd convenience call left it."""
+
+        session_prim = stage.GetSessionLayer().GetPrimAtPath(
+            property_path.GetPrimPath()
+        )
+        property_spec = stage.GetSessionLayer().GetPropertyAtPath(property_path)
+        if session_prim and property_spec:
+            session_prim.RemoveProperty(property_spec)
 
     @classmethod
-    def _xray_surface_falloff_authored_port_lines(cls, material, part_a, falloff):
-        """Describe only authored MDL material ports and their exact connections."""
+    def _define_xray_fresnel_probe_sphere(cls, stage, path, radius, Gf, UsdGeom):
+        """Define a smooth UV mesh because UsdGeom.Sphere has no resolution field."""
 
-        return tuple(
-            cls._xray_authored_port_line(name, port)
-            for name, port in (
-                ("PartA.outputs:out", part_a.GetOutput("out") if part_a else None),
+        longitude_count = cls.XRAY_PROBE_SPHERE_LONGITUDE_SEGMENTS
+        latitude_count = cls.XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS
+        points = [Gf.Vec3f(0.0, float(radius), 0.0)]
+        normals = [Gf.Vec3f(0.0, 1.0, 0.0)]
+        for latitude in range(1, latitude_count):
+            theta = math.pi * latitude / latitude_count
+            sin_theta = math.sin(theta)
+            y = math.cos(theta)
+            for longitude in range(longitude_count):
+                phi = 2.0 * math.pi * longitude / longitude_count
+                normal = Gf.Vec3f(
+                    sin_theta * math.cos(phi), y, sin_theta * math.sin(phi)
+                )
+                normals.append(normal)
+                points.append(normal * radius)
+        bottom_index = len(points)
+        points.append(Gf.Vec3f(0.0, -float(radius), 0.0))
+        normals.append(Gf.Vec3f(0.0, -1.0, 0.0))
+
+        face_counts = []
+        face_indices = []
+        first_ring = 1
+        last_ring = 1 + (latitude_count - 2) * longitude_count
+        for longitude in range(longitude_count):
+            current = first_ring + longitude
+            following = first_ring + (longitude + 1) % longitude_count
+            face_counts.append(3)
+            face_indices.extend((0, following, current))
+        for latitude in range(latitude_count - 2):
+            ring = first_ring + latitude * longitude_count
+            next_ring = ring + longitude_count
+            for longitude in range(longitude_count):
+                current = ring + longitude
+                following = ring + (longitude + 1) % longitude_count
+                next_current = next_ring + longitude
+                next_following = next_ring + (longitude + 1) % longitude_count
+                face_counts.extend((3, 3))
+                face_indices.extend(
+                    (
+                        current,
+                        following,
+                        next_following,
+                        current,
+                        next_following,
+                        next_current,
+                    )
+                )
+        for longitude in range(longitude_count):
+            current = last_ring + longitude
+            following = last_ring + (longitude + 1) % longitude_count
+            face_counts.append(3)
+            face_indices.extend((bottom_index, current, following))
+
+        sphere = UsdGeom.Mesh.Define(stage, path)
+        sphere.CreatePointsAttr(points)
+        sphere.CreateNormalsAttr(normals)
+        sphere.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+        sphere.CreateFaceVertexCountsAttr(face_counts)
+        sphere.CreateFaceVertexIndicesAttr(face_indices)
+        sphere.CreateExtentAttr(
+            [
+                Gf.Vec3f(-radius, -radius, -radius),
+                Gf.Vec3f(radius, radius, radius),
+            ]
+        )
+        sphere.CreateDoubleSidedAttr(True)
+        return sphere
+
+    def _format_xray_fresnel_probe_state(
+        self, stage, Usd, UsdGeom, UsdShade, *, action: str, values
+    ) -> str:
+        material = UsdShade.Material.Get(stage, self.XRAY_PROBE_MATERIAL_PATH)
+        shader = UsdShade.Shader.Get(stage, f"{self.XRAY_PROBE_MATERIAL_PATH}/Shader")
+        light_paths = []
+        for prim in Usd.PrimRange(stage.GetPseudoRoot()):
+            if prim.GetTypeName().endswith("Light"):
+                visibility = UsdGeom.Imageable(prim).ComputeVisibility()
+                light_paths.append(f"{prim.GetPath()}={visibility}")
+        cube = stage.GetPrimAtPath(f"{self.XRAY_PROBE_ROOT_PATH}/Cube")
+        sphere = stage.GetPrimAtPath(f"{self.XRAY_PROBE_ROOT_PATH}/Sphere")
+        facing, edge, center, softness, sharpness = values
+        cube_binding = UsdShade.MaterialBindingAPI(cube).ComputeBoundMaterial()[0]
+        sphere_binding = UsdShade.MaterialBindingAPI(sphere).ComputeBoundMaterial()[0]
+        sphere_mesh = UsdGeom.Mesh(sphere)
+        face_count = len(sphere_mesh.GetFaceVertexCountsAttr().Get() or [])
+        point_count = len(sphere_mesh.GetPointsAttr().Get() or [])
+        camera_snapshot = self._xray_fresnel_probe_camera_snapshot(
+            stage, Usd, UsdGeom, UsdShade
+        )
+        camera_position = camera_snapshot["camera_position_input"]
+        review_camera_position = camera_snapshot["review_camera_position"]
+        camera_match = self._xray_probe_diagnostic_value(
+            lambda: self._xray_probe_camera_positions_match(
+                review_camera_position, camera_position
+            )
+        )
+        geometry = self._xray_fresnel_probe_geometry_state(stage, Usd, UsdGeom)
+        shader_asset = shader.GetSourceAsset("mdl").path if shader else "<missing>"
+        cube_binding_path = cube_binding.GetPath() if cube_binding else "<none>"
+        sphere_binding_path = sphere_binding.GetPath() if sphere_binding else "<none>"
+        server_session_visibility = (
+            stage.GetSessionLayer().GetPropertyAtPath("/blackwell_rig.visibility")
+            is not None
+        )
+        scene_lights = ", ".join(light_paths) or "<none>"
+        return "\n".join(
+            (
+                "DTRS Custom MDL Fresnel Probe 01",
+                f"  action: {action}",
+                "  shader_mode: static controllable NdotV mask",
+                f"  camera_position_input: {camera_position}",
+                f"  review_camera_position: {review_camera_position}",
+                f"  camera_match: {camera_match}",
+                "  viewport_framing: disabled",
                 (
-                    "SurfaceFalloff.inputs:base",
-                    falloff.GetInput("base") if falloff else None,
+                    "  parameters: "
+                    f"facing_color={facing}; edge_color={edge}; "
+                    f"edge_center={center:g}; edge_softness={softness:g}; "
+                    f"edge_sharpness={sharpness:g}"
+                ),
+                "  probe_geometry:",
+                f"    server_bbox_min={geometry['server_bbox_min']}",
+                f"    server_bbox_max={geometry['server_bbox_max']}",
+                f"    server_bbox_extent={geometry['server_bbox_extent']}",
+                f"    server_bbox_max_extent={geometry['server_bbox_max_extent']:g}",
+                f"    probe_scale_fraction={self.XRAY_PROBE_SIZE_FRACTION:g}",
+                f"    probe_size={geometry['probe_size']:g}",
+                f"    cube_size={geometry['cube_size']:g}",
+                f"    sphere_radius={geometry['sphere_radius']:g}",
+                f"    cube_center={geometry['cube_center']}",
+                f"    sphere_center={geometry['sphere_center']}",
+                f"    center_distance={geometry['center_distance']:g}",
+                f"    gap={geometry['gap']:g}",
+                (
+                    "  scene: "
+                    f"cube={cube.IsValid()} ({cube.GetTypeName()}); "
+                    f"sphere={sphere.IsValid()} ({sphere.GetTypeName()}, "
+                    f"points={point_count}, triangles={face_count}, "
+                    "segments="
+                    f"{self.XRAY_PROBE_SPHERE_LONGITUDE_SEGMENTS}x"
+                    f"{self.XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS})"
                 ),
                 (
-                    "SurfaceFalloff.inputs:blend",
-                    falloff.GetInput("blend") if falloff else None,
+                    "  material: "
+                    f"exists={bool(material)}; "
+                    f"shader_asset={shader_asset}; "
+                    f"cube_binding={cube_binding_path}; "
+                    f"sphere_binding={sphere_binding_path}"
                 ),
+                f"  server_session_visibility={server_session_visibility}",
                 (
-                    "SurfaceFalloff.outputs:out",
-                    falloff.GetOutput("out") if falloff else None,
+                    "  preserved_lights="
+                    f"{len(self._xray_probe_light_visibility_states)}; "
+                    f"scene_lights={scene_lights}"
                 ),
+            )
+        )
+
+    def _format_xray_fresnel_probe_clear_state(
+        self,
+        stage,
+        Usd,
+        UsdGeom,
+        UsdShade,
+        *,
+        prior_visibility_state,
+        camera_before_clear,
+        review_camera_after_clear,
+    ) -> str:
+        del Usd, UsdShade
+        server = stage.GetPrimAtPath(self.XRAY_PROBE_SERVER_PATH)
+        session = stage.GetSessionLayer()
+        visibility_path = f"{self.XRAY_PROBE_SERVER_PATH}.visibility"
+        camera_changed = self._xray_probe_diagnostic_value(
+            lambda: not self._xray_probe_camera_positions_match(
+                camera_before_clear["review_camera_position"],
+                review_camera_after_clear,
+            )
+        )
+        probe_root_present = stage.GetPrimAtPath(self.XRAY_PROBE_ROOT_PATH).IsValid()
+        probe_material_present = stage.GetPrimAtPath(
+            self.XRAY_PROBE_MATERIAL_PATH
+        ).IsValid()
+        server_session_visibility_spec = (
+            session.GetPropertyAtPath(visibility_path) is not None
+        )
+        server_composed_visibility = (
+            UsdGeom.Imageable(server).ComputeVisibility() if server else "<missing>"
+        )
+        return "\n".join(
+            (
+                "DTRS Custom MDL Fresnel Probe 01",
+                "  action: Clear Probe",
+                "  shader_mode: static controllable NdotV mask",
+                "  review_camera_position_before_clear="
+                f"{camera_before_clear['review_camera_position']}",
+                "  camera_position_input_before_clear="
+                f"{camera_before_clear['camera_position_input']}",
+                "  review_camera_position_after_clear=" f"{review_camera_after_clear}",
+                f"  camera_changed_by_clear={camera_changed}",
+                f"  probe_root_present={probe_root_present}",
+                f"  probe_material_present={probe_material_present}",
+                f"  server_valid={server.IsValid() if server else False}",
+                "  prior_server_session_visibility="
+                f"{prior_visibility_state[0] if prior_visibility_state else '<none>'}",
+                f"  server_session_visibility_spec={server_session_visibility_spec}",
+                f"  server_composed_visibility={server_composed_visibility}",
+            )
+        )
+
+    @classmethod
+    def _format_xray_action_state(
+        cls,
+        stage,
+        Usd,
+        UsdShade,
+        *,
+        action: str,
+        requested_selected: bool,
+        result: str,
+    ) -> str:
+        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
+        session = stage.GetSessionLayer()
+        xray_binding_count = 0
+        session_binding_spec_count = 0
+        if root and root.IsValid():
+            for prim in Usd.PrimRange(root):
+                if prim.GetTypeName() != "Mesh":
+                    continue
+                relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+                if str(cls.XRAY_MATERIAL_PATH) in {
+                    str(path) for path in relation.GetTargets()
+                }:
+                    xray_binding_count += 1
+                if session.GetPropertyAtPath(relation.GetPath()) is not None:
+                    session_binding_spec_count += 1
+        xray_material_present = stage.GetPrimAtPath(cls.XRAY_MATERIAL_PATH).IsValid()
+        return "\n".join(
+            (
+                "DTRS X-Ray action",
+                f"  action: {action}",
+                f"  requested_selected: {requested_selected}",
+                f"  result: {result}",
                 (
-                    "Material.outputs:mdl:surface",
-                    material.GetSurfaceOutput("mdl") if material else None,
+                    "  runtime: "
+                    f"xray_material_present={xray_material_present}; "
+                    f"xray_direct_bindings={xray_binding_count}; "
+                    f"session_binding_specs={session_binding_spec_count}"
                 ),
             )
         )
 
     @classmethod
-    def _xray_authored_port_line(cls, name: str, port) -> str:
-        if not port:
-            return f"      {name}: <missing>"
-        return (
-            f"      {name}: sdf={port.GetTypeName()}; "
-            f"sdrMetadata={port.GetAttr().GetMetadata('sdrMetadata')}; "
-            f"connection={cls._xray_connection(port)}"
+    def _define_xray_fresnel_probe_material(cls, stage, Sdf, UsdShade):
+        material = UsdShade.Material.Define(stage, cls.XRAY_PROBE_MATERIAL_PATH)
+        shader = UsdShade.Shader.Define(stage, f"{cls.XRAY_PROBE_MATERIAL_PATH}/Shader")
+        shader.CreateImplementationSourceAttr().Set(UsdShade.Tokens.sourceAsset)
+        mdl_path = (
+            Path(__file__).resolve().parents[1]
+            / "ext"
+            / "msp.dtrs"
+            / "data"
+            / "materials"
+            / "DTRS_Fresnel_Test.mdl"
         )
+        shader.SetSourceAsset(Sdf.AssetPath(str(mdl_path)), "mdl")
+        shader.SetSourceAssetSubIdentifier("DTRS_Fresnel_Test", "mdl")
+        shader.CreateOutput("out", Sdf.ValueTypeNames.Token).SetRenderType("material")
+        material.CreateSurfaceOutput("mdl").ConnectToSource(
+            shader.ConnectableAPI(), "out"
+        )
+        return material
+
+    @classmethod
+    def _set_xray_fresnel_probe_values(
+        cls, stage, values, Gf, Sdf, UsdShade, *, camera_position=None
+    ) -> None:
+        facing, edge, center, softness, sharpness = values
+        shader = UsdShade.Shader.Get(stage, f"{cls.XRAY_PROBE_MATERIAL_PATH}/Shader")
+        for name, value, value_type in (
+            ("facing_color", Gf.Vec3f(*facing), Sdf.ValueTypeNames.Color3f),
+            ("edge_color", Gf.Vec3f(*edge), Sdf.ValueTypeNames.Color3f),
+            ("edge_center", center, Sdf.ValueTypeNames.Float),
+            ("edge_softness", softness, Sdf.ValueTypeNames.Float),
+            ("edge_sharpness", sharpness, Sdf.ValueTypeNames.Float),
+        ):
+            shader.CreateInput(name, value_type).Set(value)
+        if camera_position is not None:
+            shader.CreateInput("camera_position", Sdf.ValueTypeNames.Float3).Set(
+                Gf.Vec3f(*camera_position)
+            )
 
     def clear_xray_material_in_kit(self) -> XRayApplyResult:
         """Clear transient X-Ray bindings without changing persisted UI settings."""
@@ -1744,123 +1941,6 @@ class RuntimeController(FlowRuntimeMixin):
             "X-Ray disabled; original chassis materials restored.",
             removed_count,
         )
-
-    def log_xray_material_state_in_kit(
-        self,
-        requested_selected: bool,
-        result: XRayApplyResult | None = None,
-        event_label: str = "Apply",
-        state: str | None = None,
-    ) -> None:
-        """Write one compact, composed-state X-Ray diagnostic report."""
-
-        import carb
-        import omni.usd
-        from pxr import Sdf, Usd, UsdShade
-
-        stage = omni.usd.get_context().get_stage()
-        result_message = result.message if result else "No stage mutation has run."
-        if not stage:
-            carb.log_warn(
-                "DTRS X-Ray diagnostic\n"
-                f"  event: {event_label}\n"
-                f"  state: {state or '<unknown>'}\n"
-                f"  requested_selected: {requested_selected}\n"
-                f"  result: {result_message}\n"
-                "  stage: <none>"
-            )
-            return
-        carb.log_warn(
-            self._format_xray_material_state(
-                stage,
-                requested_selected,
-                XRayApplyResult(True, result_message),
-                Sdf,
-                Usd,
-                UsdShade,
-                event_label,
-                state,
-                getattr(self, "_xray_last_authoring_edit_target", "<not authored>"),
-            )
-        )
-
-    @classmethod
-    def _format_xray_material_state(
-        cls,
-        stage,
-        requested_selected: bool,
-        result: XRayApplyResult,
-        Sdf,
-        Usd,
-        UsdShade,
-        event_label: str = "Apply",
-        state: str | None = None,
-        authoring_edit_target: str = "<not authored>",
-    ) -> str:
-        """Format A/B/C evidence without dumping all chassis meshes."""
-
-        actual_state = state or ("B" if requested_selected else "C")
-        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
-        material = UsdShade.Material.Get(stage, cls.XRAY_MATERIAL_PATH)
-        material_defined = bool(material and material.GetPrim().IsValid())
-        representative = cls._xray_diagnostic_representative_mesh(
-            stage, root, Usd, UsdShade
-        )
-        aggregate = cls._xray_binding_aggregate(root, Usd, UsdShade)
-        original = cls._xray_material_fingerprint(stage, representative, UsdShade)
-        if actual_state == "A":
-            cls._xray_diagnostic_baseline = original
-            cls._xray_diagnostic_baseline_root_dirty = stage.GetRootLayer().dirty
-        comparison = cls._xray_fingerprint_comparison(actual_state, original)
-        lines = [
-            "DTRS X-Ray diagnostic",
-            f"  event: {event_label}",
-            f"  state: {actual_state}",
-            f"  requested_selected: {requested_selected}",
-            f"  result: {result.message}",
-            "  composition:",
-            f"    root_layer: {stage.GetRootLayer().identifier}",
-            f"    root_dirty: {stage.GetRootLayer().dirty}",
-            f"    session_layer: {stage.GetSessionLayer().identifier}",
-            f"    current_edit_target: {stage.GetEditTarget().GetLayer().identifier}",
-            f"    xray_authoring_edit_target: {authoring_edit_target}",
-            "    root_dirty_vs_A: "
-            + (
-                "baseline captured"
-                if actual_state == "A"
-                else (
-                    str(
-                        stage.GetRootLayer().dirty
-                        == cls._xray_diagnostic_baseline_root_dirty
-                    )
-                    if cls._xray_diagnostic_baseline_root_dirty is not None
-                    else "baseline unavailable"
-                )
-            ),
-            "  chassis_bindings:",
-            f"    mesh_count: {aggregate['mesh_count']}",
-            f"    xray_direct_count: {aggregate['xray_direct_count']}",
-            f"    resolved: {aggregate['resolved']}",
-            "  representative_mesh: "
-            f"{representative.GetPath() if representative else '<none>'}",
-            f"  representative_binding: {original['binding']}",
-            f"  representative_binding_owners: {original['binding_owners']}",
-            f"  effective_material: {original['material']}",
-            "  effective_mdl: "
-            f"{original['mdl_source']} | {original['mdl_subidentifier']}",
-            f"  effective_base_color: {original['base_color']}",
-            f"  effective_opacity: {original['opacity']}",
-            f"  effective_roughness: {original['roughness']}",
-            f"  effective_emission: {original['emission']}",
-            f"  A_vs_{actual_state}: {comparison}",
-        ]
-        if material_defined:
-            lines.extend(
-                cls._xray_graph_diagnostic_lines(
-                    stage, material, representative, Sdf, UsdShade
-                )
-            )
-        return "\n".join(lines)
 
     @classmethod
     def _xray_diagnostic_representative_mesh(cls, stage, root, Usd, UsdShade):
@@ -2126,7 +2206,7 @@ class RuntimeController(FlowRuntimeMixin):
 
     @classmethod
     def _clear_xray_session_overrides(cls, stage, Usd, UsdShade) -> int:
-        """Remove only bindings owned by X-Ray, preserving runtime state."""
+        """Remove X-Ray-owned session specs and reveal weaker authored bindings."""
 
         removed_count = 0
         xray_path = str(cls.XRAY_MATERIAL_PATH)
@@ -2140,20 +2220,11 @@ class RuntimeController(FlowRuntimeMixin):
             direct_binding = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
             target_paths = {str(path) for path in direct_binding.GetTargets()}
             if xray_path in target_paths:
-                # Removing the SdfPrimSpec directly updates composition but bypasses
-                # the UsdStage change notice that Hydra needs to refresh bindings.
-                # This public API removes only the session-layer relation spec and
-                # notifies renderer clients, revealing the weaker authored binding.
-                direct_binding.ClearTargets(True)
-                original_material, _binding = UsdShade.MaterialBindingAPI(
-                    prim
-                ).ComputeBoundMaterial()
-                if original_material and original_material.GetPrim().IsValid():
-                    # RTX retains the prior compiled material when a direct binding
-                    # merely disappears. Re-authoring the already resolved source
-                    # material provides the renderer with an explicit replacement
-                    # without changing the source asset or visibility.
-                    UsdShade.MaterialBindingAPI.Apply(prim).Bind(original_material)
+                # Removing the relationship through Usd keeps normal stage change
+                # notices while deleting only this Session Layer opinion.  Do not
+                # rebind the resolved source material: its authored binding then
+                # composes naturally from the weaker asset layer.
+                prim.RemoveProperty(direct_binding.GetName())
                 removed_count += 1
         stage.RemovePrim(cls.XRAY_MATERIAL_PATH)
         return removed_count
