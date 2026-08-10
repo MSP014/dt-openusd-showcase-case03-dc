@@ -449,39 +449,56 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             height=26,
             width=ui.Percent(100),
         )
-        ui.Label("Surface Falloff isolation (temporary)", height=18)
-        with ui.HStack(height=26, spacing=4, content_clipping=True):
-            ui.Button(
-                "Probe 1 · A",
-                clicked_fn=lambda: self._apply_xray_surface_falloff_probe(1),
-                width=ui.Fraction(1),
-                tooltip="Opaque yellow Part A only: facing=0, edge=0.",
-            )
-            ui.Button(
-                "Probe 2 · B",
-                clicked_fn=lambda: self._apply_xray_surface_falloff_probe(2),
-                width=ui.Fraction(1),
-                tooltip="Opaque blue Part B only: facing=1, edge=1.",
-            )
-            ui.Button(
-                "Probe 3 · Falloff",
-                clicked_fn=lambda: self._apply_xray_surface_falloff_probe(3),
-                width=ui.Fraction(1),
-                tooltip=(
-                    "Yellow facing surfaces and blue grazing edges: "
-                    "facing=0, edge=1."
-                ),
-            )
-        ui.Button(
-            "Probe 4 · Blend A control",
-            clicked_fn=lambda: self._apply_xray_surface_falloff_probe(4),
-            height=26,
-            width=ui.Percent(100),
-            tooltip=(
-                "Clean-start control: base and blend both use yellow Part A; "
-                "facing=1, edge=1."
-            ),
+        self._build_config_section(
+            "Debug - Custom MDL Fresnel",
+            self._build_xray_fresnel_probe_controls,
+            collapsed=True,
         )
+
+    def _build_xray_fresnel_probe_controls(self) -> None:
+        """Build temporary controls for the isolated renderer experiment."""
+
+        if not hasattr(self, "_xray_probe_models"):
+            self._xray_probe_models = {
+                "facing": ui.SimpleStringModel("#FFFF00"),
+                "edge": ui.SimpleStringModel("#0000FF"),
+                "center": ui.SimpleFloatModel(0.65),
+                "softness": ui.SimpleFloatModel(0.20),
+                "sharpness": ui.SimpleFloatModel(1.0),
+            }
+        ui.Label("Static controllable NdotV mask", height=18)
+        for label, key in (("Facing Color", "facing"), ("Edge Color", "edge")):
+            with ui.HStack(height=24):
+                ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
+                ui.StringField(model=self._xray_probe_models[key], width=ui.Fraction(1))
+        for label, key in (
+            ("Edge Center", "center"),
+            ("Edge Softness", "softness"),
+            ("Edge Sharpness", "sharpness"),
+        ):
+            with ui.HStack(height=24):
+                ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
+                ui.FloatDrag(
+                    model=self._xray_probe_models[key],
+                    width=ui.Fraction(1),
+                    precision=3,
+                )
+        with ui.HStack(height=26, spacing=4):
+            ui.Button(
+                "Probe 01",
+                clicked_fn=lambda: self._apply_xray_fresnel_probe(True),
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Apply Probe Parameters",
+                clicked_fn=lambda: self._apply_xray_fresnel_probe(False),
+                width=ui.Fraction(1),
+            )
+            ui.Button(
+                "Clear Probe",
+                clicked_fn=self._clear_xray_fresnel_probe,
+                width=ui.Fraction(1),
+            )
 
     @staticmethod
     def _build_xray_float_row(label: str, model, precision: int) -> None:
@@ -1913,18 +1930,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_status(f"X-Ray settings are invalid: {error}")
             return
         result = self._controller.apply_xray_material_in_kit(xray)
-        self._controller.log_xray_material_state_in_kit(
-            xray.chassis_selected,
-            result,
-            state="B" if xray.chassis_selected else "C",
-        )
-        if not result.success:
-            self._set_status(result.message)
-            return
         try:
             self._controller.save_xray_material_override(xray)
         except OSError as error:
-            self._set_status(f"X-Ray was applied but not saved: {error}")
+            self._set_status(f"X-Ray settings were not saved: {error}")
+            return
+        if not result.success:
+            self._set_status(result.message)
             return
         self._set_status(f"{result.message} Saved to local config.")
 
@@ -1948,26 +1960,43 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             raise ValueError("controls are unavailable")
         return xray_material_config_from_models(*models)
 
-    def _apply_xray_surface_falloff_probe(self, probe: int) -> None:
-        """Apply a non-persistent opaque yellow/blue Surface Falloff probe."""
+    def _xray_fresnel_probe_values(self):
+        from digital_twin_runtime_suite.app.view_controls import (
+            hex_to_rgb,
+            string_model_value,
+        )
 
+        models = self._xray_probe_models
+        center = models["center"].get_value_as_float()
+        softness = models["softness"].get_value_as_float()
+        sharpness = models["sharpness"].get_value_as_float()
+        if (
+            not 0.0 <= center <= 1.0
+            or not 0.001 <= softness <= 1.0
+            or not 0.1 <= sharpness <= 8.0
+        ):
+            raise ValueError("Probe values are outside their allowed range.")
+        return (
+            hex_to_rgb(string_model_value(models["facing"])),
+            hex_to_rgb(string_model_value(models["edge"])),
+            center,
+            softness,
+            sharpness,
+        )
+
+    def _apply_xray_fresnel_probe(self, rebuild: bool) -> None:
         try:
-            xray = replace(self._xray_config_from_controls(), chassis_selected=True)
+            values = self._xray_fresnel_probe_values()
         except ValueError as error:
-            self._set_status(f"X-Ray isolation controls are invalid: {error}")
+            self._set_status(f"Fresnel probe settings are invalid: {error}")
             return
-        result = self._controller.apply_xray_material_in_kit(
-            xray,
-            surface_falloff_probe=probe,
+        result = self._controller.apply_xray_fresnel_probe_in_kit(
+            values, rebuild=rebuild
         )
-        self._controller.log_xray_surface_falloff_probe(probe, result)
-        if not result.success:
-            self._set_status(result.message)
-            return
-        self._set_status(
-            "Surface Falloff Probe "
-            f"{probe} applied. Inspect the chassis and record PASS or FAIL."
-        )
+        self._set_status(result.message)
+
+    def _clear_xray_fresnel_probe(self) -> None:
+        self._set_status(self._controller.clear_xray_fresnel_probe_in_kit().message)
 
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
@@ -2213,19 +2242,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
 
     async def _load_default_asset(self, event_label: str = "Load"):
-        from digital_twin_runtime_suite.app.commands import XRayApplyResult
-
         result = await self._controller.open_default_asset_in_kit(
             status_callback=self._set_status,
-        )
-        xray_selected = (
-            self._controller.config.chassis_presentation.materials.xray.chassis_selected
-        )
-        self._controller.log_xray_material_state_in_kit(
-            xray_selected,
-            XRayApplyResult(result.success, result.message),
-            event_label=f"{event_label} (baseline after open stage)",
-            state="A",
         )
         self._set_status(
             self._asset_loaded_status(result.message)

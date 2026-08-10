@@ -7,3 +7,5 @@ exclude =
     .pytest_cache,
     cache,
     assets
+per-file-ignores =
+    tools/houdini/pdg/vti_writer.py:F821
