@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Event, Lock
@@ -22,6 +23,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    XRayMaterialConfig,
     chassis_presentation_with_operator_state,
     format_runtime_override,
 )
@@ -76,6 +78,16 @@ class NormalMapScaleResult:
 
 
 @dataclass(frozen=True)
+class XRayApplyResult:
+    """Result of applying or clearing the transient X-Ray material."""
+
+    success: bool
+    message: str
+    target_count: int = 0
+    used_fallback_color: bool = False
+
+
+@dataclass(frozen=True)
 class FacePanelApplyResult:
     """Result of preparing or applying the runtime front-panel hinge."""
 
@@ -123,6 +135,22 @@ class RuntimeController(FlowRuntimeMixin):
         "lan_02": "/DTRS_Runtime/Looks/FrontPanelLAN02On",
         "off": "/DTRS_Runtime/Looks/FrontPanelIndicatorOff",
     }
+    XRAY_CHASSIS_ROOT_PATH = "/blackwell_rig/chassis"
+    XRAY_SOURCE_MATERIAL_PATH = "/blackwell_rig/chassis/mtl/base_lod00_mat"
+    XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/xray_material"
+    XRAY_ISOLATION_PART_A_COLOR = (1.0, 1.0, 0.0)
+    XRAY_ISOLATION_PART_B_COLOR = (0.0, 0.0, 1.0)
+    XRAY_ISOLATION_ROUGHNESS = 0.4
+    XRAY_ISOLATION_BLEND_BIAS = 5.0
+    XRAY_SURFACE_FALLOFF_PROBES = {
+        1: (0.0, 0.0, "Part A selection", "yellow", "PartB"),
+        2: (1.0, 1.0, "Part B selection", "blue", "PartB"),
+        3: (0.0, 1.0, "Surface Falloff", "yellow face / blue edge", "PartB"),
+        4: (1.0, 1.0, "Blend input control", "yellow", "PartA"),
+    }
+    _xray_diagnostic_baseline: dict[str, str] | None = None
+    _xray_diagnostic_representative_path: str | None = None
+    _xray_diagnostic_baseline_root_dirty: bool | None = None
 
     def __init__(self, config_path: Path | str):
         self._config_path = Path(config_path)
@@ -289,6 +317,25 @@ class RuntimeController(FlowRuntimeMixin):
             materials=replace(
                 self.config.chassis_presentation.materials,
                 normal_map_scale=normal_map_scale,
+            ),
+        )
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            presentation,
+        )
+
+    def save_xray_material_override(self, xray: XRayMaterialConfig) -> Path:
+        """Persist the X-Ray UI state without storing transient USD opinions."""
+
+        presentation = replace(
+            self.config.chassis_presentation,
+            materials=replace(
+                self.config.chassis_presentation.materials,
+                xray=xray,
             ),
         )
         return self.save_runtime_override(
@@ -1160,6 +1207,1097 @@ class RuntimeController(FlowRuntimeMixin):
             ),
             texture_count=texture_count,
         )
+
+    def apply_xray_material_in_kit(
+        self,
+        xray: XRayMaterialConfig,
+        surface_falloff_probe: int | None = None,
+    ) -> XRayApplyResult:
+        """Apply the temporary Surface Falloff isolation graph in the session layer."""
+
+        import omni.usd
+        from pxr import Gf, Sdf, Usd, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return XRayApplyResult(False, "X-Ray skipped: no open stage.")
+
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        self._xray_last_authoring_edit_target = (
+            stage.GetEditTarget().GetLayer().identifier
+        )
+        try:
+            if not xray.chassis_selected:
+                removed_count = self._clear_xray_session_overrides(
+                    stage,
+                    Usd,
+                    UsdShade,
+                )
+                return XRayApplyResult(
+                    True,
+                    "X-Ray removed; original chassis materials restored.",
+                    removed_count,
+                )
+
+            root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
+            if not root or not root.IsValid():
+                return XRayApplyResult(
+                    False,
+                    "X-Ray skipped: Chassis - SilverStone RM44 was not found.",
+                )
+            self._clear_xray_session_overrides(stage, Usd, UsdShade)
+            probe = surface_falloff_probe or 3
+            facing_weight, edge_weight, _name, _expected, blend_part = (
+                self._xray_surface_falloff_probe(probe)
+            )
+            material = self._define_xray_material(
+                stage,
+                (facing_weight, edge_weight),
+                blend_part,
+                Gf,
+                Sdf,
+                UsdShade,
+            )
+            target_count = self._bind_xray_material_to_chassis(
+                stage,
+                root,
+                material,
+                Usd,
+                UsdShade,
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        if not target_count:
+            return XRayApplyResult(
+                False,
+                "X-Ray skipped: no chassis mesh targets were found.",
+            )
+        return XRayApplyResult(
+            True,
+            "X-Ray Surface Falloff isolation probe "
+            f"{probe} applied to {target_count} chassis mesh target(s).",
+            target_count,
+        )
+
+    @classmethod
+    def _xray_surface_falloff_probe(
+        cls,
+        probe: int,
+    ) -> tuple[float, float, str, str, str]:
+        """Return the fixed, non-persistent weights for one isolation probe."""
+
+        try:
+            return cls.XRAY_SURFACE_FALLOFF_PROBES[probe]
+        except KeyError as error:
+            raise ValueError(
+                f"Unknown Surface Falloff isolation probe: {probe}"
+            ) from error
+
+    def log_xray_surface_falloff_probe(
+        self,
+        probe: int,
+        result: XRayApplyResult,
+    ) -> None:
+        """Log the actual composed state immediately after a probe click."""
+
+        import carb
+        import omni.usd
+        from pxr import Usd, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            carb.log_warn(
+                "DTRS X-Ray SurfaceFalloff isolation\n"
+                f"  Probe {probe}: stage=<none>\n"
+                f"  result: {result.message}"
+            )
+            return
+        carb.log_warn(
+            self._format_xray_surface_falloff_isolation_state(
+                stage,
+                probe,
+                result,
+                Usd,
+                UsdShade,
+            )
+        )
+        if probe == 4 and result.success:
+            asyncio.ensure_future(
+                self._log_xray_surface_falloff_neuray_backend_after_renderer_update()
+            )
+
+    async def _log_xray_surface_falloff_neuray_backend_after_renderer_update(
+        self,
+    ) -> None:
+        """Inspect the active RTX MDL call after its renderer update."""
+
+        import carb
+        import omni.kit.app
+
+        for _ in range(3):
+            await omni.kit.app.get_app().next_update_async()
+        carb.log_warn(self._format_xray_surface_falloff_neuray_backend())
+
+    @classmethod
+    def _format_xray_surface_falloff_neuray_backend(cls) -> str:
+        """Read only the five runtime arguments of SurfaceFalloff's active MDL call."""
+
+        import omni.mdl.neuraylib
+        import omni.mdl.pymdlsdk as pymdlsdk
+
+        entity = None
+        snapshot = None
+        transaction = None
+        path = f"{cls.XRAY_MATERIAL_PATH}/SurfaceFalloff"
+        try:
+            neuraylib = omni.mdl.neuraylib.get_neuraylib()
+            entity = neuraylib.createMdlEntity(path)
+            entity_valid = bool(entity and entity.valid())
+            lines = [
+                "DTRS X-Ray Neuray SurfaceFalloff backend",
+                f"  prim: {path}",
+                "  entity: "
+                f"valid={entity_valid}; "
+                f"dbScopeName={getattr(entity, 'dbScopeName', '<missing>')}; "
+                "simpleNameWithSignature="
+                f"{getattr(entity, 'simpleNameWithSignature', '<missing>')}",
+            ]
+            if not entity_valid:
+                lines.append("  snapshot: NOT CREATED (entity invalid)")
+                return "\n".join(lines)
+
+            snapshot = neuraylib.createMdlEntitySnapshot(entity)
+            # MdlEntitySnapshot in this Kit build has no valid() method.  A
+            # non-null snapshot is the supported success condition; its DB
+            # identifiers name the renderer-side material call to inspect.
+            snapshot_valid = snapshot is not None
+            lines.append(
+                "  snapshot: "
+                f"returned={snapshot_valid}; "
+                f"dbScopeName={getattr(snapshot, 'dbScopeName', '<missing>')}; "
+                f"dbName={getattr(snapshot, 'dbName', '<missing>')}; "
+                "simpleNameWithSignature="
+                f"{getattr(snapshot, 'simpleNameWithSignature', '<missing>')}"
+            )
+            if not snapshot_valid:
+                return "\n".join(lines)
+
+            transaction_handle = neuraylib.createReadingTransaction(
+                snapshot.dbScopeName
+            )
+            transaction = pymdlsdk.attach_itransaction(transaction_handle)
+            # Keep all DB-interface handles in this helper's local scope. It
+            # drops them before the outer finally aborts the read transaction.
+            lines.extend(
+                cls._read_xray_surface_falloff_backend_values(
+                    transaction,
+                    snapshot.dbName,
+                    pymdlsdk,
+                )
+            )
+            return "\n".join(lines)
+        except Exception as error:
+            return (
+                "DTRS X-Ray Neuray SurfaceFalloff backend\n"
+                f"  prim: {path}\n"
+                f"  inspection_failed: {error}"
+            )
+        finally:
+            if transaction and transaction.is_open():
+                transaction.abort()
+            if snapshot is not None:
+                neuraylib.destroyMdlEntitySnapshot(snapshot)
+            if entity is not None:
+                neuraylib.destroyMdlEntity(entity)
+
+    @classmethod
+    def _read_xray_surface_falloff_backend_values(
+        cls,
+        transaction,
+        falloff_db_name: str,
+        pymdlsdk,
+    ) -> list[str]:
+        """Read primitive diagnostics, then drop all MDL DB handles before abort."""
+
+        falloff_call = None
+        falloff_arguments = None
+        part_a_call = None
+        part_a_arguments = None
+        try:
+            falloff_call = transaction.access_as(
+                pymdlsdk.IFunction_call, falloff_db_name
+            )
+            if not falloff_call or not falloff_call.is_valid_interface():
+                return ["  function_call: <invalid>"]
+
+            falloff_arguments = falloff_call.get_arguments()
+            lines = ["  backend_arguments:"]
+            base_reference = "<none>"
+            for name in (
+                "base",
+                "blend",
+                "facing_weight",
+                "edge_weight",
+                "blend_bias",
+            ):
+                details = cls._xray_neuray_expression_details(
+                    falloff_arguments.get_expression(name), pymdlsdk
+                )
+                if name == "base":
+                    base_reference = details["reference"]
+                lines.append(cls._xray_neuray_details_line(name, details))
+
+            if base_reference == "<none>":
+                lines.append("  shared_part_a: <not a call>")
+                return lines
+
+            part_a_call = transaction.access_as(pymdlsdk.IFunction_call, base_reference)
+            if not part_a_call or not part_a_call.is_valid_interface():
+                lines.append("  shared_part_a: <invalid>")
+                return lines
+
+            part_a_arguments = part_a_call.get_arguments()
+            lines.append(f"  shared_part_a: {base_reference}")
+            for name in ("diffuse_reflection_color", "enable_opacity"):
+                details = cls._xray_neuray_expression_details(
+                    part_a_arguments.get_expression(name), pymdlsdk
+                )
+                lines.append(
+                    cls._xray_neuray_details_line(name, details, indent="    ")
+                )
+            return lines
+        finally:
+            # Explicitly discard all transaction-backed handles before its
+            # abort in the caller. The SWIG wrappers release their references
+            # when these local references disappear.
+            part_a_arguments = None
+            part_a_call = None
+            falloff_arguments = None
+            falloff_call = None
+
+    @classmethod
+    def _xray_neuray_expression_details(cls, expression, pymdlsdk) -> dict[str, object]:
+        """Convert the small supported MDL expression set to plain Python data."""
+
+        if not expression or not expression.is_valid_interface():
+            return {"kind": "<missing>", "reference": "<none>", "constant": "<none>"}
+
+        kind = expression.get_kind()
+        reference = "<none>"
+        constant: object = "<not a constant>"
+        call_expression = expression.get_interface(pymdlsdk.IExpression_call)
+        if call_expression and call_expression.is_valid_interface():
+            reference = call_expression.get_call()
+        else:
+            direct_call = expression.get_interface(pymdlsdk.IExpression_direct_call)
+            if direct_call and direct_call.is_valid_interface():
+                reference = direct_call.get_definition()
+            else:
+                constant_expression = expression.get_interface(
+                    pymdlsdk.IExpression_constant
+                )
+                if constant_expression and constant_expression.is_valid_interface():
+                    value = constant_expression.get_value()
+                    constant = cls._xray_neuray_value_to_python(value, pymdlsdk)
+        return {"kind": kind, "reference": reference, "constant": constant}
+
+    @staticmethod
+    def _xray_neuray_value_to_python(value, pymdlsdk) -> object:
+        """Decode only the float, color, and bool values used by Probe 4."""
+
+        if not value or not value.is_valid_interface():
+            return "<invalid>"
+        float_value = value.get_interface(pymdlsdk.IValue_float)
+        if float_value and float_value.is_valid_interface():
+            return float(float_value.get_value())
+        bool_value = value.get_interface(pymdlsdk.IValue_bool)
+        if bool_value and bool_value.is_valid_interface():
+            return bool(bool_value.get_value())
+        color_value = value.get_interface(pymdlsdk.IValue_color)
+        if color_value and color_value.is_valid_interface():
+            components = []
+            for index in range(3):
+                component = color_value.get_value(index)
+                component_float = component.get_interface(pymdlsdk.IValue_float)
+                components.append(float(component_float.get_value()))
+            return tuple(components)
+        return f"<unsupported {value.get_kind()}>"
+
+    @staticmethod
+    def _xray_neuray_details_line(
+        name: str,
+        details: dict[str, object],
+        *,
+        indent: str = "    ",
+    ) -> str:
+        return (
+            f"{indent}{name}: kind={details['kind']}; "
+            f"reference={details['reference']}; constant={details['constant']}"
+        )
+
+    @classmethod
+    def _format_xray_surface_falloff_isolation_state(
+        cls,
+        stage,
+        probe: int,
+        result: XRayApplyResult,
+        Usd,
+        UsdShade,
+    ) -> str:
+        """Format one compact post-Apply state proof; never dump all meshes."""
+
+        facing_weight, edge_weight, name, expected, _blend_part = (
+            cls._xray_surface_falloff_probe(probe)
+        )
+        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
+        representative = cls._xray_diagnostic_representative_mesh(
+            stage, root, Usd, UsdShade
+        )
+        aggregate = cls._xray_binding_aggregate(root, Usd, UsdShade)
+        material = UsdShade.Material.Get(stage, cls.XRAY_MATERIAL_PATH)
+        part_a = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartA")
+        part_b = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartB")
+        falloff = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/SurfaceFalloff")
+        representative_binding = "<none>"
+        binding_owner = "<none>"
+        if representative:
+            binding_api = UsdShade.MaterialBindingAPI(representative)
+            bound_material, _binding = binding_api.ComputeBoundMaterial()
+            representative_binding = (
+                str(bound_material.GetPath()) if bound_material else "<none>"
+            )
+            binding_owner = cls._xray_property_owners(binding_api.GetDirectBindingRel())
+        session = stage.GetSessionLayer()
+        registry_inspection = cls._format_xray_surface_falloff_registry(falloff)
+        authored_ports = cls._xray_surface_falloff_authored_port_lines(
+            material, part_a, falloff
+        )
+        probe_status = (
+            f"  Probe {probe} [{facing_weight:g}/{edge_weight:g}] "
+            f"— {name}: AWAITING VISUAL RESULT"
+        )
+        material_defined = bool(material and material.GetPrim().IsValid())
+        direct_bindings = f"{aggregate['xray_direct_count']}/{aggregate['mesh_count']}"
+        representative_path = representative.GetPath() if representative else "<none>"
+        terminal = cls._xray_connection(
+            material.GetSurfaceOutput("mdl") if material else None
+        )
+        part_a_emission = bool(part_a.GetInput("emission_color")) if part_a else False
+        part_b_emission = bool(part_b.GetInput("emission_color")) if part_b else False
+        falloff_base = cls._xray_connection(
+            falloff.GetInput("base") if falloff else None
+        )
+        falloff_blend = cls._xray_connection(
+            falloff.GetInput("blend") if falloff else None
+        )
+        session_representative = (
+            bool(session.GetPrimAtPath(representative.GetPath()))
+            if representative
+            else False
+        )
+        from pxr import Sdf
+
+        material_fragment = cls._xray_session_fragment(stage, None, Sdf)
+        return "\n".join(
+            (
+                "DTRS X-Ray SurfaceFalloff isolation",
+                "  configured: "
+                "PartA=yellow opaque; PartB=blue opaque; roughness=0.4; emission=off",
+                probe_status,
+                f"  expected: {expected}",
+                "  after_apply:",
+                f"    xray_material_defined: {material_defined}",
+                f"    xray_direct_bindings: {direct_bindings}",
+                f"    representative: {representative_path}",
+                f"    representative_binding: {representative_binding}",
+                f"    representative_binding_owner: {binding_owner}",
+                f"    terminal: {terminal}",
+                "    PartA: "
+                f"color={cls._xray_input_value(part_a, 'diffuse_reflection_color')}; "
+                f"opacity_enabled={cls._xray_input_value(part_a, 'enable_opacity')}; "
+                f"emission_input={part_a_emission}",
+                "    PartB: "
+                f"color={cls._xray_input_value(part_b, 'diffuse_reflection_color')}; "
+                f"opacity_enabled={cls._xray_input_value(part_b, 'enable_opacity')}; "
+                f"emission_input={part_b_emission}",
+                "    SurfaceFalloff: "
+                f"asset={cls._xray_shader_asset(falloff)}; "
+                f"base={falloff_base}; "
+                f"blend={falloff_blend}; "
+                f"facing={cls._xray_input_value(falloff, 'facing_weight')}; "
+                f"edge={cls._xray_input_value(falloff, 'edge_weight')}; "
+                f"bias={cls._xray_input_value(falloff, 'blend_bias')}",
+                registry_inspection,
+                "    authored_ports:",
+                *authored_ports,
+                "    authored_usda:",
+                material_fragment,
+                "    session_owns: "
+                f"material={bool(session.GetPrimAtPath(cls.XRAY_MATERIAL_PATH))}; "
+                f"representative={session_representative}",
+                f"  result: {result.message}",
+            )
+        )
+
+    @classmethod
+    def _format_xray_surface_falloff_registry(cls, falloff, UsdMdl=None) -> str:
+        """Return the narrow registry/type diagnostic for Surface Falloff."""
+
+        if not falloff:
+            return "    registry: surface_falloff=<missing>"
+        try:
+            if UsdMdl is None:
+                import omni.UsdMdl as UsdMdl
+
+            node = UsdMdl.RegistryUtils.GetShaderNodeForPrim(falloff.GetPrim())
+            if not node:
+                return "    registry: surface_falloff=<unresolved>"
+            resolved = (
+                f"module={node.GetModuleUsdIdentifier()}; "
+                f"subIdentifier={node.GetSubIdentifier()}; "
+                f"signature={node.GetNameWithSignature()}"
+            )
+            lines = [f"    registry: {resolved}"]
+            for name, definition, authored in (
+                ("base", node.GetShaderInput("base"), falloff.GetInput("base")),
+                ("blend", node.GetShaderInput("blend"), falloff.GetInput("blend")),
+                ("out", node.GetShaderOutput("out"), falloff.GetOutput("out")),
+            ):
+                declared_type = (
+                    cls._sdf_type_from_sdr_property(definition)
+                    if definition
+                    else "<missing>"
+                )
+                declared_sdr_type = definition.GetType() if definition else "<missing>"
+                declared_metadata = definition.GetMetadata() if definition else {}
+                authored_type = authored.GetTypeName() if authored else "<missing>"
+                authored_metadata = (
+                    authored.GetAttr().GetMetadata("sdrMetadata") if authored else {}
+                )
+                lines.append(
+                    f"      {name}: registry_sdf={declared_type}; "
+                    f"registry_sdr={declared_sdr_type}; "
+                    f"registry_sdrMetadata={declared_metadata}; "
+                    f"authored_sdf={authored_type}; "
+                    f"authored_sdrMetadata={authored_metadata}"
+                )
+            return "\n".join(lines)
+        except Exception as error:
+            return f"    registry: inspection_failed={error}"
+
+    @classmethod
+    def _xray_surface_falloff_authored_port_lines(cls, material, part_a, falloff):
+        """Describe only authored MDL material ports and their exact connections."""
+
+        return tuple(
+            cls._xray_authored_port_line(name, port)
+            for name, port in (
+                ("PartA.outputs:out", part_a.GetOutput("out") if part_a else None),
+                (
+                    "SurfaceFalloff.inputs:base",
+                    falloff.GetInput("base") if falloff else None,
+                ),
+                (
+                    "SurfaceFalloff.inputs:blend",
+                    falloff.GetInput("blend") if falloff else None,
+                ),
+                (
+                    "SurfaceFalloff.outputs:out",
+                    falloff.GetOutput("out") if falloff else None,
+                ),
+                (
+                    "Material.outputs:mdl:surface",
+                    material.GetSurfaceOutput("mdl") if material else None,
+                ),
+            )
+        )
+
+    @classmethod
+    def _xray_authored_port_line(cls, name: str, port) -> str:
+        if not port:
+            return f"      {name}: <missing>"
+        return (
+            f"      {name}: sdf={port.GetTypeName()}; "
+            f"sdrMetadata={port.GetAttr().GetMetadata('sdrMetadata')}; "
+            f"connection={cls._xray_connection(port)}"
+        )
+
+    def clear_xray_material_in_kit(self) -> XRayApplyResult:
+        """Clear transient X-Ray bindings without changing persisted UI settings."""
+
+        import omni.usd
+        from pxr import Usd, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return XRayApplyResult(True, "X-Ray is inactive; no open stage.")
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            removed_count = self._clear_xray_session_overrides(stage, Usd, UsdShade)
+        finally:
+            stage.SetEditTarget(previous_target)
+        return XRayApplyResult(
+            True,
+            "X-Ray disabled; original chassis materials restored.",
+            removed_count,
+        )
+
+    def log_xray_material_state_in_kit(
+        self,
+        requested_selected: bool,
+        result: XRayApplyResult | None = None,
+        event_label: str = "Apply",
+        state: str | None = None,
+    ) -> None:
+        """Write one compact, composed-state X-Ray diagnostic report."""
+
+        import carb
+        import omni.usd
+        from pxr import Sdf, Usd, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        result_message = result.message if result else "No stage mutation has run."
+        if not stage:
+            carb.log_warn(
+                "DTRS X-Ray diagnostic\n"
+                f"  event: {event_label}\n"
+                f"  state: {state or '<unknown>'}\n"
+                f"  requested_selected: {requested_selected}\n"
+                f"  result: {result_message}\n"
+                "  stage: <none>"
+            )
+            return
+        carb.log_warn(
+            self._format_xray_material_state(
+                stage,
+                requested_selected,
+                XRayApplyResult(True, result_message),
+                Sdf,
+                Usd,
+                UsdShade,
+                event_label,
+                state,
+                getattr(self, "_xray_last_authoring_edit_target", "<not authored>"),
+            )
+        )
+
+    @classmethod
+    def _format_xray_material_state(
+        cls,
+        stage,
+        requested_selected: bool,
+        result: XRayApplyResult,
+        Sdf,
+        Usd,
+        UsdShade,
+        event_label: str = "Apply",
+        state: str | None = None,
+        authoring_edit_target: str = "<not authored>",
+    ) -> str:
+        """Format A/B/C evidence without dumping all chassis meshes."""
+
+        actual_state = state or ("B" if requested_selected else "C")
+        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
+        material = UsdShade.Material.Get(stage, cls.XRAY_MATERIAL_PATH)
+        material_defined = bool(material and material.GetPrim().IsValid())
+        representative = cls._xray_diagnostic_representative_mesh(
+            stage, root, Usd, UsdShade
+        )
+        aggregate = cls._xray_binding_aggregate(root, Usd, UsdShade)
+        original = cls._xray_material_fingerprint(stage, representative, UsdShade)
+        if actual_state == "A":
+            cls._xray_diagnostic_baseline = original
+            cls._xray_diagnostic_baseline_root_dirty = stage.GetRootLayer().dirty
+        comparison = cls._xray_fingerprint_comparison(actual_state, original)
+        lines = [
+            "DTRS X-Ray diagnostic",
+            f"  event: {event_label}",
+            f"  state: {actual_state}",
+            f"  requested_selected: {requested_selected}",
+            f"  result: {result.message}",
+            "  composition:",
+            f"    root_layer: {stage.GetRootLayer().identifier}",
+            f"    root_dirty: {stage.GetRootLayer().dirty}",
+            f"    session_layer: {stage.GetSessionLayer().identifier}",
+            f"    current_edit_target: {stage.GetEditTarget().GetLayer().identifier}",
+            f"    xray_authoring_edit_target: {authoring_edit_target}",
+            "    root_dirty_vs_A: "
+            + (
+                "baseline captured"
+                if actual_state == "A"
+                else (
+                    str(
+                        stage.GetRootLayer().dirty
+                        == cls._xray_diagnostic_baseline_root_dirty
+                    )
+                    if cls._xray_diagnostic_baseline_root_dirty is not None
+                    else "baseline unavailable"
+                )
+            ),
+            "  chassis_bindings:",
+            f"    mesh_count: {aggregate['mesh_count']}",
+            f"    xray_direct_count: {aggregate['xray_direct_count']}",
+            f"    resolved: {aggregate['resolved']}",
+            "  representative_mesh: "
+            f"{representative.GetPath() if representative else '<none>'}",
+            f"  representative_binding: {original['binding']}",
+            f"  representative_binding_owners: {original['binding_owners']}",
+            f"  effective_material: {original['material']}",
+            "  effective_mdl: "
+            f"{original['mdl_source']} | {original['mdl_subidentifier']}",
+            f"  effective_base_color: {original['base_color']}",
+            f"  effective_opacity: {original['opacity']}",
+            f"  effective_roughness: {original['roughness']}",
+            f"  effective_emission: {original['emission']}",
+            f"  A_vs_{actual_state}: {comparison}",
+        ]
+        if material_defined:
+            lines.extend(
+                cls._xray_graph_diagnostic_lines(
+                    stage, material, representative, Sdf, UsdShade
+                )
+            )
+        return "\n".join(lines)
+
+    @classmethod
+    def _xray_diagnostic_representative_mesh(cls, stage, root, Usd, UsdShade):
+        """Choose one stable mesh that resolves to base_lod00_mat before X-Ray."""
+
+        if cls._xray_diagnostic_representative_path:
+            prim = stage.GetPrimAtPath(cls._xray_diagnostic_representative_path)
+            if prim and prim.IsValid() and prim.GetTypeName() == "Mesh":
+                return prim
+        fallback = None
+        if root and root.IsValid():
+            for prim in Usd.PrimRange(root):
+                if prim.GetTypeName() != "Mesh":
+                    continue
+                fallback = fallback or prim
+                material, _binding = UsdShade.MaterialBindingAPI(
+                    prim
+                ).ComputeBoundMaterial()
+                if (
+                    material
+                    and str(material.GetPath()) == cls.XRAY_SOURCE_MATERIAL_PATH
+                ):
+                    cls._xray_diagnostic_representative_path = str(prim.GetPath())
+                    return prim
+        if fallback:
+            cls._xray_diagnostic_representative_path = str(fallback.GetPath())
+        return fallback
+
+    @classmethod
+    def _xray_binding_aggregate(cls, root, Usd, UsdShade) -> dict[str, object]:
+        """Return counts only; per-mesh dumps hide the actual material evidence."""
+
+        resolved: Counter[str] = Counter()
+        mesh_count = 0
+        xray_direct_count = 0
+        if root and root.IsValid():
+            for prim in Usd.PrimRange(root):
+                if prim.GetTypeName() != "Mesh":
+                    continue
+                mesh_count += 1
+                binding_api = UsdShade.MaterialBindingAPI(prim)
+                material, _binding = binding_api.ComputeBoundMaterial()
+                path = str(material.GetPath()) if material else "<none>"
+                resolved[path] += 1
+                if str(cls.XRAY_MATERIAL_PATH) in {
+                    str(path) for path in binding_api.GetDirectBindingRel().GetTargets()
+                }:
+                    xray_direct_count += 1
+        resolved_summary = (
+            ", ".join(f"{path} ({count})" for path, count in sorted(resolved.items()))
+            or "<none>"
+        )
+        return {
+            "mesh_count": mesh_count,
+            "xray_direct_count": xray_direct_count,
+            "resolved": resolved_summary,
+        }
+
+    @classmethod
+    def _xray_material_fingerprint(cls, stage, mesh, UsdShade) -> dict[str, str]:
+        """Capture only fields needed to compare original material A and C."""
+
+        empty = {
+            "binding": "<none>",
+            "binding_owners": "<none>",
+            "material": "<none>",
+            "mdl_source": "<none>",
+            "mdl_subidentifier": "<none>",
+            "base_color": "<none>",
+            "opacity": "<none>",
+            "roughness": "<none>",
+            "emission": "<none>",
+        }
+        if not mesh:
+            return empty
+        binding_api = UsdShade.MaterialBindingAPI(mesh)
+        material, _binding = binding_api.ComputeBoundMaterial()
+        direct_rel = binding_api.GetDirectBindingRel()
+        owners = cls._xray_property_owners(direct_rel)
+        if not material or not material.GetPrim().IsValid():
+            return {**empty, "binding_owners": owners}
+        material_path = str(material.GetPath())
+        terminal = material.GetSurfaceOutput("mdl")
+        source = cls._xray_connection(terminal)
+        shader = None
+        if terminal:
+            connected = terminal.GetConnectedSource()
+            if connected:
+                shader = UsdShade.Shader(connected[0].GetPrim())
+        basecolor_shader = UsdShade.Shader.Get(stage, f"{material_path}/basecolor")
+        basecolor_file = cls._xray_input_value(basecolor_shader, "file")
+        return {
+            "binding": material_path,
+            "binding_owners": owners,
+            "material": material_path,
+            "mdl_source": cls._xray_shader_asset(shader),
+            "mdl_subidentifier": cls._xray_shader_subidentifier(shader),
+            "base_color": basecolor_file if basecolor_file != "<missing>" else source,
+            "opacity": cls._xray_input_value(shader, "geometry_opacity"),
+            "roughness": cls._xray_input_value(shader, "diffuse_reflection_roughness"),
+            "emission": (
+                f"color={cls._xray_input_value(shader, 'emission_color')}; "
+                f"intensity={cls._xray_input_value(shader, 'emission_intensity')}"
+            ),
+        }
+
+    @classmethod
+    def _xray_fingerprint_comparison(
+        cls,
+        state: str,
+        current: dict[str, str],
+    ) -> str:
+        """Compare only the baseline and post-removal source-material evidence."""
+
+        if state == "A":
+            return "baseline captured"
+        if state != "C":
+            return "not applicable"
+        if cls._xray_diagnostic_baseline is None:
+            return "baseline unavailable; use Load, then repeat A/B/C"
+        differences = [
+            key
+            for key, value in current.items()
+            if cls._xray_diagnostic_baseline.get(key) != value
+        ]
+        return (
+            "identical" if not differences else "different: " + ", ".join(differences)
+        )
+
+    @classmethod
+    def _xray_graph_diagnostic_lines(
+        cls, stage, material, representative, Sdf, UsdShade
+    ) -> list[str]:
+        """Expose composed MDL connections and the small session-layer fragment."""
+
+        part_a = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartA")
+        part_b = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartB")
+        falloff = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/SurfaceFalloff")
+        terminal = material.GetSurfaceOutput("mdl")
+        session = stage.GetSessionLayer()
+        representative_session_spec = (
+            session.GetPrimAtPath(representative.GetPath()) if representative else None
+        )
+        part_b_emission_intensity = cls._xray_input_value(part_b, "emission_intensity")
+        part_b_base_owner = cls._xray_property_owners(
+            part_b.GetInput("diffuse_reflection_color")
+        )
+        part_b_emission_owner = cls._xray_property_owners(
+            part_b.GetInput("emission_color")
+        )
+        lines = [
+            "  xray_graph:",
+            f"    material.outputs:mdl:surface -> {cls._xray_connection(terminal)}",
+            f"    terminal_owner: {cls._xray_property_owners(terminal)}",
+            "    session_specs: "
+            f"material={bool(session.GetPrimAtPath(material.GetPath()))}; "
+            f"representative_binding={bool(representative_session_spec)}",
+            "    SurfaceFalloff: "
+            f"asset={cls._xray_shader_asset(falloff)}; "
+            f"subIdentifier={cls._xray_shader_subidentifier(falloff)}; "
+            f"output={cls._xray_output(falloff, 'out')}",
+            f"      base -> {cls._xray_connection(falloff.GetInput('base'))}",
+            f"      blend -> {cls._xray_connection(falloff.GetInput('blend'))}",
+            "      weights: "
+            f"facing={cls._xray_input_value(falloff, 'facing_weight')}; "
+            f"edge={cls._xray_input_value(falloff, 'edge_weight')}; "
+            f"bias={cls._xray_input_value(falloff, 'blend_bias')}",
+            "    PartA: "
+            f"asset={cls._xray_shader_asset(part_a)}; "
+            f"subIdentifier={cls._xray_shader_subidentifier(part_a)}; "
+            f"output={cls._xray_output(part_a, 'out')}",
+            "    PartB: "
+            f"asset={cls._xray_shader_asset(part_b)}; "
+            f"subIdentifier={cls._xray_shader_subidentifier(part_b)}; "
+            f"output={cls._xray_output(part_b, 'out')}",
+            "      composed: "
+            f"base_color={cls._xray_input_value(part_b, 'diffuse_reflection_color')}; "
+            f"emission_color={cls._xray_input_value(part_b, 'emission_color')}; "
+            f"emission_intensity={part_b_emission_intensity}",
+            "    owners: "
+            f"material={cls._xray_prim_owners(material.GetPrim())}; "
+            f"PartA={cls._xray_prim_owners(part_a.GetPrim())}; "
+            f"PartB={cls._xray_prim_owners(part_b.GetPrim())}; "
+            f"SurfaceFalloff={cls._xray_prim_owners(falloff.GetPrim())}",
+            "    input_owners: "
+            f"base={cls._xray_property_owners(falloff.GetInput('base'))}; "
+            f"blend={cls._xray_property_owners(falloff.GetInput('blend'))}; "
+            f"PartB.base={part_b_base_owner}; "
+            f"PartB.emission={part_b_emission_owner}",
+            "  session_fragment:",
+            cls._xray_session_fragment(stage, representative, Sdf),
+        ]
+        return lines
+
+    @staticmethod
+    def _xray_input_value(shader, name: str) -> str:
+        shader_input = shader.GetInput(name) if shader else None
+        return str(shader_input.Get()) if shader_input else "<missing>"
+
+    @staticmethod
+    def _xray_output(shader, name: str) -> str:
+        output = shader.GetOutput(name) if shader else None
+        if not output:
+            return "<missing>"
+        return (
+            f"{output.GetBaseName()} ({output.GetTypeName()}, {output.GetRenderType()})"
+        )
+
+    @staticmethod
+    def _xray_connection(connectable) -> str:
+        if not connectable:
+            return "<none>"
+        connected = connectable.GetConnectedSource()
+        if not connected:
+            return "<none>"
+        source, name, source_type = connected
+        return f"{source.GetPrim().GetPath()}.outputs:{name} ({source_type})"
+
+    @staticmethod
+    def _xray_shader_asset(shader) -> str:
+        if not shader:
+            return "<none>"
+        asset = shader.GetSourceAsset("mdl")
+        return str(asset.path) if asset else "<none>"
+
+    @staticmethod
+    def _xray_shader_subidentifier(shader) -> str:
+        return shader.GetSourceAssetSubIdentifier("mdl") if shader else "<none>"
+
+    @staticmethod
+    def _xray_property_owners(property_api) -> str:
+        if not property_api:
+            return "<none>"
+        property_spec = (
+            property_api.GetAttr() if hasattr(property_api, "GetAttr") else property_api
+        )
+        stack = property_spec.GetPropertyStack() if property_spec else []
+        return ", ".join(spec.layer.identifier for spec in stack) or "<none>"
+
+    @staticmethod
+    def _xray_prim_owners(prim) -> str:
+        if not prim:
+            return "<none>"
+        return (
+            ", ".join(spec.layer.identifier for spec in prim.GetPrimStack()) or "<none>"
+        )
+
+    @classmethod
+    def _xray_session_fragment(cls, stage, representative, Sdf) -> str:
+        session = stage.GetSessionLayer()
+        fragment = Sdf.Layer.CreateAnonymous("DTRS_XRayDiagnostic.usda")
+        for path in (
+            Sdf.Path(cls.XRAY_MATERIAL_PATH),
+            representative.GetPath() if representative else None,
+        ):
+            if path and session.GetPrimAtPath(path):
+                for ancestor in path.GetPrefixes()[:-1]:
+                    if ancestor != Sdf.Path.absoluteRootPath:
+                        Sdf.CreatePrimInLayer(fragment, ancestor)
+                Sdf.CopySpec(session, path, fragment, path)
+        exported = fragment.ExportToString().strip()
+        return "\n".join(f"    {line}" for line in exported.splitlines())
+
+    @classmethod
+    def _clear_xray_session_overrides(cls, stage, Usd, UsdShade) -> int:
+        """Remove only bindings owned by X-Ray, preserving runtime state."""
+
+        removed_count = 0
+        xray_path = str(cls.XRAY_MATERIAL_PATH)
+        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
+        if not root or not root.IsValid():
+            stage.RemovePrim(cls.XRAY_MATERIAL_PATH)
+            return removed_count
+        for prim in Usd.PrimRange(root):
+            if prim.GetTypeName() != "Mesh":
+                continue
+            direct_binding = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+            target_paths = {str(path) for path in direct_binding.GetTargets()}
+            if xray_path in target_paths:
+                # Removing the SdfPrimSpec directly updates composition but bypasses
+                # the UsdStage change notice that Hydra needs to refresh bindings.
+                # This public API removes only the session-layer relation spec and
+                # notifies renderer clients, revealing the weaker authored binding.
+                direct_binding.ClearTargets(True)
+                original_material, _binding = UsdShade.MaterialBindingAPI(
+                    prim
+                ).ComputeBoundMaterial()
+                if original_material and original_material.GetPrim().IsValid():
+                    # RTX retains the prior compiled material when a direct binding
+                    # merely disappears. Re-authoring the already resolved source
+                    # material provides the renderer with an explicit replacement
+                    # without changing the source asset or visibility.
+                    UsdShade.MaterialBindingAPI.Apply(prim).Bind(original_material)
+                removed_count += 1
+        stage.RemovePrim(cls.XRAY_MATERIAL_PATH)
+        return removed_count
+
+    @classmethod
+    def _define_xray_material(
+        cls,
+        stage,
+        surface_falloff_weights: tuple[float, float],
+        blend_part: str,
+        Gf,
+        Sdf,
+        UsdShade,
+        UsdMdl=None,
+    ):
+        """Author the temporary opaque yellow/blue Surface Falloff isolation graph."""
+
+        if UsdMdl is None:
+            import omni.UsdMdl as UsdMdl
+
+        material_path = Sdf.Path(cls.XRAY_MATERIAL_PATH)
+        material = UsdShade.Material.Define(stage, material_path)
+        part_a = cls._define_omni_surface_part(
+            stage,
+            material_path.AppendChild("PartA"),
+            cls.XRAY_ISOLATION_PART_A_COLOR,
+            cls.XRAY_ISOLATION_ROUGHNESS,
+            Gf,
+            Sdf,
+            UsdShade,
+        )
+        part_b = cls._define_omni_surface_part(
+            stage,
+            material_path.AppendChild("PartB"),
+            cls.XRAY_ISOLATION_PART_B_COLOR,
+            cls.XRAY_ISOLATION_ROUGHNESS,
+            Gf,
+            Sdf,
+            UsdShade,
+        )
+        falloff = UsdShade.Shader.Define(
+            stage, material_path.AppendChild("SurfaceFalloff")
+        )
+        falloff.CreateImplementationSourceAttr().Set(UsdShade.Tokens.sourceAsset)
+        falloff.SetSourceAsset(Sdf.AssetPath("nvidia/core_definitions.mdl"), "mdl")
+        falloff.SetSourceAssetSubIdentifier("surface_falloff", "mdl")
+        shader_node = UsdMdl.RegistryUtils.GetShaderNodeForPrim(falloff.GetPrim())
+        if not shader_node:
+            raise RuntimeError(
+                "MDL registry could not resolve "
+                "nvidia/core_definitions.mdl::surface_falloff."
+            )
+        falloff.SetSdrMetadata(shader_node.GetMetadata())
+        cls._create_mdl_registry_input(
+            falloff, shader_node, "base", Sdf
+        ).ConnectToSource(part_a.ConnectableAPI(), "out")
+        blend_source = part_a if blend_part == "PartA" else part_b
+        cls._create_mdl_registry_input(
+            falloff, shader_node, "blend", Sdf
+        ).ConnectToSource(blend_source.ConnectableAPI(), "out")
+        facing_weight, edge_weight = surface_falloff_weights
+        falloff.CreateInput("facing_weight", Sdf.ValueTypeNames.Float).Set(
+            facing_weight
+        )
+        falloff.CreateInput("edge_weight", Sdf.ValueTypeNames.Float).Set(edge_weight)
+        falloff.CreateInput("blend_bias", Sdf.ValueTypeNames.Float).Set(
+            cls.XRAY_ISOLATION_BLEND_BIAS
+        )
+        output = falloff.CreateOutput("out", Sdf.ValueTypeNames.Token)
+        output.SetRenderType("material")
+        material.CreateSurfaceOutput("mdl").ConnectToSource(
+            falloff.ConnectableAPI(), "out"
+        )
+        return material
+
+    @staticmethod
+    def _create_mdl_registry_input(shader, shader_node, name: str, Sdf):
+        """Create one MDL input with the exact Sdr-declared type and metadata."""
+
+        property_definition = shader_node.GetShaderInput(name)
+        if not property_definition:
+            raise RuntimeError(f"MDL registry has no '{name}' input.")
+        sdf_type = RuntimeController._sdf_type_from_sdr_property(property_definition)
+        if not sdf_type:
+            raise RuntimeError(f"MDL registry has no Sdf type for '{name}'.")
+        shader_input = shader.CreateInput(name, sdf_type)
+        sdr_metadata = property_definition.GetMetadata()
+        if sdr_metadata:
+            shader_input.GetAttr().SetMetadata("sdrMetadata", sdr_metadata)
+        return shader_input
+
+    @staticmethod
+    def _sdf_type_from_sdr_property(property_definition):
+        """Accept both legacy tuple and current SdfTypeIndicator Sdr bindings."""
+
+        type_indicator = property_definition.GetTypeAsSdfType()
+        if hasattr(type_indicator, "GetSdfType"):
+            return type_indicator.GetSdfType()
+        return type_indicator[0]
+
+    @staticmethod
+    def _define_omni_surface_part(
+        stage,
+        path,
+        base_color,
+        roughness: float,
+        Gf,
+        Sdf,
+        UsdShade,
+    ):
+        shader = UsdShade.Shader.Define(stage, path)
+        shader.CreateImplementationSourceAttr().Set(UsdShade.Tokens.sourceAsset)
+        shader.SetSourceAsset(Sdf.AssetPath("OmniSurface.mdl"), "mdl")
+        shader.SetSourceAssetSubIdentifier("OmniSurface", "mdl")
+        shader.CreateInput("diffuse_reflection_color", Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(*base_color)
+        )
+        shader.CreateInput(
+            "diffuse_reflection_roughness", Sdf.ValueTypeNames.Float
+        ).Set(roughness)
+        shader.CreateInput(
+            "specular_reflection_roughness", Sdf.ValueTypeNames.Float
+        ).Set(roughness)
+        shader.CreateInput("enable_opacity", Sdf.ValueTypeNames.Bool).Set(False)
+        output = shader.CreateOutput("out", Sdf.ValueTypeNames.Token)
+        output.SetRenderType("material")
+        return shader
+
+    @classmethod
+    def _bind_xray_material_to_chassis(
+        cls,
+        stage,
+        root,
+        material,
+        Usd,
+        UsdShade,
+    ) -> int:
+        target_count = 0
+        for prim in Usd.PrimRange(root):
+            if prim.GetTypeName() != "Mesh":
+                continue
+            UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+            target_count += 1
+        return target_count
 
     @staticmethod
     def _apply_normal_map_scale(

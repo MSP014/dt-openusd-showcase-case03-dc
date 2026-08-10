@@ -60,6 +60,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._lighting_status_label = None
         self._asset_label = None
         self._load_task = None
+        self._reload_task = None
         self._airflow_task = None
         self._airflow_detach_requested = False
         self._view_task = None
@@ -83,6 +84,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._config_tab_button = None
         self._chassis_visibility_models = {}
         self._normal_map_scale_model = None
+        self._xray_chassis_selected_model = None
+        self._xray_part_a_opacity_model = None
+        self._xray_part_a_roughness_model = None
+        self._xray_part_a_fallback_color_model = None
+        self._xray_part_b_color_model = None
+        self._xray_part_b_opacity_model = None
+        self._xray_part_b_roughness_model = None
+        self._xray_part_b_emission_intensity_model = None
+        self._xray_edge_falloff_model = None
+        self._xray_color_models = {}
+        self._updating_xray_color_controls = False
         self._face_panel_open_model = None
         self._face_panel_action_label = None
         self._face_panel_open_state = False
@@ -146,6 +158,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     def on_shutdown(self) -> None:
         for task_name in (
             "_load_task",
+            "_reload_task",
             "_lighting_task",
             "_airflow_task",
             "_view_task",
@@ -372,10 +385,227 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _build_material_controls(self, materials) -> None:
         self._build_config_section(
+            "X-Ray",
+            lambda: self._build_xray_controls(materials.xray),
+            collapsed=True,
+        )
+        self._build_config_section(
             "Normal Map Scale",
             lambda: self._build_normal_map_scale_controls(materials),
             collapsed=True,
         )
+
+    def _build_xray_controls(self, xray) -> None:
+        if self._xray_chassis_selected_model is None:
+            self._xray_chassis_selected_model = ui.SimpleBoolModel(
+                xray.chassis_selected
+            )
+            self._xray_part_a_opacity_model = ui.SimpleFloatModel(xray.part_a_opacity)
+            self._xray_part_a_roughness_model = ui.SimpleFloatModel(
+                xray.part_a_roughness
+            )
+            self._xray_part_b_opacity_model = ui.SimpleFloatModel(xray.part_b_opacity)
+            self._xray_part_b_roughness_model = ui.SimpleFloatModel(
+                xray.part_b_roughness
+            )
+            self._xray_part_b_emission_intensity_model = ui.SimpleFloatModel(
+                xray.part_b_emission_intensity
+            )
+            self._xray_edge_falloff_model = ui.SimpleFloatModel(xray.edge_falloff)
+
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label(
+                "Chassis - SilverStone RM44",
+                width=SERVER_VIEW_LABEL_WIDTH,
+                elided_text=True,
+                tooltip="Apply xray_material to the chassis asset.",
+            )
+            ui.CheckBox(model=self._xray_chassis_selected_model)
+        ui.Label("Part A - Facing surface", height=18)
+        self._build_xray_float_row("Opacity", self._xray_part_a_opacity_model, 2)
+        self._build_xray_float_row("Roughness", self._xray_part_a_roughness_model, 2)
+        self._build_xray_color_controls(
+            "fallback",
+            "Fallback Color",
+            xray.part_a_fallback_color,
+            "Used only when base_lod00_mat Base Color is unavailable.",
+        )
+        ui.Label("Part B - Hologram edge", height=18)
+        self._build_xray_color_controls(
+            "edge",
+            "Edge Color",
+            xray.part_b_color,
+            "Drives both Base Color and Emission Color.",
+        )
+        self._build_xray_float_row("Opacity", self._xray_part_b_opacity_model, 2)
+        self._build_xray_float_row("Roughness", self._xray_part_b_roughness_model, 2)
+        self._build_xray_float_row(
+            "Emission", self._xray_part_b_emission_intensity_model, 2
+        )
+        self._build_xray_float_row("Edge Falloff", self._xray_edge_falloff_model, 2)
+        ui.Button(
+            "Apply",
+            clicked_fn=self._apply_xray_material,
+            height=26,
+            width=ui.Percent(100),
+        )
+        ui.Label("Surface Falloff isolation (temporary)", height=18)
+        with ui.HStack(height=26, spacing=4, content_clipping=True):
+            ui.Button(
+                "Probe 1 · A",
+                clicked_fn=lambda: self._apply_xray_surface_falloff_probe(1),
+                width=ui.Fraction(1),
+                tooltip="Opaque yellow Part A only: facing=0, edge=0.",
+            )
+            ui.Button(
+                "Probe 2 · B",
+                clicked_fn=lambda: self._apply_xray_surface_falloff_probe(2),
+                width=ui.Fraction(1),
+                tooltip="Opaque blue Part B only: facing=1, edge=1.",
+            )
+            ui.Button(
+                "Probe 3 · Falloff",
+                clicked_fn=lambda: self._apply_xray_surface_falloff_probe(3),
+                width=ui.Fraction(1),
+                tooltip=(
+                    "Yellow facing surfaces and blue grazing edges: "
+                    "facing=0, edge=1."
+                ),
+            )
+        ui.Button(
+            "Probe 4 · Blend A control",
+            clicked_fn=lambda: self._apply_xray_surface_falloff_probe(4),
+            height=26,
+            width=ui.Percent(100),
+            tooltip=(
+                "Clean-start control: base and blend both use yellow Part A; "
+                "facing=1, edge=1."
+            ),
+        )
+
+    @staticmethod
+    def _build_xray_float_row(label: str, model, precision: int) -> None:
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH, elided_text=True)
+            ui.FloatDrag(model=model, width=ui.Fraction(1), precision=precision)
+
+    def _build_xray_color_controls(
+        self,
+        key: str,
+        label: str,
+        color: tuple[float, float, float],
+        tooltip: str,
+    ) -> None:
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
+
+        models = self._xray_color_models.get(key)
+        if models is None:
+            hue, saturation, value = rgb_to_hsv(color)
+            models = {
+                "hex": ui.SimpleStringModel(rgb_to_hex(color)),
+                "hue": ui.SimpleFloatModel(hue),
+                "saturation": ui.SimpleFloatModel(saturation),
+                "value": ui.SimpleFloatModel(value),
+                "preview": None,
+            }
+            self._xray_color_models[key] = models
+            if key == "fallback":
+                self._xray_part_a_fallback_color_model = models["hex"]
+            else:
+                self._xray_part_b_color_model = models["hex"]
+            models["hex"].add_value_changed_fn(
+                lambda model, color_key=key: self._on_xray_color_hex_changed(
+                    color_key, model
+                )
+            )
+            on_hsv_changed = self._on_xray_color_hsv_changed
+            for model in (models["hue"], models["saturation"], models["value"]):
+                model.add_value_changed_fn(
+                    lambda changed_model, color_key=key: on_hsv_changed(
+                        color_key, changed_model
+                    )
+                )
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH, elided_text=True)
+            ui.StringField(model=models["hex"], width=ui.Fraction(1), tooltip=tooltip)
+            models["preview"] = ui.Frame(width=32, height=20)
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("HSV", width=SERVER_VIEW_LABEL_WIDTH)
+            ui.Label("H", width=12)
+            ui.FloatField(model=models["hue"], width=ui.Fraction(1))
+            ui.Label("S", width=12)
+            ui.FloatField(model=models["saturation"], width=ui.Fraction(1))
+            ui.Label("V", width=12)
+            ui.FloatField(model=models["value"], width=ui.Fraction(1))
+        self._set_pending_xray_color(key, color)
+
+    def _set_pending_xray_color(
+        self,
+        key: str,
+        color: tuple[float, float, float],
+    ) -> None:
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
+
+        models = self._xray_color_models[key]
+        self._updating_xray_color_controls = True
+        try:
+            hue, saturation, value = rgb_to_hsv(color)
+            models["hex"].set_value(rgb_to_hex(color))
+            models["hue"].set_value(hue)
+            models["saturation"].set_value(saturation)
+            models["value"].set_value(value)
+        finally:
+            self._updating_xray_color_controls = False
+        self._refresh_xray_color_preview(key, color)
+
+    def _refresh_xray_color_preview(
+        self,
+        key: str,
+        color: tuple[float, float, float],
+    ) -> None:
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_omniui_color
+
+        preview = self._xray_color_models[key]["preview"]
+        with preview:
+            ui.Rectangle(
+                style={"background_color": rgb_to_omniui_color(color)},
+                width=ui.Percent(100),
+                height=ui.Percent(100),
+            )
+
+    def _on_xray_color_hex_changed(self, key: str, _model) -> None:
+        if self._updating_xray_color_controls:
+            return
+        from digital_twin_runtime_suite.app.view_controls import (
+            hex_to_rgb,
+            string_model_value,
+        )
+
+        try:
+            color = hex_to_rgb(string_model_value(self._xray_color_models[key]["hex"]))
+        except ValueError:
+            return
+        self._set_pending_xray_color(key, color)
+
+    def _on_xray_color_hsv_changed(self, key: str, _model) -> None:
+        if self._updating_xray_color_controls:
+            return
+        from digital_twin_runtime_suite.app.view_controls import (
+            build_smoke_base_color_from_models,
+        )
+
+        models = self._xray_color_models[key]
+        try:
+            color = build_smoke_base_color_from_models(
+                source="hsv",
+                hex_model=models["hex"],
+                hue_model=models["hue"],
+                saturation_model=models["saturation"],
+                value_model=models["value"],
+            )
+        except ValueError:
+            return
+        self._set_pending_xray_color(key, color)
 
     def _build_normal_map_scale_controls(self, materials) -> None:
         if self._normal_map_scale_model is None:
@@ -1466,6 +1696,12 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
 
     def _reload_config(self) -> None:
+        if self._reload_task and not self._reload_task.done():
+            self._set_status("Configuration reload is already running.")
+            return
+        self._reload_task = asyncio.ensure_future(self._reload_config_and_stage())
+
+    async def _reload_config_and_stage(self) -> None:
         try:
             config = self._controller.reload_config()
         except RuntimeError:
@@ -1493,7 +1729,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._lighting_status_label.text = _compact_text(lighting_text)
             self._lighting_status_label.tooltip = lighting_text
         self._set_airflow_status("Not attached")
-        self._set_status("Configuration reloaded.")
+        result = await self._load_default_asset("Reload Config (stage open)")
+        if result.success:
+            self._set_status("Configuration reloaded and stage reopened.")
 
     def _set_status(self, message: str) -> None:
         if self._status_label:
@@ -1668,6 +1906,69 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._set_status(f"{result.message} Saved to local config.")
 
+    def _apply_xray_material(self) -> None:
+        try:
+            xray = self._xray_config_from_controls()
+        except ValueError as error:
+            self._set_status(f"X-Ray settings are invalid: {error}")
+            return
+        result = self._controller.apply_xray_material_in_kit(xray)
+        self._controller.log_xray_material_state_in_kit(
+            xray.chassis_selected,
+            result,
+            state="B" if xray.chassis_selected else "C",
+        )
+        if not result.success:
+            self._set_status(result.message)
+            return
+        try:
+            self._controller.save_xray_material_override(xray)
+        except OSError as error:
+            self._set_status(f"X-Ray was applied but not saved: {error}")
+            return
+        self._set_status(f"{result.message} Saved to local config.")
+
+    def _xray_config_from_controls(self):
+        from digital_twin_runtime_suite.app.view_controls import (
+            xray_material_config_from_models,
+        )
+
+        models = (
+            self._xray_chassis_selected_model,
+            self._xray_part_a_opacity_model,
+            self._xray_part_a_roughness_model,
+            self._xray_part_a_fallback_color_model,
+            self._xray_part_b_color_model,
+            self._xray_part_b_opacity_model,
+            self._xray_part_b_roughness_model,
+            self._xray_part_b_emission_intensity_model,
+            self._xray_edge_falloff_model,
+        )
+        if any(model is None for model in models):
+            raise ValueError("controls are unavailable")
+        return xray_material_config_from_models(*models)
+
+    def _apply_xray_surface_falloff_probe(self, probe: int) -> None:
+        """Apply a non-persistent opaque yellow/blue Surface Falloff probe."""
+
+        try:
+            xray = replace(self._xray_config_from_controls(), chassis_selected=True)
+        except ValueError as error:
+            self._set_status(f"X-Ray isolation controls are invalid: {error}")
+            return
+        result = self._controller.apply_xray_material_in_kit(
+            xray,
+            surface_falloff_probe=probe,
+        )
+        self._controller.log_xray_surface_falloff_probe(probe, result)
+        if not result.success:
+            self._set_status(result.message)
+            return
+        self._set_status(
+            "Surface Falloff Probe "
+            f"{probe} applied. Inspect the chassis and record PASS or FAIL."
+        )
+
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
             self._apply_chassis_visibility_controls()
@@ -1743,6 +2044,27 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._normal_map_scale_model.set_value(
                 presentation.materials.normal_map_scale
             )
+        xray = presentation.materials.xray
+        if self._xray_chassis_selected_model is not None:
+            self._xray_chassis_selected_model.set_value(xray.chassis_selected)
+        if self._xray_part_a_opacity_model is not None:
+            self._xray_part_a_opacity_model.set_value(xray.part_a_opacity)
+        if self._xray_part_a_roughness_model is not None:
+            self._xray_part_a_roughness_model.set_value(xray.part_a_roughness)
+        if "fallback" in self._xray_color_models:
+            self._set_pending_xray_color("fallback", xray.part_a_fallback_color)
+        if "edge" in self._xray_color_models:
+            self._set_pending_xray_color("edge", xray.part_b_color)
+        if self._xray_part_b_opacity_model is not None:
+            self._xray_part_b_opacity_model.set_value(xray.part_b_opacity)
+        if self._xray_part_b_roughness_model is not None:
+            self._xray_part_b_roughness_model.set_value(xray.part_b_roughness)
+        if self._xray_part_b_emission_intensity_model is not None:
+            self._xray_part_b_emission_intensity_model.set_value(
+                xray.part_b_emission_intensity
+            )
+        if self._xray_edge_falloff_model is not None:
+            self._xray_edge_falloff_model.set_value(xray.edge_falloff)
         self._face_panel_open_state = presentation.face_panel.default_open
         self._set_face_panel_action_label(self._face_panel_open_state)
 
@@ -1890,9 +2212,20 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         except Exception:  # noqa: BLE001
             return
 
-    async def _load_default_asset(self) -> None:
+    async def _load_default_asset(self, event_label: str = "Load"):
+        from digital_twin_runtime_suite.app.commands import XRayApplyResult
+
         result = await self._controller.open_default_asset_in_kit(
             status_callback=self._set_status,
+        )
+        xray_selected = (
+            self._controller.config.chassis_presentation.materials.xray.chassis_selected
+        )
+        self._controller.log_xray_material_state_in_kit(
+            xray_selected,
+            XRayApplyResult(result.success, result.message),
+            event_label=f"{event_label} (baseline after open stage)",
+            state="A",
         )
         self._set_status(
             self._asset_loaded_status(result.message)
@@ -1901,6 +2234,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         if result.success:
             self._set_lighting_status(self._lighting_status_from_load(result.message))
+        return result
 
     async def _attach_airflow(self) -> None:
         result = await self._controller.attach_simulation_cache_in_kit(

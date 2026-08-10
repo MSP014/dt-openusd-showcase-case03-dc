@@ -8,6 +8,8 @@ keywords = ["openusd", "kit", "viewer", "runtime"]
 [dependencies]
 "omni.kit.uiapp" = {}
 "omni.kit.viewport.window" = {}
+"omni.kit.usd.mdl" = {}
+"omni.mdl.neuraylib" = {}
 "omni.timeline" = {}
 "omni.hydra.engine.stats" = {}
 
