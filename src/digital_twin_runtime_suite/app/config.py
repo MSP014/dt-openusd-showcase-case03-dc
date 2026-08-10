@@ -179,10 +179,26 @@ class FrontPanelIndicatorsConfig:
 
 
 @dataclass(frozen=True)
+class XRayMaterialConfig:
+    """Persisted operator values for the runtime-only chassis X-Ray material."""
+
+    chassis_selected: bool = False
+    part_a_opacity: float = 0.1
+    part_a_roughness: float = 0.4
+    part_a_fallback_color: tuple[float, float, float] = (0.72, 0.36, 1.0)
+    part_b_color: tuple[float, float, float] = (0.08, 1.0, 0.42)
+    part_b_opacity: float = 0.6
+    part_b_roughness: float = 0.3
+    part_b_emission_intensity: float = 1.5
+    edge_falloff: float = 0.5
+
+
+@dataclass(frozen=True)
 class MaterialPresentationConfig:
     """Runtime material presentation settings for the server appearance."""
 
     normal_map_scale: float = 2.0
+    xray: XRayMaterialConfig = XRayMaterialConfig()
 
 
 @dataclass(frozen=True)
@@ -556,6 +572,25 @@ def format_runtime_override(
             "normal_map_scale = "
             f"{chassis_presentation.materials.normal_map_scale:.6g}\n"
         )
+        xray = chassis_presentation.materials.xray
+        text += (
+            "\n[chassis_presentation.materials.xray]\n"
+            f"chassis_selected = {_toml_bool(xray.chassis_selected)}\n"
+            f"part_a_opacity = {xray.part_a_opacity:.6g}\n"
+            f"part_a_roughness = {xray.part_a_roughness:.6g}\n"
+            "part_a_fallback_color = "
+            f"[{xray.part_a_fallback_color[0]:.6g}, "
+            f"{xray.part_a_fallback_color[1]:.6g}, "
+            f"{xray.part_a_fallback_color[2]:.6g}]\n"
+            "part_b_color = "
+            f"[{xray.part_b_color[0]:.6g}, {xray.part_b_color[1]:.6g}, "
+            f"{xray.part_b_color[2]:.6g}]\n"
+            f"part_b_opacity = {xray.part_b_opacity:.6g}\n"
+            f"part_b_roughness = {xray.part_b_roughness:.6g}\n"
+            "part_b_emission_intensity = "
+            f"{xray.part_b_emission_intensity:.6g}\n"
+            f"edge_falloff = {xray.edge_falloff:.6g}\n"
+        )
     return text
 
 
@@ -663,9 +698,19 @@ def _merge_runtime_override(
                 updated_face_panel["default_open"] = face_panel_open
                 chassis["face_panel"] = updated_face_panel
         local_materials = local_chassis.get("materials")
-        if isinstance(local_materials, dict) and "normal_map_scale" in local_materials:
+        if isinstance(local_materials, dict):
             materials = dict(chassis.get("materials", {}))
-            materials["normal_map_scale"] = local_materials["normal_map_scale"]
+            if "normal_map_scale" in local_materials:
+                materials["normal_map_scale"] = local_materials["normal_map_scale"]
+            local_xray = local_materials.get("xray")
+            if isinstance(local_xray, dict):
+                xray = dict(materials.get("xray", {}))
+                xray.update(local_xray)
+                materials["xray"] = xray
+            elif local_xray is not None:
+                LOGGER.warning(
+                    "Ignoring chassis materials X-Ray local override: expected a table."
+                )
             chassis["materials"] = materials
         elif local_materials is not None and not isinstance(local_materials, dict):
             LOGGER.warning(
@@ -774,7 +819,62 @@ def _parse_material_presentation_config(data: Any) -> MaterialPresentationConfig
     normal_map_scale = float(data.get("normal_map_scale", 2.0))
     if not 0.0 <= normal_map_scale <= 4.0:
         raise ValueError("materials.normal_map_scale must be between 0 and 4.")
-    return MaterialPresentationConfig(normal_map_scale=normal_map_scale)
+    return MaterialPresentationConfig(
+        normal_map_scale=normal_map_scale,
+        xray=_parse_xray_material_config(data.get("xray")),
+    )
+
+
+def _parse_xray_material_config(data: Any) -> XRayMaterialConfig:
+    if not isinstance(data, dict):
+        return XRayMaterialConfig()
+
+    defaults = XRayMaterialConfig()
+    values = {
+        "part_a_opacity": float(data.get("part_a_opacity", defaults.part_a_opacity)),
+        "part_a_roughness": float(
+            data.get("part_a_roughness", defaults.part_a_roughness)
+        ),
+        "part_b_opacity": float(data.get("part_b_opacity", defaults.part_b_opacity)),
+        "part_b_roughness": float(
+            data.get("part_b_roughness", defaults.part_b_roughness)
+        ),
+        "edge_falloff": float(data.get("edge_falloff", defaults.edge_falloff)),
+    }
+    for field, value in values.items():
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"materials.xray.{field} must be between 0 and 1.")
+
+    emission = float(
+        data.get("part_b_emission_intensity", defaults.part_b_emission_intensity)
+    )
+    if not 0.0 <= emission <= 1000.0:
+        raise ValueError(
+            "materials.xray.part_b_emission_intensity must be between 0 and 1000."
+        )
+
+    def parse_color(field: str, default: tuple[float, float, float]):
+        color = _parse_rgb(data.get(field), default, f"materials.xray.{field}")
+        if any(component < 0.0 or component > 1.0 for component in color):
+            raise ValueError(f"materials.xray.{field} values must be between 0 and 1.")
+        return color
+
+    selected = data.get("chassis_selected", defaults.chassis_selected)
+    if not isinstance(selected, bool):
+        raise ValueError("materials.xray.chassis_selected must be a bool.")
+    return XRayMaterialConfig(
+        chassis_selected=selected,
+        part_a_opacity=values["part_a_opacity"],
+        part_a_roughness=values["part_a_roughness"],
+        part_a_fallback_color=parse_color(
+            "part_a_fallback_color", defaults.part_a_fallback_color
+        ),
+        part_b_color=parse_color("part_b_color", defaults.part_b_color),
+        part_b_opacity=values["part_b_opacity"],
+        part_b_roughness=values["part_b_roughness"],
+        part_b_emission_intensity=emission,
+        edge_falloff=values["edge_falloff"],
+    )
 
 
 def chassis_presentation_with_operator_state(

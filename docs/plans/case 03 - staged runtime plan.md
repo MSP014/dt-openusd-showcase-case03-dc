@@ -642,6 +642,14 @@ Jira: `DC-48`
 
 #### Stage 7.1 - Engineering X-Ray Visual Mode Slice
 
+> [!NOTE] IMPLEMENTATION IN PROGRESS — SHADING DESIGN DECISION REQUIRED
+> The Session Layer override architecture, target UI/configuration, and
+> reversible-binding requirements remain valid. The originally selected
+> `nvidia::core_definitions::surface_falloff` implementation path is rejected
+> for the tested Kit/RTX environment; Stage 7.1 requires a separate alternative
+> X-Ray shading design. Camera-driven fade and multi-material target handling
+> remain explicitly deferred.
+
 Release track: `0.4.0` (released on Stage 8 completion).
 
 Introduce a manually controlled, reversible runtime visual override that lets
@@ -650,33 +658,172 @@ otherwise occluding chassis geometry.
 
 Required scope:
 
-- expose an explicit Engineering X-Ray toggle and visible mode status;
+- expose Engineering X-Ray target selection, an `Apply` action, and visible
+  applied or error status;
 - apply runtime or Session Layer overrides without editing authored USD assets
   or MDL sources;
-- restore the original presentation after the mode is disabled or the stage is
-  reloaded;
+- restore the original presentation when a target is unchecked and `Apply` is
+  pressed, on stage reload, and on application startup;
 - initially target the outer chassis and other documented occluding components,
   including the SilverStone RM44 walls and covers;
-- establish a camera-aware chassis fade for server review: the top cover stays
-  hidden, while the left and right side panels remain opaque near front/rear
-  views and smoothly fade out as the camera moves towards a side view;
-- calculate the fade from the camera position in server-local space against a
-  configured longitudinal front/rear axis, rather than hard-coding a world
-  axis or using camera distance; refine the angular thresholds, interpolation,
-  and hysteresis during the Stage 7 plan finalisation;
+- make Part A opacity a static operator value applied only by `Apply`. Do not
+  implement camera observation, camera-driven material updates, thresholds,
+  interpolation, or hysteresis in this slice;
 - author a dedicated runtime-only material override or material binding for
-  the side panels. Do not mutate a shared Houdini-authored chassis material;
+  the selected logical asset. Do not mutate a shared Houdini-authored chassis
+  material;
   validate the chosen Omniverse renderer material path before depending on
   smooth opacity in RTX;
-- when a panel reaches zero opacity, permit a visibility override as a final
-  render-cost optimisation, while opacity remains the presentation mechanism
-  through the transition;
+- retain `Server Enclosure` as the sole owner of top-cover and panel visibility;
+  X-Ray must leave existing visibility choices intact, including when a
+  material reaches zero opacity;
 - establish an override boundary that later LED, heatmap, and other material
   states can compose with instead of silently replacing.
 
-Done when Engineering X-Ray can be enabled and disabled reproducibly, reveals
-the documented internal review targets, restores the normal presentation, and
-does not dirty authored assets.
+Implementation contract — material and Session Layer:
+
+- retain the Houdini-authored chassis materials and bindings unchanged;
+- identify the effective material binding on every intended side-panel mesh or
+  geometry subset before authoring an override; a binding on a parent Xform is
+  not assumed to replace stronger descendant bindings;
+- apply the dedicated runtime-only `xray_material` binding through the Session
+  Layer to resolved geometry targets of a selected logical asset, never blindly
+  to a parent Xform. The initial and only debug-selectable target is
+  `Chassis - SilverStone RM44`;
+- `Server Appearance > Materials > X-Ray` must mirror the existing enclosure
+  interaction pattern: its target checkbox is the enable state. When checked,
+  `Apply` authors the X-Ray material override for that target; when unchecked,
+  `Apply` removes that target's X-Ray overrides and restores the original
+  appearance. No separate global X-Ray enable control is required. On
+  application startup and stage reload, X-Ray begins inactive even if the
+  persisted target checkbox remains checked; it becomes active only after a
+  new `Apply`;
+- persist the X-Ray target selection and all exposed X-Ray settings in the
+  local configuration file. Persist logical target identifiers and user values,
+  not transient Session Layer paths or generated MDL prim paths;
+- `xray_material` has two service-oriented parts. Part A is the near-transparent
+  facing surface: expose only opacity and roughness. It should use the source
+  Base Color map from `base_lod00_mat`; otherwise use a configurable lilac
+  fallback Base Color and report the fallback through the UI status channel.
+  Multiple source materials on one selected asset are outside this slice;
+- Part B is the grazing-edge hologram treatment: expose edge colour, opacity,
+  roughness, and emission intensity. Its single edge-colour control drives
+  both Base Color and Emission Color; keep the emission restrained pending
+  renderer validation;
+- reserve one normalised `Edge Falloff` operator control with default `0.5`.
+  Its mapping is an alternative-shader design decision; do not retain an
+  implicit `surface_falloff` / `blend_bias` mapping merely because that was the
+  first candidate;
+- do not expose or plan controls for Part A colour, metalness, IOR, or separate
+  facing and edge weights. X-Ray is a diagnostic material, not a general
+  photorealistic material editor;
+- do not use the X-Ray material as a substitute for existing enclosure
+  presentation controls. X-Ray may modify only its own material bindings and
+  material parameters, never top-cover or side-panel visibility;
+- on disable, stage reload, and shutdown, remove the Session Layer override
+  property specifications rather than authoring an empty binding target, so
+  the lower authored binding becomes effective again;
+- keep runtime-only X-Ray material and binding opinions in a dedicated,
+  transient runtime namespace. Establish the precedence contract with future
+  LED, heatmap, and material-state layers before implementation;
+- validate the exact RTX material graph, opacity behaviour, blend ordering,
+  edge emission, and full-server performance before accepting the alternative
+  shader implementation path.
+
+Surface Falloff investigation outcome — rejected implementation path:
+
+- The proposed graph was `Part A` (transparent-facing) and `Part B`
+  (coloured/emissive hologram edge) through
+  `nvidia::core_definitions::surface_falloff`, with
+  `facing_weight`, `edge_weight`, and `blend_bias` controlling the
+  view-dependent blend.
+- DTRS validated the surrounding runtime architecture: all 44 chassis meshes
+  received the intended Session Layer binding; the material terminal and
+  `base`/`blend` connections were composed correctly; Sdr registry types and
+  material-struct metadata matched the registered MDL definition; and the
+  Neuray renderer-side call contained the expected material references and
+  scalar values.
+- In the strongest DTRS control, both inputs referenced the same opaque yellow
+  Part A material, with `facing_weight = 1.0`, `edge_weight = 1.0`, and
+  `blend_bias = 5.0`. Neuray confirmed the same Part A call, yellow diffuse
+  colour `(1.0, 1.0, 0.0)`, and disabled opacity, while RTX rendered an
+  incorrect grey result. The defect is therefore below DTRS USD/MDL graph
+  authoring.
+- The failure was independently reproduced in a clean standalone Kit 110.1
+  Material Graph scene, without DTRS, Python, Session Layers, runtime
+  `UsdShade` authoring, chassis geometry, or DTRS bindings. `Part A` and
+  `Part B` connected directly to Material Output rendered correctly, but
+  `A/A` and `A/B` through Surface Falloff did not. RTX Real-Time 2.0 produced a
+  black/dark result; RTX Interactive (Path Tracing) removed that artifact but
+  still failed to evaluate Blend Material correctly.
+- A minimal reproduction scene and screenshots were submitted to the NVIDIA
+  Developer Forums under `Omniverse → Core Platform → RTX Renderer`. Do not
+  resume debugging or artist-tuning this Surface Falloff graph unless NVIDIA
+  provides new information or a fix.
+- `nvidia::core_definitions::apply_colorfalloff_v2` was separately observed to
+  work view-dependently in RTX Interactive but to be effectively ignored in
+  RTX Real-Time 2.0. This is a related renderer-mode observation, not a proven
+  replacement or the next implementation decision.
+- Follow-up shading hypothesis — do not implement until its standalone proof
+  is scheduled: create `DTRS_Fresnel_Test.mdl`, a minimal custom MDL material
+  that derives an edge/falloff mask from surface normal `N`, view direction
+  `V`, and `abs(dot(N, V))`, then blends a yellow facing branch to a blue
+  grazing-edge branch. Test this material on a standalone sphere in both RTX
+  Interactive (Path Tracing) and RTX Real-Time 2.0. The only question is
+  whether custom MDL view-dependent logic survives the RTX Real-Time 2.0
+  material-processing path.
+  - Interactive PASS + Real-Time 2.0 PASS: custom MDL becomes the preferred
+    replacement path for Stage 7.1 X-Ray.
+  - Interactive PASS + Real-Time 2.0 FAIL: custom MDL does not remove the
+    Real-Time limitation; reconsider the X-Ray implementation before creating
+    the full material.
+  - Only after that proof passes may the final custom material receive the
+    Stage 7.1 facing-opacity/roughness and edge-colour/opacity/emission
+    controls.
+- Stage 7.1 itself is not blocked: UI/config persistence, logical target
+  selection, Session Layer runtime binding, reversible material override, and
+  `Server Enclosure` visibility ownership remain the valid architecture. The
+  final view-dependent X-Ray shader is now a follow-up design decision.
+- Separately, the known X-Ray OFF lifecycle defect remains open: disabling
+  X-Ray currently leaves a Session Layer material-binding opinion instead of
+  removing the X-Ray-created binding property specification. It was not part of
+  the Surface Falloff investigation and must be fixed independently.
+
+Implementation notes:
+
+- NVIDIA documents `core_definitions::surface_falloff` as an MDL material
+  modifier with `base`, `blend`, `facing_weight`, `edge_weight`, and
+  `blend_bias` inputs, but it is no longer a viable Stage 7.1 implementation
+  candidate in the tested Kit/RTX stack (see investigation outcome above);
+- for OmniSurface, the candidate facing material must explicitly enable opacity
+  and use `geometry_opacity`; `0.0` is invisible to camera rays and `1.0` is
+  fully opaque. Opacity is the preferred candidate mechanism for the fade;
+  specular transmission is not a substitute for this visibility control;
+- an emissive edge treatment is technically supported, but it must remain
+  restrained. RTX Interactive path tracing can require a higher sample budget
+  to control emissive noise;
+- material binding is applied to a prim through `UsdShade.MaterialBindingAPI`.
+  The eventual runtime inspection must record the effective binding target and
+  winning binding for each proposed X-Ray panel;
+- static runtime-dependency check confirmed that DTRS includes
+  `omni.hydra.rtx`, which resolves the MDL runtime through
+  `omni.mdl.neuraylib` and `omni.kit.usd.mdl`. The resolving Kit release bundles
+  `nvidia::core_definitions::surface_falloff` and OmniSurface MDL modules;
+  adding the Material Graph editor UI extension is neither required nor
+  appropriate for the operator-facing application;
+- the first implementation slice validates the Session Layer graph and its USD
+  wiring with focused tests. The alternative shader must separately demonstrate
+  correct RTX behaviour, blend ordering, emissive-edge noise, and the
+  full-server performance budget before acceptance. Camera fade is explicitly
+  deferred to a later stage.
+
+Done when Engineering X-Ray can be enabled and disabled reproducibly through
+the target checkbox and `Apply`, uses a validated alternative view-dependent
+shader, restores the original material presentation by removing its own Session
+Layer binding opinions, does not change `Server Enclosure` visibility choices,
+persists its operator settings locally without auto-applying after startup or
+stage reload, reveals the documented internal review targets, and does not dirty
+authored assets.
 
 ### Stage 8 - Workload-to-Cache State Binding Slice
 

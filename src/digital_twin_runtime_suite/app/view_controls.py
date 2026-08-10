@@ -12,19 +12,20 @@ from digital_twin_runtime_suite.app.config import (
     SMOKE_TUNING_VALUE_OPTIONS,
     EmitterLayoutConfig,
     SmokeTuningConfig,
+    XRayMaterialConfig,
 )
 
 
 def bool_model_value(model: Any) -> bool:
     """Read a boolean value from an OmniUI-like model or test double."""
 
-    if hasattr(model, "as_bool"):
-        value = getattr(model, "as_bool")
-        return bool(value() if callable(value) else value)
     if hasattr(model, "get_value_as_bool"):
         return bool(model.get_value_as_bool())
     if hasattr(model, "get_value_as_int"):
         return bool(model.get_value_as_int())
+    if hasattr(model, "as_bool"):
+        value = getattr(model, "as_bool")
+        return bool(value() if callable(value) else value)
     return bool(model)
 
 
@@ -68,6 +69,47 @@ def normal_map_scale_from_model(model: Any) -> float:
     if not math.isfinite(value) or not 0.0 <= value <= 4.0:
         raise ValueError("Normal map scale must be between 0 and 4.")
     return value
+
+
+def xray_material_config_from_models(
+    chassis_selected_model: Any,
+    part_a_opacity_model: Any,
+    part_a_roughness_model: Any,
+    part_a_fallback_color_model: Any,
+    part_b_color_model: Any,
+    part_b_opacity_model: Any,
+    part_b_roughness_model: Any,
+    part_b_emission_intensity_model: Any,
+    edge_falloff_model: Any,
+) -> XRayMaterialConfig:
+    """Build validated persisted X-Ray settings from OmniUI-like models."""
+
+    normalized = {
+        "Part A opacity": float_model_value(part_a_opacity_model),
+        "Part A roughness": float_model_value(part_a_roughness_model),
+        "Part B opacity": float_model_value(part_b_opacity_model),
+        "Part B roughness": float_model_value(part_b_roughness_model),
+        "Edge Falloff": float_model_value(edge_falloff_model),
+    }
+    for label, value in normalized.items():
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"{label} must be between 0 and 1.")
+    emission_intensity = float_model_value(part_b_emission_intensity_model)
+    if not math.isfinite(emission_intensity) or not 0.0 <= emission_intensity <= 1000.0:
+        raise ValueError("Emission must be between 0 and 1000.")
+    return XRayMaterialConfig(
+        chassis_selected=bool_model_value(chassis_selected_model),
+        part_a_opacity=normalized["Part A opacity"],
+        part_a_roughness=normalized["Part A roughness"],
+        part_a_fallback_color=hex_to_rgb(
+            string_model_value(part_a_fallback_color_model)
+        ),
+        part_b_color=hex_to_rgb(string_model_value(part_b_color_model)),
+        part_b_opacity=normalized["Part B opacity"],
+        part_b_roughness=normalized["Part B roughness"],
+        part_b_emission_intensity=emission_intensity,
+        edge_falloff=normalized["Edge Falloff"],
+    )
 
 
 def rgb_to_hex(color: tuple[float, float, float]) -> str:
