@@ -11,10 +11,7 @@ from __future__ import annotations
 import math
 import time
 
-from digital_twin_runtime_suite.app.flow.performance import (
-    ViewportPerformanceSample,
-    capture_viewport_performance_sample,
-)
+from digital_twin_runtime_suite.app.xray import performance
 from digital_twin_runtime_suite.app.xray.material import (
     XRayApplyResult,
     XRayMaterialMixin,
@@ -29,47 +26,22 @@ class XRayProbeMixin(XRayMaterialMixin):
     to the MDL; it never changes ReviewCamera or production X-Ray bindings.
     """
 
-    @classmethod
-    def _format_xray_action_state(
-        cls,
-        stage,
-        Usd,
-        UsdShade,
-        *,
-        action: str,
-        requested_selected: bool,
-        result: str,
-    ) -> str:
-        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
-        session = stage.GetSessionLayer()
-        xray_binding_count = 0
-        session_binding_spec_count = 0
-        if root and root.IsValid():
-            for prim in Usd.PrimRange(root):
-                if prim.GetTypeName() != "Mesh":
-                    continue
-                relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
-                if str(cls.XRAY_MATERIAL_PATH) in {
-                    str(path) for path in relation.GetTargets()
-                }:
-                    xray_binding_count += 1
-                if session.GetPropertyAtPath(relation.GetPath()) is not None:
-                    session_binding_spec_count += 1
-        xray_material_present = stage.GetPrimAtPath(cls.XRAY_MATERIAL_PATH).IsValid()
-        return "\n".join(
-            (
-                "DTRS X-Ray action",
-                f"  action: {action}",
-                f"  requested_selected: {requested_selected}",
-                f"  result: {result}",
-                (
-                    "  runtime: "
-                    f"xray_material_present={xray_material_present}; "
-                    f"xray_direct_bindings={xray_binding_count}; "
-                    f"session_binding_specs={session_binding_spec_count}"
-                ),
-            )
-        )
+    XRAY_PROBE_ROOT_PATH = "/DTRS_Runtime/Debug/XRayProbe01"
+    XRAY_PROBE_MATERIAL_PATH = "/DTRS_Runtime/Debug/Looks/FresnelProbe01"
+    XRAY_PROBE_SERVER_PATH = "/blackwell_rig"
+    # Probe 01 is derived only from the server extent, keeping it visible in
+    # the review framing without introducing a hard-coded world-space size.
+    XRAY_PROBE_SIZE_FRACTION = 0.64
+    XRAY_PROBE_BOUND_PURPOSES = (
+        "default_",
+        "render",
+        "proxy",
+        "guide",
+    )
+    XRAY_PROBE_SPHERE_LONGITUDE_SEGMENTS = 64
+    XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS = 32
+    XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
+    XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
     def _format_xray_fresnel_probe_clear_state(
         self,
@@ -98,8 +70,10 @@ class XRayProbeMixin(XRayMaterialMixin):
                 camera_before_clear["camera_position_input"],
             )
         )
-        performance = self._xray_probe_diagnostic_value(
-            self._xray_fresnel_probe_performance_state
+        statistics = self._xray_probe_diagnostic_value(
+            lambda: performance.viewport_performance_state(
+                self._xray_probe_performance_samples
+            )
         )
         opacity_before_clear = self._xray_fresnel_probe_opacity_state()
         roughness_before_clear = self._xray_fresnel_probe_roughness_state()
@@ -127,15 +101,14 @@ class XRayProbeMixin(XRayMaterialMixin):
                 "  live_camera_sync_updates="
                 f"{self._xray_probe_live_camera_sync_updates}",
                 "  performance:",
-                f"    fps_current={performance['fps_current']}",
-                "    frame_time_ms_current=" f"{performance['frame_time_ms_current']}",
-                f"    probe_avg_fps={performance['probe_avg_fps']}",
-                "    probe_avg_frame_time_ms="
-                f"{performance['probe_avg_frame_time_ms']}",
-                f"    probe_min_fps={performance['probe_min_fps']}",
-                f"    probe_max_fps={performance['probe_max_fps']}",
-                f"    gpu_used_gib={performance['gpu_used_gib']}",
-                f"    process_used_gib={performance['process_used_gib']}",
+                f"    fps_current={statistics['fps_current']}",
+                "    frame_time_ms_current=" f"{statistics['frame_time_ms_current']}",
+                f"    probe_avg_fps={statistics['average_fps']}",
+                "    probe_avg_frame_time_ms=" f"{statistics['average_frame_time_ms']}",
+                f"    probe_min_fps={statistics['minimum_fps']}",
+                f"    probe_max_fps={statistics['maximum_fps']}",
+                f"    gpu_used_gib={statistics['gpu_used_gib']}",
+                f"    process_used_gib={statistics['process_used_gib']}",
                 f"  opacity_before_clear={opacity_before_clear}",
                 f"  roughness_before_clear={roughness_before_clear}",
                 f"  emission_before_clear={emission_before_clear}",
@@ -192,8 +165,10 @@ class XRayProbeMixin(XRayMaterialMixin):
                 review_camera_position, camera_position
             )
         )
-        performance = self._xray_probe_diagnostic_value(
-            self._xray_fresnel_probe_performance_state
+        statistics = self._xray_probe_diagnostic_value(
+            lambda: performance.viewport_performance_state(
+                self._xray_probe_performance_samples
+            )
         )
         geometry = self._xray_fresnel_probe_geometry_state(stage, Usd, UsdGeom)
         shader_asset = shader.GetSourceAsset("mdl").path if shader else "<missing>"
@@ -216,15 +191,14 @@ class XRayProbeMixin(XRayMaterialMixin):
                 "  live_camera_sync_updates="
                 f"{self._xray_probe_live_camera_sync_updates}",
                 "  performance:",
-                f"    fps_current={performance['fps_current']}",
-                "    frame_time_ms_current=" f"{performance['frame_time_ms_current']}",
-                f"    probe_avg_fps={performance['probe_avg_fps']}",
-                "    probe_avg_frame_time_ms="
-                f"{performance['probe_avg_frame_time_ms']}",
-                f"    probe_min_fps={performance['probe_min_fps']}",
-                f"    probe_max_fps={performance['probe_max_fps']}",
-                f"    gpu_used_gib={performance['gpu_used_gib']}",
-                f"    process_used_gib={performance['process_used_gib']}",
+                f"    fps_current={statistics['fps_current']}",
+                "    frame_time_ms_current=" f"{statistics['frame_time_ms_current']}",
+                f"    probe_avg_fps={statistics['average_fps']}",
+                "    probe_avg_frame_time_ms=" f"{statistics['average_frame_time_ms']}",
+                f"    probe_min_fps={statistics['minimum_fps']}",
+                f"    probe_max_fps={statistics['maximum_fps']}",
+                f"    gpu_used_gib={statistics['gpu_used_gib']}",
+                f"    process_used_gib={statistics['process_used_gib']}",
                 "  viewport_framing: disabled",
                 (
                     "  parameters: "
@@ -596,41 +570,6 @@ class XRayProbeMixin(XRayMaterialMixin):
             )
             light_visibility.Set(UsdGeom.Tokens.inherited)
 
-    def _xray_fresnel_probe_performance_state(
-        self, samples: list[ViewportPerformanceSample] | None = None
-    ) -> dict[str, str]:
-        """Format Kit HUD measurements for action diagnostics only."""
-
-        samples = self._xray_probe_performance_samples if samples is None else samples
-        latest = samples[-1] if samples else None
-        fps_values = [sample.fps for sample in samples if sample.fps is not None]
-        frame_times = [
-            sample.frame_time_ms
-            for sample in samples
-            if sample.frame_time_ms is not None
-        ]
-
-        def average(values):
-            return sum(values) / len(values) if values else None
-
-        def formatted(value):
-            return f"{value:.2f}" if value is not None else "<unavailable>"
-
-        return {
-            "fps_current": formatted(latest.fps if latest else None),
-            "frame_time_ms_current": formatted(
-                latest.frame_time_ms if latest else None
-            ),
-            "probe_avg_fps": formatted(average(fps_values)),
-            "probe_min_fps": formatted(min(fps_values) if fps_values else None),
-            "probe_max_fps": formatted(max(fps_values) if fps_values else None),
-            "probe_avg_frame_time_ms": formatted(average(frame_times)),
-            "gpu_used_gib": formatted(latest.gpu_memory_used_gib if latest else None),
-            "process_used_gib": formatted(
-                latest.process_memory_used_gib if latest else None
-            ),
-        }
-
     def _xray_fresnel_probe_opacity_state(self) -> dict[str, str]:
         try:
             values = self._xray_probe_last_values
@@ -700,9 +639,9 @@ class XRayProbeMixin(XRayMaterialMixin):
             return {"facing_roughness": unavailable, "edge_roughness": unavailable}
 
     def _format_xray_fresnel_probe_performance_interval(
-        self, samples: list[ViewportPerformanceSample]
+        self, samples: list[performance.ViewportPerformanceSample]
     ) -> str:
-        performance = self._xray_fresnel_probe_performance_state(samples)
+        statistics = performance.viewport_performance_state(samples)
         latest = samples[-1] if samples else None
         started_at = self._xray_probe_performance_started_at
         elapsed = (
@@ -733,16 +672,16 @@ class XRayProbeMixin(XRayMaterialMixin):
                 "    effective_facing=" f"{emission['effective_facing_emission']}",
                 "    effective_edge=" f"{emission['effective_edge_emission']}",
                 "  FPS:",
-                f"    current={performance['fps_current']}",
-                f"    average={performance['probe_avg_fps']}",
-                f"    minimum={performance['probe_min_fps']}",
-                f"    maximum={performance['probe_max_fps']}",
+                f"    current={statistics['fps_current']}",
+                f"    average={statistics['average_fps']}",
+                f"    minimum={statistics['minimum_fps']}",
+                f"    maximum={statistics['maximum_fps']}",
                 "  Frame time:",
-                f"    current={performance['frame_time_ms_current']} ms",
-                f"    average={performance['probe_avg_frame_time_ms']} ms",
+                f"    current={statistics['frame_time_ms_current']} ms",
+                f"    average={statistics['average_frame_time_ms']} ms",
                 "  Memory:",
-                f"    gpu_used_gib={performance['gpu_used_gib']}",
-                f"    process_used_gib={performance['process_used_gib']}",
+                f"    gpu_used_gib={statistics['gpu_used_gib']}",
+                f"    process_used_gib={statistics['process_used_gib']}",
             )
         )
 
@@ -795,7 +734,7 @@ class XRayProbeMixin(XRayMaterialMixin):
     def _start_xray_fresnel_probe_performance_sampler(self) -> None:
         """Reset one HUD-backed sampler when a new Probe 01 is created."""
 
-        initial_sample = self._capture_xray_fresnel_probe_performance_sample()
+        initial_sample = performance.capture_viewport_performance_sample()
         started_at = initial_sample.captured_at
         self._xray_probe_performance_started_at = started_at
         self._xray_probe_performance_next_sample_at = (
@@ -816,10 +755,6 @@ class XRayProbeMixin(XRayMaterialMixin):
         self._xray_probe_performance_interval_started_at = None
         self._xray_probe_performance_samples = []
 
-    @staticmethod
-    def _capture_xray_fresnel_probe_performance_sample() -> ViewportPerformanceSample:
-        return capture_viewport_performance_sample()
-
     def _advance_xray_fresnel_probe_performance_sampler(self) -> None:
         """Collect HUD samples in the existing camera-sync loop without a task."""
 
@@ -832,7 +767,7 @@ class XRayProbeMixin(XRayMaterialMixin):
         now = time.monotonic()
         if now < next_sample_at:
             return
-        sample = self._capture_xray_fresnel_probe_performance_sample()
+        sample = performance.capture_viewport_performance_sample()
         self._xray_probe_performance_samples.append(sample)
         self._xray_probe_performance_next_sample_at = (
             now + self.XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS

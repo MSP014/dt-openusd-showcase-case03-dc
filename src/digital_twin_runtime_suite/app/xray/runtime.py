@@ -17,12 +17,14 @@ from __future__ import annotations
 import time
 
 from digital_twin_runtime_suite.app.config import XRayMaterialConfig
-from digital_twin_runtime_suite.app.flow.performance import ViewportPerformanceSample
-from digital_twin_runtime_suite.app.xray.material import XRayApplyResult
-from digital_twin_runtime_suite.app.xray.probe import XRayProbeMixin
+from digital_twin_runtime_suite.app.xray import performance
+from digital_twin_runtime_suite.app.xray.material import (
+    XRayApplyResult,
+    XRayMaterialMixin,
+)
 
 
-class XRayRuntimeMixin(XRayProbeMixin):
+class XRayRuntimeMixin(XRayMaterialMixin):
     """Own the reversible production X-Ray binding lifecycle.
 
     ``RuntimeController`` supplies application-lifetime state and the existing
@@ -33,22 +35,6 @@ class XRayRuntimeMixin(XRayProbeMixin):
 
     XRAY_CHASSIS_ROOT_PATH = "/blackwell_rig/chassis"
     XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/XRayLifecycleControl"
-    XRAY_PROBE_ROOT_PATH = "/DTRS_Runtime/Debug/XRayProbe01"
-    XRAY_PROBE_MATERIAL_PATH = "/DTRS_Runtime/Debug/Looks/FresnelProbe01"
-    XRAY_PROBE_SERVER_PATH = "/blackwell_rig"
-    # Probe 01 is derived only from the server extent, keeping it visible in
-    # the review framing without introducing a hard-coded world-space size.
-    XRAY_PROBE_SIZE_FRACTION = 0.64
-    XRAY_PROBE_BOUND_PURPOSES = (
-        "default_",
-        "render",
-        "proxy",
-        "guide",
-    )
-    XRAY_PROBE_SPHERE_LONGITUDE_SEGMENTS = 64
-    XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS = 32
-    XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
-    XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
     XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
     XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
@@ -151,7 +137,7 @@ class XRayRuntimeMixin(XRayProbeMixin):
     def _start_xray_material_performance_sampler(self) -> None:
         """Start a HUD-backed interval for one production X-Ray activation."""
 
-        initial_sample = self._capture_xray_fresnel_probe_performance_sample()
+        initial_sample = performance.capture_viewport_performance_sample()
         started_at = initial_sample.captured_at
         self._xray_material_performance_started_at = started_at
         self._xray_material_performance_next_sample_at = (
@@ -181,7 +167,7 @@ class XRayRuntimeMixin(XRayProbeMixin):
         if now < next_sample_at:
             return
         try:
-            sample = self._capture_xray_fresnel_probe_performance_sample()
+            sample = performance.capture_viewport_performance_sample()
         except Exception as error:
             self._xray_material_performance_next_sample_at = (
                 now + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
@@ -217,9 +203,9 @@ class XRayRuntimeMixin(XRayProbeMixin):
         )
 
     def _format_xray_material_performance_interval(
-        self, samples: list[ViewportPerformanceSample]
+        self, samples: list[performance.ViewportPerformanceSample]
     ) -> str:
-        performance = self._xray_fresnel_probe_performance_state(samples)
+        statistics = performance.viewport_performance_state(samples)
         latest = samples[-1] if samples else None
         started_at = self._xray_material_performance_started_at
         elapsed = (
@@ -235,16 +221,16 @@ class XRayRuntimeMixin(XRayProbeMixin):
                 f"  control_material_path={self.XRAY_MATERIAL_PATH}",
                 f"  samples={len(samples)}",
                 "  FPS: "
-                f"current={performance['fps_current']}; "
-                f"average={performance['probe_avg_fps']}; "
-                f"minimum={performance['probe_min_fps']}; "
-                f"maximum={performance['probe_max_fps']}",
+                f"current={statistics['fps_current']}; "
+                f"average={statistics['average_fps']}; "
+                f"minimum={statistics['minimum_fps']}; "
+                f"maximum={statistics['maximum_fps']}",
                 "  Frame time: "
-                f"current={performance['frame_time_ms_current']} ms; "
-                f"average={performance['probe_avg_frame_time_ms']} ms",
+                f"current={statistics['frame_time_ms_current']} ms; "
+                f"average={statistics['average_frame_time_ms']} ms",
                 "  Memory: "
-                f"gpu_used_gib={performance['gpu_used_gib']}; "
-                f"process_used_gib={performance['process_used_gib']}",
+                f"gpu_used_gib={statistics['gpu_used_gib']}; "
+                f"process_used_gib={statistics['process_used_gib']}",
             )
         )
 
