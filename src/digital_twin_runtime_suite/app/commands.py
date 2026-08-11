@@ -24,6 +24,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    XRayFresnelProbeConfig,
     XRayMaterialConfig,
     chassis_presentation_with_operator_state,
     format_runtime_override,
@@ -31,7 +32,11 @@ from digital_twin_runtime_suite.app.config import (
 from digital_twin_runtime_suite.app.front_panel_indicators import (
     front_panel_indicator_state,
 )
-from digital_twin_runtime_suite.app.flow.performance import FlowPerformanceSample
+from digital_twin_runtime_suite.app.flow.performance import (
+    FlowPerformanceSample,
+    ViewportPerformanceSample,
+    capture_viewport_performance_sample,
+)
 from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
 from digital_twin_runtime_suite.app.flow.validation_cache import SessionValidationCache
 from digital_twin_runtime_suite.app.flow.runtime import (
@@ -156,11 +161,20 @@ class RuntimeController(FlowRuntimeMixin):
     )
     XRAY_PROBE_SPHERE_LONGITUDE_SEGMENTS = 64
     XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS = 32
+    XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
+    XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
     def __init__(self, config_path: Path | str):
         self._config_path = Path(config_path)
         self._xray_probe_visibility_state: tuple[bool, object | None] | None = None
         self._xray_probe_server_bbox_snapshot = None
+        self._xray_probe_last_values = None
+        self._xray_probe_live_camera_sync_updates = 0
+        self._xray_probe_performance_started_at: float | None = None
+        self._xray_probe_performance_next_sample_at: float | None = None
+        self._xray_probe_performance_next_log_at: float | None = None
+        self._xray_probe_performance_interval_started_at: float | None = None
+        self._xray_probe_performance_samples: list[ViewportPerformanceSample] = []
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
@@ -343,6 +357,27 @@ class RuntimeController(FlowRuntimeMixin):
             materials=replace(
                 self.config.chassis_presentation.materials,
                 xray=xray,
+            ),
+        )
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            presentation,
+        )
+
+    def save_xray_fresnel_probe_override(
+        self, fresnel_probe: XRayFresnelProbeConfig
+    ) -> Path:
+        """Persist debug probe controls without retaining its transient USD state."""
+
+        presentation = replace(
+            self.config.chassis_presentation,
+            materials=replace(
+                self.config.chassis_presentation.materials,
+                xray_fresnel_probe=fresnel_probe,
             ),
         )
         return self.save_runtime_override(
@@ -1280,6 +1315,13 @@ class RuntimeController(FlowRuntimeMixin):
             float,
             float,
             float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
         ],
         *,
         rebuild: bool,
@@ -1330,6 +1372,8 @@ class RuntimeController(FlowRuntimeMixin):
                 )
                 for prim in (cube.GetPrim(), sphere.GetPrim()):
                     UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+                self._xray_probe_live_camera_sync_updates = 0
+                self._start_xray_fresnel_probe_performance_sampler()
             self._set_xray_fresnel_probe_values(
                 stage,
                 values,
@@ -1338,6 +1382,7 @@ class RuntimeController(FlowRuntimeMixin):
                 UsdShade,
                 camera_position=camera_position,
             )
+            self._xray_probe_last_values = values
             self._log_xray_fresnel_probe_diagnostic(
                 carb,
                 action="Probe 01" if rebuild else "Apply Probe Parameters",
@@ -1361,6 +1406,7 @@ class RuntimeController(FlowRuntimeMixin):
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
+            self._stop_xray_fresnel_probe_performance_sampler()
             return XRayApplyResult(True, "Fresnel probe is inactive; no open stage.")
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
@@ -1386,9 +1432,273 @@ class RuntimeController(FlowRuntimeMixin):
                     review_camera_after_clear=review_camera_after_clear,
                 ),
             )
+            self._stop_xray_fresnel_probe_performance_sampler()
         finally:
             stage.SetEditTarget(previous_target)
         return XRayApplyResult(True, "Custom MDL Fresnel Probe cleared.")
+
+    def sync_xray_fresnel_probe_camera_in_kit(self) -> bool:
+        """Update the active probe's MDL camera input only when it moved."""
+
+        import omni.usd
+        from pxr import Gf, Usd, UsdGeom, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            self._stop_xray_fresnel_probe_performance_sampler()
+            return False
+        probe_root = stage.GetPrimAtPath(self.XRAY_PROBE_ROOT_PATH)
+        material_prim = stage.GetPrimAtPath(self.XRAY_PROBE_MATERIAL_PATH)
+        if not (
+            probe_root
+            and probe_root.IsValid()
+            and material_prim
+            and material_prim.IsValid()
+        ):
+            self._stop_xray_fresnel_probe_performance_sampler()
+            return False
+        shader = UsdShade.Shader.Get(stage, f"{self.XRAY_PROBE_MATERIAL_PATH}/Shader")
+        if not shader or not shader.GetPrim().IsValid():
+            self._stop_xray_fresnel_probe_performance_sampler()
+            return False
+        camera_input = shader.GetInput("camera_position")
+        if not camera_input or not camera_input.GetAttr().HasAuthoredValue():
+            self._stop_xray_fresnel_probe_performance_sampler()
+            return False
+        self._advance_xray_fresnel_probe_performance_sampler()
+        current_position = self._xray_fresnel_probe_camera_position(stage, Usd, UsdGeom)
+        if current_position is None:
+            return False
+        authored_position = camera_input.Get()
+        if authored_position is None or self._xray_probe_camera_positions_match(
+            current_position, authored_position
+        ):
+            return False
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            camera_input.Set(Gf.Vec3f(*current_position))
+            self._xray_probe_live_camera_sync_updates += 1
+        finally:
+            stage.SetEditTarget(previous_target)
+        return True
+
+    def _start_xray_fresnel_probe_performance_sampler(self) -> None:
+        """Reset one HUD-backed sampler when a new Probe 01 is created."""
+
+        initial_sample = self._capture_xray_fresnel_probe_performance_sample()
+        started_at = initial_sample.captured_at
+        self._xray_probe_performance_started_at = started_at
+        self._xray_probe_performance_next_sample_at = (
+            started_at + self.XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
+        )
+        self._xray_probe_performance_next_log_at = (
+            started_at + self.XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS
+        )
+        self._xray_probe_performance_interval_started_at = started_at
+        self._xray_probe_performance_samples = [initial_sample]
+
+    def _stop_xray_fresnel_probe_performance_sampler(self) -> None:
+        """Clear the probe sampler when its transient material no longer exists."""
+
+        self._xray_probe_performance_started_at = None
+        self._xray_probe_performance_next_sample_at = None
+        self._xray_probe_performance_next_log_at = None
+        self._xray_probe_performance_interval_started_at = None
+        self._xray_probe_performance_samples = []
+
+    @staticmethod
+    def _capture_xray_fresnel_probe_performance_sample() -> ViewportPerformanceSample:
+        return capture_viewport_performance_sample()
+
+    def _advance_xray_fresnel_probe_performance_sampler(self) -> None:
+        """Collect HUD samples in the existing camera-sync loop without a task."""
+
+        started_at = self._xray_probe_performance_started_at
+        next_sample_at = self._xray_probe_performance_next_sample_at
+        next_log_at = self._xray_probe_performance_next_log_at
+        if started_at is None or next_sample_at is None or next_log_at is None:
+            self._start_xray_fresnel_probe_performance_sampler()
+            return
+        now = time.monotonic()
+        if now < next_sample_at:
+            return
+        sample = self._capture_xray_fresnel_probe_performance_sample()
+        self._xray_probe_performance_samples.append(sample)
+        self._xray_probe_performance_next_sample_at = (
+            now + self.XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
+        )
+        if now < next_log_at:
+            return
+        interval_started_at = self._xray_probe_performance_interval_started_at
+        interval_samples = [
+            item
+            for item in self._xray_probe_performance_samples
+            if interval_started_at is None or item.captured_at >= interval_started_at
+        ]
+        import carb
+
+        self._log_xray_fresnel_probe_diagnostic(
+            carb,
+            action="PERFORMANCE",
+            formatter=lambda: self._format_xray_fresnel_probe_performance_interval(
+                interval_samples
+            ),
+        )
+        self._xray_probe_performance_interval_started_at = sample.captured_at
+        self._xray_probe_performance_next_log_at = (
+            now + self.XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS
+        )
+
+    def _xray_fresnel_probe_performance_state(
+        self, samples: list[ViewportPerformanceSample] | None = None
+    ) -> dict[str, str]:
+        """Format Kit HUD measurements for action diagnostics only."""
+
+        samples = self._xray_probe_performance_samples if samples is None else samples
+        latest = samples[-1] if samples else None
+        fps_values = [sample.fps for sample in samples if sample.fps is not None]
+        frame_times = [
+            sample.frame_time_ms
+            for sample in samples
+            if sample.frame_time_ms is not None
+        ]
+
+        def average(values):
+            return sum(values) / len(values) if values else None
+
+        def formatted(value):
+            return f"{value:.2f}" if value is not None else "<unavailable>"
+
+        return {
+            "fps_current": formatted(latest.fps if latest else None),
+            "frame_time_ms_current": formatted(
+                latest.frame_time_ms if latest else None
+            ),
+            "probe_avg_fps": formatted(average(fps_values)),
+            "probe_min_fps": formatted(min(fps_values) if fps_values else None),
+            "probe_max_fps": formatted(max(fps_values) if fps_values else None),
+            "probe_avg_frame_time_ms": formatted(average(frame_times)),
+            "gpu_used_gib": formatted(latest.gpu_memory_used_gib if latest else None),
+            "process_used_gib": formatted(
+                latest.process_memory_used_gib if latest else None
+            ),
+        }
+
+    def _xray_fresnel_probe_opacity_state(self) -> dict[str, str]:
+        try:
+            values = self._xray_probe_last_values
+            return {
+                "facing_opacity": (
+                    f"{float(values[7]):.2f}" if values is not None else "<unavailable>"
+                ),
+                "edge_opacity": (
+                    f"{float(values[8]):.2f}" if values is not None else "<unavailable>"
+                ),
+            }
+        except Exception as error:
+            unavailable = f"<inspection failed: {error}>"
+            return {"facing_opacity": unavailable, "edge_opacity": unavailable}
+
+    def _xray_fresnel_probe_emission_state(self) -> dict[str, str]:
+        try:
+            values = self._xray_probe_last_values
+            return {
+                "facing_emission": (
+                    f"{float(values[9]):.2f}" if values is not None else "<unavailable>"
+                ),
+                "edge_emission": (
+                    f"{float(values[10]):.2f}"
+                    if values is not None
+                    else "<unavailable>"
+                ),
+                "emission_scale": (
+                    f"{float(values[11]):.2f}"
+                    if values is not None
+                    else "<unavailable>"
+                ),
+                "effective_facing_emission": (
+                    f"{float(values[9]) * float(values[11]):.2f}"
+                    if values is not None
+                    else "<unavailable>"
+                ),
+                "effective_edge_emission": (
+                    f"{float(values[10]) * float(values[11]):.2f}"
+                    if values is not None
+                    else "<unavailable>"
+                ),
+            }
+        except Exception as error:
+            unavailable = f"<inspection failed: {error}>"
+            return {
+                "facing_emission": unavailable,
+                "edge_emission": unavailable,
+                "emission_scale": unavailable,
+                "effective_facing_emission": unavailable,
+                "effective_edge_emission": unavailable,
+            }
+
+    def _xray_fresnel_probe_roughness_state(self) -> dict[str, str]:
+        try:
+            values = self._xray_probe_last_values
+            return {
+                "facing_roughness": (
+                    f"{float(values[5]):.2f}" if values is not None else "<unavailable>"
+                ),
+                "edge_roughness": (
+                    f"{float(values[6]):.2f}" if values is not None else "<unavailable>"
+                ),
+            }
+        except Exception as error:
+            unavailable = f"<inspection failed: {error}>"
+            return {"facing_roughness": unavailable, "edge_roughness": unavailable}
+
+    def _format_xray_fresnel_probe_performance_interval(
+        self, samples: list[ViewportPerformanceSample]
+    ) -> str:
+        performance = self._xray_fresnel_probe_performance_state(samples)
+        latest = samples[-1] if samples else None
+        started_at = self._xray_probe_performance_started_at
+        elapsed = (
+            latest.captured_at - started_at
+            if latest is not None and started_at is not None
+            else None
+        )
+        opacity = self._xray_fresnel_probe_opacity_state()
+        roughness = self._xray_fresnel_probe_roughness_state()
+        emission = self._xray_fresnel_probe_emission_state()
+        elapsed_text = f"{elapsed:.1f} s" if elapsed is not None else "<unavailable>"
+        return "\n".join(
+            (
+                "DTRS Custom MDL Fresnel Probe 01 - PERFORMANCE",
+                f"  elapsed={elapsed_text}",
+                "  live_camera_sync_updates="
+                f"{self._xray_probe_live_camera_sync_updates}",
+                "  opacity:",
+                f"    facing_opacity={opacity['facing_opacity']}",
+                f"    edge_opacity={opacity['edge_opacity']}",
+                "  roughness: "
+                f"facing={roughness['facing_roughness']}; "
+                f"edge={roughness['edge_roughness']}",
+                "  emission:",
+                f"    facing_emission={emission['facing_emission']}",
+                f"    edge_emission={emission['edge_emission']}",
+                f"    emission_scale={emission['emission_scale']}",
+                "    effective_facing=" f"{emission['effective_facing_emission']}",
+                "    effective_edge=" f"{emission['effective_edge_emission']}",
+                "  FPS:",
+                f"    current={performance['fps_current']}",
+                f"    average={performance['probe_avg_fps']}",
+                f"    minimum={performance['probe_min_fps']}",
+                f"    maximum={performance['probe_max_fps']}",
+                "  Frame time:",
+                f"    current={performance['frame_time_ms_current']} ms",
+                f"    average={performance['probe_avg_frame_time_ms']} ms",
+                "  Memory:",
+                f"    gpu_used_gib={performance['gpu_used_gib']}",
+                f"    process_used_gib={performance['process_used_gib']}",
+            )
+        )
 
     @staticmethod
     def _log_xray_fresnel_probe_diagnostic(carb, *, action: str, formatter) -> None:
@@ -1709,7 +2019,20 @@ class RuntimeController(FlowRuntimeMixin):
                 light_paths.append(f"{prim.GetPath()}={visibility}")
         cube = stage.GetPrimAtPath(f"{self.XRAY_PROBE_ROOT_PATH}/Cube")
         sphere = stage.GetPrimAtPath(f"{self.XRAY_PROBE_ROOT_PATH}/Sphere")
-        facing, edge, center, softness, sharpness = values
+        (
+            facing,
+            edge,
+            center,
+            softness,
+            sharpness,
+            facing_roughness,
+            edge_roughness,
+            facing_opacity,
+            edge_opacity,
+            facing_emission,
+            edge_emission,
+            emission_scale,
+        ) = values
         cube_binding = UsdShade.MaterialBindingAPI(cube).ComputeBoundMaterial()[0]
         sphere_binding = UsdShade.MaterialBindingAPI(sphere).ComputeBoundMaterial()[0]
         sphere_mesh = UsdGeom.Mesh(sphere)
@@ -1724,6 +2047,9 @@ class RuntimeController(FlowRuntimeMixin):
             lambda: self._xray_probe_camera_positions_match(
                 review_camera_position, camera_position
             )
+        )
+        performance = self._xray_probe_diagnostic_value(
+            self._xray_fresnel_probe_performance_state
         )
         geometry = self._xray_fresnel_probe_geometry_state(stage, Usd, UsdGeom)
         shader_asset = shader.GetSourceAsset("mdl").path if shader else "<missing>"
@@ -1742,12 +2068,45 @@ class RuntimeController(FlowRuntimeMixin):
                 f"  camera_position_input: {camera_position}",
                 f"  review_camera_position: {review_camera_position}",
                 f"  camera_match: {camera_match}",
+                "  live_camera_sync: enabled",
+                "  live_camera_sync_updates="
+                f"{self._xray_probe_live_camera_sync_updates}",
+                "  performance:",
+                f"    fps_current={performance['fps_current']}",
+                "    frame_time_ms_current=" f"{performance['frame_time_ms_current']}",
+                f"    probe_avg_fps={performance['probe_avg_fps']}",
+                "    probe_avg_frame_time_ms="
+                f"{performance['probe_avg_frame_time_ms']}",
+                f"    probe_min_fps={performance['probe_min_fps']}",
+                f"    probe_max_fps={performance['probe_max_fps']}",
+                f"    gpu_used_gib={performance['gpu_used_gib']}",
+                f"    process_used_gib={performance['process_used_gib']}",
                 "  viewport_framing: disabled",
                 (
                     "  parameters: "
                     f"facing_color={facing}; edge_color={edge}; "
                     f"edge_center={center:g}; edge_softness={softness:g}; "
                     f"edge_sharpness={sharpness:g}"
+                ),
+                (
+                    "  roughness: "
+                    f"facing_roughness={facing_roughness:g}; "
+                    f"edge_roughness={edge_roughness:g}"
+                ),
+                (
+                    "  opacity: "
+                    f"facing_opacity={facing_opacity:g}; "
+                    f"edge_opacity={edge_opacity:g}"
+                ),
+                (
+                    "  emission: "
+                    f"facing_emission={facing_emission:g}; "
+                    f"edge_emission={edge_emission:g}; "
+                    f"emission_scale={emission_scale:.2f}; "
+                    "effective_facing_emission="
+                    f"{facing_emission * emission_scale:.2f}; "
+                    "effective_edge_emission="
+                    f"{edge_emission * emission_scale:.2f}"
                 ),
                 "  probe_geometry:",
                 f"    server_bbox_min={geometry['server_bbox_min']}",
@@ -1808,6 +2167,18 @@ class RuntimeController(FlowRuntimeMixin):
                 review_camera_after_clear,
             )
         )
+        camera_match_before_clear = self._xray_probe_diagnostic_value(
+            lambda: self._xray_probe_camera_positions_match(
+                camera_before_clear["review_camera_position"],
+                camera_before_clear["camera_position_input"],
+            )
+        )
+        performance = self._xray_probe_diagnostic_value(
+            self._xray_fresnel_probe_performance_state
+        )
+        opacity_before_clear = self._xray_fresnel_probe_opacity_state()
+        roughness_before_clear = self._xray_fresnel_probe_roughness_state()
+        emission_before_clear = self._xray_fresnel_probe_emission_state()
         probe_root_present = stage.GetPrimAtPath(self.XRAY_PROBE_ROOT_PATH).IsValid()
         probe_material_present = stage.GetPrimAtPath(
             self.XRAY_PROBE_MATERIAL_PATH
@@ -1827,6 +2198,22 @@ class RuntimeController(FlowRuntimeMixin):
                 f"{camera_before_clear['review_camera_position']}",
                 "  camera_position_input_before_clear="
                 f"{camera_before_clear['camera_position_input']}",
+                f"  camera_match_before_clear={camera_match_before_clear}",
+                "  live_camera_sync_updates="
+                f"{self._xray_probe_live_camera_sync_updates}",
+                "  performance:",
+                f"    fps_current={performance['fps_current']}",
+                "    frame_time_ms_current=" f"{performance['frame_time_ms_current']}",
+                f"    probe_avg_fps={performance['probe_avg_fps']}",
+                "    probe_avg_frame_time_ms="
+                f"{performance['probe_avg_frame_time_ms']}",
+                f"    probe_min_fps={performance['probe_min_fps']}",
+                f"    probe_max_fps={performance['probe_max_fps']}",
+                f"    gpu_used_gib={performance['gpu_used_gib']}",
+                f"    process_used_gib={performance['process_used_gib']}",
+                f"  opacity_before_clear={opacity_before_clear}",
+                f"  roughness_before_clear={roughness_before_clear}",
+                f"  emission_before_clear={emission_before_clear}",
                 "  review_camera_position_after_clear=" f"{review_camera_after_clear}",
                 f"  camera_changed_by_clear={camera_changed}",
                 f"  probe_root_present={probe_root_present}",
@@ -1906,7 +2293,20 @@ class RuntimeController(FlowRuntimeMixin):
     def _set_xray_fresnel_probe_values(
         cls, stage, values, Gf, Sdf, UsdShade, *, camera_position=None
     ) -> None:
-        facing, edge, center, softness, sharpness = values
+        (
+            facing,
+            edge,
+            center,
+            softness,
+            sharpness,
+            facing_roughness,
+            edge_roughness,
+            facing_opacity,
+            edge_opacity,
+            facing_emission,
+            edge_emission,
+            emission_scale,
+        ) = values
         shader = UsdShade.Shader.Get(stage, f"{cls.XRAY_PROBE_MATERIAL_PATH}/Shader")
         for name, value, value_type in (
             ("facing_color", Gf.Vec3f(*facing), Sdf.ValueTypeNames.Color3f),
@@ -1914,6 +2314,13 @@ class RuntimeController(FlowRuntimeMixin):
             ("edge_center", center, Sdf.ValueTypeNames.Float),
             ("edge_softness", softness, Sdf.ValueTypeNames.Float),
             ("edge_sharpness", sharpness, Sdf.ValueTypeNames.Float),
+            ("facing_roughness", facing_roughness, Sdf.ValueTypeNames.Float),
+            ("edge_roughness", edge_roughness, Sdf.ValueTypeNames.Float),
+            ("facing_opacity", facing_opacity, Sdf.ValueTypeNames.Float),
+            ("edge_opacity", edge_opacity, Sdf.ValueTypeNames.Float),
+            ("facing_emission", facing_emission, Sdf.ValueTypeNames.Float),
+            ("edge_emission", edge_emission, Sdf.ValueTypeNames.Float),
+            ("emission_scale", emission_scale, Sdf.ValueTypeNames.Float),
         ):
             shader.CreateInput(name, value_type).Set(value)
         if camera_position is not None:

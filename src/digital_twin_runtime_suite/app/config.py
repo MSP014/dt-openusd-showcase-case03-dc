@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import tomllib
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -194,11 +195,30 @@ class XRayMaterialConfig:
 
 
 @dataclass(frozen=True)
+class XRayFresnelProbeConfig:
+    """Persisted operator values for the debug-only Custom MDL Fresnel probe."""
+
+    facing_color: tuple[float, float, float] = (1.0, 1.0, 0.0)
+    edge_color: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    edge_center: float = 0.65
+    edge_softness: float = 0.20
+    edge_sharpness: float = 1.0
+    facing_roughness: float = 0.40
+    edge_roughness: float = 0.30
+    facing_opacity: float = 0.20
+    edge_opacity: float = 0.55
+    facing_emission: float = 0.32
+    edge_emission: float = 3.20
+    emission_scale: float = 10000.0
+
+
+@dataclass(frozen=True)
 class MaterialPresentationConfig:
     """Runtime material presentation settings for the server appearance."""
 
     normal_map_scale: float = 2.0
     xray: XRayMaterialConfig = XRayMaterialConfig()
+    xray_fresnel_probe: XRayFresnelProbeConfig = XRayFresnelProbeConfig()
 
 
 @dataclass(frozen=True)
@@ -591,6 +611,28 @@ def format_runtime_override(
             f"{xray.part_b_emission_intensity:.6g}\n"
             f"edge_falloff = {xray.edge_falloff:.6g}\n"
         )
+        fresnel_probe = chassis_presentation.materials.xray_fresnel_probe
+        text += (
+            "\n[chassis_presentation.materials.xray_fresnel_probe]\n"
+            "facing_color = "
+            f"[{fresnel_probe.facing_color[0]:.6g}, "
+            f"{fresnel_probe.facing_color[1]:.6g}, "
+            f"{fresnel_probe.facing_color[2]:.6g}]\n"
+            "edge_color = "
+            f"[{fresnel_probe.edge_color[0]:.6g}, "
+            f"{fresnel_probe.edge_color[1]:.6g}, "
+            f"{fresnel_probe.edge_color[2]:.6g}]\n"
+            f"edge_center = {fresnel_probe.edge_center:.6g}\n"
+            f"edge_softness = {fresnel_probe.edge_softness:.6g}\n"
+            f"edge_sharpness = {fresnel_probe.edge_sharpness:.6g}\n"
+            f"facing_roughness = {fresnel_probe.facing_roughness:.6g}\n"
+            f"edge_roughness = {fresnel_probe.edge_roughness:.6g}\n"
+            f"facing_opacity = {fresnel_probe.facing_opacity:.6g}\n"
+            f"edge_opacity = {fresnel_probe.edge_opacity:.6g}\n"
+            f"facing_emission = {fresnel_probe.facing_emission:.6g}\n"
+            f"edge_emission = {fresnel_probe.edge_emission:.6g}\n"
+            f"emission_scale = {fresnel_probe.emission_scale:.6g}\n"
+        )
     return text
 
 
@@ -711,6 +753,15 @@ def _merge_runtime_override(
                 LOGGER.warning(
                     "Ignoring chassis materials X-Ray local override: expected a table."
                 )
+            local_fresnel_probe = local_materials.get("xray_fresnel_probe")
+            if isinstance(local_fresnel_probe, dict):
+                fresnel_probe = dict(materials.get("xray_fresnel_probe", {}))
+                fresnel_probe.update(local_fresnel_probe)
+                materials["xray_fresnel_probe"] = fresnel_probe
+            elif local_fresnel_probe is not None:
+                LOGGER.warning(
+                    "Ignoring X-Ray Fresnel probe local override: expected a table."
+                )
             chassis["materials"] = materials
         elif local_materials is not None and not isinstance(local_materials, dict):
             LOGGER.warning(
@@ -822,6 +873,9 @@ def _parse_material_presentation_config(data: Any) -> MaterialPresentationConfig
     return MaterialPresentationConfig(
         normal_map_scale=normal_map_scale,
         xray=_parse_xray_material_config(data.get("xray")),
+        xray_fresnel_probe=_parse_xray_fresnel_probe_config(
+            data.get("xray_fresnel_probe")
+        ),
     )
 
 
@@ -874,6 +928,74 @@ def _parse_xray_material_config(data: Any) -> XRayMaterialConfig:
         part_b_roughness=values["part_b_roughness"],
         part_b_emission_intensity=emission,
         edge_falloff=values["edge_falloff"],
+    )
+
+
+def _parse_xray_fresnel_probe_config(data: Any) -> XRayFresnelProbeConfig:
+    if not isinstance(data, dict):
+        return XRayFresnelProbeConfig()
+
+    defaults = XRayFresnelProbeConfig()
+
+    def parse_color(field: str, default: tuple[float, float, float]):
+        color = _parse_rgb(
+            data.get(field), default, f"materials.xray_fresnel_probe.{field}"
+        )
+        if any(component < 0.0 or component > 1.0 for component in color):
+            raise ValueError(
+                f"materials.xray_fresnel_probe.{field} values must be between 0 and 1."
+            )
+        return color
+
+    values = {
+        "edge_center": float(data.get("edge_center", defaults.edge_center)),
+        "edge_softness": float(data.get("edge_softness", defaults.edge_softness)),
+        "edge_sharpness": float(data.get("edge_sharpness", defaults.edge_sharpness)),
+        "facing_roughness": float(
+            data.get("facing_roughness", defaults.facing_roughness)
+        ),
+        "edge_roughness": float(data.get("edge_roughness", defaults.edge_roughness)),
+        "facing_opacity": float(data.get("facing_opacity", defaults.facing_opacity)),
+        "edge_opacity": float(data.get("edge_opacity", defaults.edge_opacity)),
+        "facing_emission": float(data.get("facing_emission", defaults.facing_emission)),
+        "edge_emission": float(data.get("edge_emission", defaults.edge_emission)),
+        "emission_scale": float(data.get("emission_scale", defaults.emission_scale)),
+    }
+    for field, value in values.items():
+        if not math.isfinite(value):
+            raise ValueError(f"materials.xray_fresnel_probe.{field} must be finite.")
+    if not 0.0 <= values["edge_center"] <= 1.0:
+        raise ValueError(
+            "materials.xray_fresnel_probe.edge_center must be between 0 and 1."
+        )
+    if not 0.001 <= values["edge_softness"] <= 1.0:
+        raise ValueError(
+            "materials.xray_fresnel_probe.edge_softness must be between 0.001 and 1."
+        )
+    if not 0.1 <= values["edge_sharpness"] <= 8.0:
+        raise ValueError(
+            "materials.xray_fresnel_probe.edge_sharpness must be between 0.1 and 8."
+        )
+    for field in (
+        "facing_roughness",
+        "edge_roughness",
+        "facing_opacity",
+        "edge_opacity",
+    ):
+        if not 0.0 <= values[field] <= 1.0:
+            raise ValueError(
+                f"materials.xray_fresnel_probe.{field} must be between 0 and 1."
+            )
+    for field in ("facing_emission", "edge_emission", "emission_scale"):
+        if values[field] < 0.0:
+            raise ValueError(
+                "materials.xray_fresnel_probe."
+                f"{field} must be greater than or equal to 0."
+            )
+    return XRayFresnelProbeConfig(
+        facing_color=parse_color("facing_color", defaults.facing_color),
+        edge_color=parse_color("edge_color", defaults.edge_color),
+        **values,
     )
 
 
