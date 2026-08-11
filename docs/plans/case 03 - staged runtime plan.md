@@ -642,13 +642,17 @@ Jira: `DC-48`
 
 #### Stage 7.1 - Engineering X-Ray Visual Mode Slice
 
-> [!NOTE] IMPLEMENTATION IN PROGRESS — SHADING DESIGN DECISION REQUIRED
+> [!NOTE] IMPLEMENTATION IN PROGRESS — CUSTOM MDL ISOLATED MATERIAL PROOF VALIDATED
 > The Session Layer override architecture, target UI/configuration, and
 > reversible-binding requirements remain valid. The originally selected
-> `nvidia::core_definitions::surface_falloff` implementation path is rejected
-> for the tested Kit/RTX environment; Stage 7.1 requires a separate alternative
-> X-Ray shading design. Camera-driven fade and multi-material target handling
-> remain explicitly deferred.
+> `nvidia::core_definitions::surface_falloff` route was rejected after
+> reproducible incorrect behaviour in the tested Kit 110.1 / RTX environment,
+> independently of DTRS runtime authoring; a bug report was submitted to
+> NVIDIA. Stage 7.1 therefore uses a project-owned custom MDL view-angle mask,
+> validated for Base Color, Glossy Roughness, Opacity, and Emission on isolated
+> Cube/Sphere probe geometry in DTRS. Shared-mask interpolation, reversed
+> Roughness endpoints, and live ReviewCamera response are manually validated;
+> production chassis integration remains next.
 
 Release track: `0.4.0` (released on Stage 8 completion).
 
@@ -666,9 +670,10 @@ Required scope:
   pressed, on stage reload, and on application startup;
 - initially target the outer chassis and other documented occluding components,
   including the SilverStone RM44 walls and covers;
-- make Part A opacity a static operator value applied only by `Apply`. Do not
-  implement camera observation, camera-driven material updates, thresholds,
-  interpolation, or hysteresis in this slice;
+- keep production X-Ray operator values applied only by `Apply`. Live
+  ReviewCamera updates are validated only for the isolated custom-MDL probe;
+  do not extend camera observation, interpolation, or hysteresis to production
+  chassis materials in this slice;
 - author a dedicated runtime-only material override or material binding for
   the selected logical asset. Do not mutate a shared Houdini-authored chassis
   material;
@@ -726,9 +731,8 @@ Implementation contract — material and Session Layer:
 - keep runtime-only X-Ray material and binding opinions in a dedicated,
   transient runtime namespace. Establish the precedence contract with future
   LED, heatmap, and material-state layers before implementation;
-- validate the exact RTX material graph, opacity behaviour, blend ordering,
-  edge emission, and full-server performance before accepting the alternative
-  shader implementation path.
+- validate opacity behaviour, edge emission, and full-server performance before
+  accepting the corresponding production X-Ray phase.
 
 Surface Falloff investigation outcome — rejected implementation path:
 
@@ -764,26 +768,148 @@ Surface Falloff investigation outcome — rejected implementation path:
   work view-dependently in RTX Interactive but to be effectively ignored in
   RTX Real-Time 2.0. This is a related renderer-mode observation, not a proven
   replacement or the next implementation decision.
-- Follow-up shading hypothesis — do not implement until its standalone proof
-  is scheduled: create `DTRS_Fresnel_Test.mdl`, a minimal custom MDL material
-  that derives an edge/falloff mask from surface normal `N`, view direction
-  `V`, and `abs(dot(N, V))`, then blends a yellow facing branch to a blue
-  grazing-edge branch. Test this material on a standalone sphere in both RTX
-  Interactive (Path Tracing) and RTX Real-Time 2.0. The only question is
-  whether custom MDL view-dependent logic survives the RTX Real-Time 2.0
-  material-processing path.
-  - Interactive PASS + Real-Time 2.0 PASS: custom MDL becomes the preferred
-    replacement path for Stage 7.1 X-Ray.
-  - Interactive PASS + Real-Time 2.0 FAIL: custom MDL does not remove the
-    Real-Time limitation; reconsider the X-Ray implementation before creating
-    the full material.
-  - Only after that proof passes may the final custom material receive the
-    Stage 7.1 facing-opacity/roughness and edge-colour/opacity/emission
-    controls.
+Custom MDL validation outcome:
+
+- `DTRS_Fresnel_Test.mdl` is the selected project-owned replacement path.
+  Its view-angle mask is conceptually derived from `N = state::normal()`,
+  `P = state::position()`, `V = camera_position - P`,
+  `NdotV = abs(dot(N, V))`, and `raw_edge = 1 - NdotV`, then remapped through
+  Edge Center, Edge Softness, and Edge Sharpness.
+- The permanent semantic contract is `mask = 0` for the facing surface and
+  `mask = 1` for the grazing / silhouette edge. `state::direction()` was
+  rejected for this route; the current material explicitly receives the
+  ReviewCamera world position through its `camera_position` input.
+- One project-owned camera-reactive NdotV mask drives all tested material
+  channels:
+
+  ```text
+                          ┌→ Base Color
+                          ├→ Roughness
+  ReviewCamera → NdotV ───┼→ Opacity
+       mask               │
+                          └→ Emission
+  ```
+
+  Edge Center, Edge Softness, and Edge Sharpness remain the shared shape
+  controls for all four consumers.
+
+#### Custom MDL X-Ray material phases
+
+Phase 1 — Base-colour view-angle proof — VALIDATED
+
+- The project-owned custom MDL material is evaluated on isolated Cube and
+  smooth Sphere probe geometry.
+- The same controllable NdotV mask drives interpolation between Facing Color
+  and Edge Color.
+- Edge Center, Edge Softness, and Edge Sharpness have been manually validated.
+- ReviewCamera world position is synchronised live into the MDL
+  `camera_position` input while the probe is active.
+- The mask follows camera movement without requiring Apply or rebuild.
+- Probe creation, parameter updates, cleanup, camera preservation, and live
+  camera synchronisation are covered by focused tests and manual Kit
+  validation.
+
+Phase 2 — Controllable opacity — VALIDATED
+
+Opacity is remapped between independently controllable artist endpoints,
+rather than driven directly by the `0..1` mask output:
+
+```text
+final_opacity =
+    facing_opacity * (1 - mask)
+  + edge_opacity   * mask
+```
+
+Facing Opacity and Edge Opacity have been manually validated on Cube/Sphere
+Probe 01 and remain independently controllable.
+
+Final Probe control pass — Fresnel-driven Glossy Roughness — VALIDATED
+
+- Facing Roughness and Edge Roughness are independent `0..1` artist controls
+  that use the same shared mask:
+
+  ```text
+  final_roughness =
+      facing_roughness * (1 - mask)
+    + edge_roughness   * mask
+  ```
+
+- The endpoints are authored, persisted, and covered by focused tests. They
+  safely clamp in the custom MDL and do not alter Color, Opacity, Emission,
+  Emission Scale, Fresnel shape controls, camera input, live synchronisation,
+  or the performance sampler.
+- The initial `df::diffuse_reflection_bsdf` Oren–Nayar route was rejected
+  because it did not provide PBR-style environment/specular reflections. The
+  corrected material layers a fixed-strength GGX microfacet reflection over a
+  simple diffuse base, with `final_roughness` driving the isotropic GGX
+  `roughness_u` and `roughness_v` inputs.
+- Facing / Edge Roughness, shared Fresnel-mask interpolation, glossy/specular
+  reflection response, reversed endpoint relationship, and live ReviewCamera
+  response are all manually validated on the isolated Cube/Sphere probe.
+
+Phase 3 — Controllable emission — VALIDATED
+
+Emission uses the same mask:
+
+```text
+artist_emission =
+    facing_emission * (1 - mask)
+  + edge_emission   * mask
+```
+
+Manual isolation proved both directions: strong Facing Emission makes the
+facing region emissive, while strong Edge Emission makes the grazing region
+emissive. Early apparently ineffective values were an intensity-scale and
+HDRI/exposure calibration issue, not a Fresnel-routing or MDL surface-emission
+failure.
+
+The debug material additionally applies `final_emission = artist_emission *
+emission_scale`. Facing / Edge Emission define relative artistic balance;
+Emission Scale defines global strength against HDRI/exposure. Emission Scale is
+an artist-facing presentation control, not a calibrated physical unit.
+
+The complete Debug - Custom MDL Fresnel parameter set persists through the
+local `.local.toml` override: Facing Color, Edge Color, Edge Center, Edge
+Softness, Edge Sharpness, Facing Roughness, Edge Roughness, Facing Opacity,
+Edge Opacity, Facing Emission, Edge Emission, and Emission Scale. Only values
+persist; probe geometry, material, and Session Layer state remain transient and
+are not reconstructed at startup.
+
+ReviewCamera position is synchronised live into the custom MDL, so Base Color,
+Glossy Roughness, Opacity, and Emission follow the current view without Apply.
+HUD-backed probe sampling uses the established Stage 6 viewport-statistics
+source and reports FPS, frame time, GPU memory, and process memory every 10
+seconds.
+
+The custom MDL Probe remained interactively usable on the RTX 3080, with most
+rolling ten-second averages during the latest validation around 60–80 FPS;
+transient sampled lows still occurred. As an observed development comparison,
+this was materially more stable than the earlier rejected `surface_falloff`
+experiments, where viewport performance was observed degrading toward
+approximately 20–25 FPS. This is not a controlled benchmark or a universal
+renderer-performance claim.
+
+Phase 4 — Production X-Ray chassis integration — NEXT
+
+Transfer the proven Base Color, Glossy Roughness, Opacity, Emission, Emission
+Scale, and live ReviewCamera mask from Cube/Sphere Probe 01 to the selected
+production X-Ray chassis targets.
+Preserve the existing Session Layer-only, reversible material-binding
+architecture, authored Houdini/OpenUSD assets, and Server Enclosure visibility
+ownership. Revalidate performance on real chassis geometry; Probe performance
+is not proof of full-server production performance.
+
+Phase 2 passed before Phase 3. Phase 3 passed before production chassis
+integration; Phase 4 is now the next implementation step.
+
+- The isolated custom-material proof is complete for Base Color, Glossy
+  Roughness, Opacity, Emission, Emission Scale, and live ReviewCamera
+  synchronisation; production chassis integration remains unimplemented.
 - Stage 7.1 itself is not blocked: UI/config persistence, logical target
   selection, Session Layer runtime binding, reversible material override, and
   `Server Enclosure` visibility ownership remain the valid architecture. The
-  final view-dependent X-Ray shader is now a follow-up design decision.
+  custom shading design and isolated material proof are validated; production
+  integration is next, and Stage 7.1 remains implementation in progress.
 - Separately, the known X-Ray OFF lifecycle defect remains open: disabling
   X-Ray currently leaves a Session Layer material-binding opinion instead of
   removing the X-Ray-created binding property specification. It was not part of
@@ -812,10 +938,10 @@ Implementation notes:
   adding the Material Graph editor UI extension is neither required nor
   appropriate for the operator-facing application;
 - the first implementation slice validates the Session Layer graph and its USD
-  wiring with focused tests. The alternative shader must separately demonstrate
-  correct RTX behaviour, blend ordering, emissive-edge noise, and the
-  full-server performance budget before acceptance. Camera fade is explicitly
-  deferred to a later stage.
+  wiring with focused tests. The custom MDL Base Color, Opacity, Emission,
+  artist-facing Emission Scale, Glossy Roughness, and live camera-reactive
+  mask are validated. Production full-server integration and performance
+  validation remain next.
 
 Done when Engineering X-Ray can be enabled and disabled reproducibly through
 the target checkbox and `Apply`, uses a validated alternative view-dependent

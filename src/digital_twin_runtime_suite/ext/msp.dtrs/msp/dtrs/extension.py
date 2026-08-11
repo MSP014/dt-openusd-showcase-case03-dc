@@ -458,13 +458,24 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     def _build_xray_fresnel_probe_controls(self) -> None:
         """Build temporary controls for the isolated renderer experiment."""
 
+        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex
+
         if not hasattr(self, "_xray_probe_models"):
+            materials = self._controller.config.chassis_presentation.materials
+            fresnel_probe = materials.xray_fresnel_probe
             self._xray_probe_models = {
-                "facing": ui.SimpleStringModel("#FFFF00"),
-                "edge": ui.SimpleStringModel("#0000FF"),
-                "center": ui.SimpleFloatModel(0.65),
-                "softness": ui.SimpleFloatModel(0.20),
-                "sharpness": ui.SimpleFloatModel(1.0),
+                "facing": ui.SimpleStringModel(rgb_to_hex(fresnel_probe.facing_color)),
+                "edge": ui.SimpleStringModel(rgb_to_hex(fresnel_probe.edge_color)),
+                "center": ui.SimpleFloatModel(fresnel_probe.edge_center),
+                "softness": ui.SimpleFloatModel(fresnel_probe.edge_softness),
+                "sharpness": ui.SimpleFloatModel(fresnel_probe.edge_sharpness),
+                "facing_roughness": ui.SimpleFloatModel(fresnel_probe.facing_roughness),
+                "edge_roughness": ui.SimpleFloatModel(fresnel_probe.edge_roughness),
+                "facing_opacity": ui.SimpleFloatModel(fresnel_probe.facing_opacity),
+                "edge_opacity": ui.SimpleFloatModel(fresnel_probe.edge_opacity),
+                "facing_emission": ui.SimpleFloatModel(fresnel_probe.facing_emission),
+                "edge_emission": ui.SimpleFloatModel(fresnel_probe.edge_emission),
+                "emission_scale": ui.SimpleFloatModel(fresnel_probe.emission_scale),
             }
         ui.Label("Static controllable NdotV mask", height=18)
         for label, key in (("Facing Color", "facing"), ("Edge Color", "edge")):
@@ -475,6 +486,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             ("Edge Center", "center"),
             ("Edge Softness", "softness"),
             ("Edge Sharpness", "sharpness"),
+            ("Facing Roughness", "facing_roughness"),
+            ("Edge Roughness", "edge_roughness"),
+            ("Facing Opacity", "facing_opacity"),
+            ("Edge Opacity", "edge_opacity"),
+            ("Facing Emission", "facing_emission"),
+            ("Edge Emission", "edge_emission"),
+            ("Emission Scale", "emission_scale"),
         ):
             with ui.HStack(height=24):
                 ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
@@ -1970,10 +1988,24 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         center = models["center"].get_value_as_float()
         softness = models["softness"].get_value_as_float()
         sharpness = models["sharpness"].get_value_as_float()
+        facing_roughness = models["facing_roughness"].get_value_as_float()
+        edge_roughness = models["edge_roughness"].get_value_as_float()
+        facing_opacity = models["facing_opacity"].get_value_as_float()
+        edge_opacity = models["edge_opacity"].get_value_as_float()
+        facing_emission = models["facing_emission"].get_value_as_float()
+        edge_emission = models["edge_emission"].get_value_as_float()
+        emission_scale = models["emission_scale"].get_value_as_float()
         if (
             not 0.0 <= center <= 1.0
             or not 0.001 <= softness <= 1.0
             or not 0.1 <= sharpness <= 8.0
+            or not 0.0 <= facing_roughness <= 1.0
+            or not 0.0 <= edge_roughness <= 1.0
+            or not 0.0 <= facing_opacity <= 1.0
+            or not 0.0 <= edge_opacity <= 1.0
+            or facing_emission < 0.0
+            or edge_emission < 0.0
+            or emission_scale < 0.0
         ):
             raise ValueError("Probe values are outside their allowed range.")
         return (
@@ -1982,6 +2014,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             center,
             softness,
             sharpness,
+            facing_roughness,
+            edge_roughness,
+            facing_opacity,
+            edge_opacity,
+            facing_emission,
+            edge_emission,
+            emission_scale,
         )
 
     def _apply_xray_fresnel_probe(self, rebuild: bool) -> None:
@@ -1993,7 +2032,32 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         result = self._controller.apply_xray_fresnel_probe_in_kit(
             values, rebuild=rebuild
         )
-        self._set_status(result.message)
+        from digital_twin_runtime_suite.app.config import XRayFresnelProbeConfig
+
+        try:
+            self._controller.save_xray_fresnel_probe_override(
+                XRayFresnelProbeConfig(
+                    facing_color=values[0],
+                    edge_color=values[1],
+                    edge_center=values[2],
+                    edge_softness=values[3],
+                    edge_sharpness=values[4],
+                    facing_roughness=values[5],
+                    edge_roughness=values[6],
+                    facing_opacity=values[7],
+                    edge_opacity=values[8],
+                    facing_emission=values[9],
+                    edge_emission=values[10],
+                    emission_scale=values[11],
+                )
+            )
+        except OSError as error:
+            self._set_status(f"Fresnel probe was applied but not saved: {error}")
+            return
+        if not result.success:
+            self._set_status(result.message)
+            return
+        self._set_status(f"{result.message} Saved to local config.")
 
     def _clear_xray_fresnel_probe(self) -> None:
         self._set_status(self._controller.clear_xray_fresnel_probe_in_kit().message)
@@ -2228,9 +2292,14 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             import omni.kit.app
 
             app = omni.kit.app.get_app()
+            panel_counter = 0
             while self._controller and self._window:
-                for _ in range(15):
-                    await app.next_update_async()
+                await app.next_update_async()
+                self._controller.sync_xray_fresnel_probe_camera_in_kit()
+                panel_counter += 1
+                if panel_counter < 15:
+                    continue
+                panel_counter = 0
                 if time.monotonic() < self._suspend_camera_sync_until:
                     continue
                 camera = self._controller.capture_review_camera_config()

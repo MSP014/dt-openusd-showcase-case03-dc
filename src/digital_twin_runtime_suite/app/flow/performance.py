@@ -8,14 +8,68 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class FlowPerformanceSample:
-    """One Stage 6 observation from Kit's built-in viewport statistics."""
+class ViewportPerformanceSample:
+    """One observation from Kit's built-in viewport statistics."""
 
     captured_at: float
     fps: float | None
     frame_time_ms: float | None
     gpu_memory_used_gib: float | None
     process_memory_used_gib: float | None
+
+
+def capture_viewport_performance_sample() -> ViewportPerformanceSample:
+    """Read the same viewport FPS and memory sources used by Kit's HUD."""
+
+    captured_at = time.monotonic()
+    fps = None
+    frame_time_ms = None
+    gpu_memory_used_gib = None
+    process_memory_used_gib = None
+    try:
+        import omni.hydra.engine.stats as engine_stats
+        import omni.kit.viewport.utility as viewport_utility
+        from omni.gpu_foundation_factory import get_memory_info
+
+        viewport = viewport_utility.get_active_viewport()
+        frame_info = viewport.frame_info if viewport else {}
+        if viewport:
+            subframe_count = frame_info.get("subframe_count", 1) or 1
+            effective_fps = float(viewport.fps) * float(subframe_count)
+            if effective_fps > 0.0:
+                fps = effective_fps
+                frame_time_ms = 1000.0 / effective_fps
+
+        device_mask = frame_info.get("device_mask")
+        device_info = engine_stats.get_device_info()
+        enabled_devices = [
+            device
+            for index, device in enumerate(device_info)
+            if device_mask is None or device_mask & (1 << index)
+        ]
+        selected_device = (enabled_devices or device_info or [None])[0]
+        if selected_device:
+            gpu_memory_used_gib = float(selected_device["usage"]) / (1024**3)
+
+        host_info = get_memory_info(rss=True)
+        process_memory_used_gib = float(host_info["rss_memory"]) / (1024**3)
+    except Exception:
+        # Performance instrumentation must never change runtime behaviour.
+        fps = frame_time_ms = gpu_memory_used_gib = process_memory_used_gib = None
+
+    return ViewportPerformanceSample(
+        captured_at=captured_at,
+        fps=fps,
+        frame_time_ms=frame_time_ms,
+        gpu_memory_used_gib=gpu_memory_used_gib,
+        process_memory_used_gib=process_memory_used_gib,
+    )
+
+
+@dataclass(frozen=True)
+class FlowPerformanceSample(ViewportPerformanceSample):
+    """One Stage 6 observation with its active temporal source."""
+
     temporal_source: str | None
 
 
@@ -85,48 +139,14 @@ class FlowPerformanceMixin:
     def _capture_flow_performance_sample(self) -> FlowPerformanceSample:
         """Read the same viewport FPS and memory sources used by Kit's HUD."""
 
-        captured_at = time.monotonic()
-        fps = None
-        frame_time_ms = None
-        gpu_memory_used_gib = None
-        process_memory_used_gib = None
-        try:
-            import omni.hydra.engine.stats as engine_stats
-            import omni.kit.viewport.utility as viewport_utility
-            from omni.gpu_foundation_factory import get_memory_info
-
-            viewport = viewport_utility.get_active_viewport()
-            frame_info = viewport.frame_info if viewport else {}
-            if viewport:
-                subframe_count = frame_info.get("subframe_count", 1) or 1
-                effective_fps = float(viewport.fps) * float(subframe_count)
-                if effective_fps > 0.0:
-                    fps = effective_fps
-                    frame_time_ms = 1000.0 / effective_fps
-
-            device_mask = frame_info.get("device_mask")
-            device_info = engine_stats.get_device_info()
-            enabled_devices = [
-                device
-                for index, device in enumerate(device_info)
-                if device_mask is None or device_mask & (1 << index)
-            ]
-            selected_device = (enabled_devices or device_info or [None])[0]
-            if selected_device:
-                gpu_memory_used_gib = float(selected_device["usage"]) / (1024**3)
-
-            host_info = get_memory_info(rss=True)
-            process_memory_used_gib = float(host_info["rss_memory"]) / (1024**3)
-        except Exception:
-            # Performance instrumentation must never make Flow Attach fail.
-            fps = frame_time_ms = gpu_memory_used_gib = process_memory_used_gib = None
+        viewport_sample = capture_viewport_performance_sample()
 
         return FlowPerformanceSample(
-            captured_at=captured_at,
-            fps=fps,
-            frame_time_ms=frame_time_ms,
-            gpu_memory_used_gib=gpu_memory_used_gib,
-            process_memory_used_gib=process_memory_used_gib,
+            captured_at=viewport_sample.captured_at,
+            fps=viewport_sample.fps,
+            frame_time_ms=viewport_sample.frame_time_ms,
+            gpu_memory_used_gib=viewport_sample.gpu_memory_used_gib,
+            process_memory_used_gib=viewport_sample.process_memory_used_gib,
             temporal_source=self._kit_cae_current_temporal_source_name(),
         )
 

@@ -18,6 +18,13 @@ export material DTRS_Fresnel_Test(
     float edge_center = 0.65,
     float edge_softness = 0.20,
     float edge_sharpness = 1.0,
+    float facing_roughness = 0.40,
+    float edge_roughness = 0.30,
+    float facing_opacity = 0.20,
+    float edge_opacity = 0.55,
+    float facing_emission = 0.32,
+    float edge_emission = 3.20,
+    float emission_scale = 10000.0,
     float3 camera_position = float3(0.0, 0.0, 0.0)
 ) = let {
     float3 N = math::normalize(state::normal());
@@ -37,8 +44,39 @@ export material DTRS_Fresnel_Test(
         dtrs_clamp01(dtrs_smoothstep(safe_lower, safe_upper, raw_edge)), safe_sharpness
     );
     color final_color = facing_color * (1.0 - mask) + edge_color * mask;
+    float final_roughness = dtrs_clamp01(facing_roughness) * (1.0 - mask) +
+        dtrs_clamp01(edge_roughness) * mask;
+    float final_opacity = dtrs_clamp01(facing_opacity) * (1.0 - mask) +
+        dtrs_clamp01(edge_opacity) * mask;
+    float artist_emission = (facing_emission < 0.0 ? 0.0 : facing_emission) *
+        (1.0 - mask) + (edge_emission < 0.0 ? 0.0 : edge_emission) * mask;
+    float final_emission = artist_emission *
+        (emission_scale < 0.0 ? 0.0 : emission_scale);
+    color final_emission_color = final_color * color(final_emission);
+    bsdf diffuse_base = df::diffuse_reflection_bsdf(
+        tint: final_color,
+        roughness: 0.0
+    );
+    bsdf glossy_reflection = df::microfacet_ggx_smith_bsdf(
+        roughness_u: final_roughness,
+        roughness_v: final_roughness,
+        tint: color(1.0),
+        mode: df::scatter_reflect
+    );
+    bsdf surface_scattering = df::weighted_layer(
+        weight: 0.35,
+        layer: glossy_reflection,
+        base: diffuse_base
+    );
 } in material(
     surface: material_surface(
-        scattering: df::diffuse_reflection_bsdf(tint: final_color)
+        scattering: surface_scattering,
+        emission: material_emission(
+            df::diffuse_edf(),
+            intensity: final_emission_color
+        )
+    ),
+    geometry: material_geometry(
+        cutout_opacity: final_opacity
     )
 );
