@@ -906,12 +906,18 @@ tested FSD runtime limitation; a minimal standalone reproduction and potential
 NVIDIA bug report are deferred to later work. Do not investigate FSD further in
 this phase.
 
-Phase 4.1 — Custom MDL production integration — NEXT / DEFERRED
+Phase 4.1A — X-Ray subsystem extraction and code documentation — CURRENT
 
-Phase 4.1 will replace the temporary Part A lifecycle material with the
-already validated custom Fresnel X-Ray material from the Cube/Sphere debug
-proof, then transfer it to the production RM44 chassis. It does not begin as
-part of Phase 4.0.
+This deliberately precedes Fresnel production integration: the validated
+binding lifecycle, material construction, isolated probe, and ReviewCamera
+synchronisation need clear ownership boundaries before production shading
+becomes more complex. Phase 4.1A is a behaviour-preserving refactor only.
+
+Phase 4.1B — Production custom Fresnel integration — NEXT
+
+Replace the temporary `XRayLifecycleControl` / Part A material with the
+already validated project-owned custom Fresnel material from the Cube/Sphere
+debug proof, then transfer it to the production RM44 chassis.
 
 Phase 4.2 — Full chassis visual/performance tuning — PLANNED
 
@@ -919,7 +925,7 @@ Tune and validate the final production chassis appearance and performance only
 after Phase 4.1 integration.
 
 Phase 2 passed before Phase 3. The binding/ownership prerequisite is now
-validated; Phase 4.1 is the next deferred implementation step.
+validated; Phase 4.1A is the current implementation step.
 
 - The isolated custom-material proof is complete for Base Color, Glossy
   Roughness, Opacity, Emission, Emission Scale, and live ReviewCamera
@@ -927,8 +933,9 @@ validated; Phase 4.1 is the next deferred implementation step.
 - Stage 7.1 architecture remains valid: UI/config persistence, logical target
   selection, Session Layer runtime binding, reversible material override, and
   `Server Enclosure` visibility ownership. The custom shader proof and the
-  production binding lifecycle are validated; custom-material production
-  integration is explicitly deferred to Phase 4.1.
+  production binding lifecycle are validated; subsystem extraction and code
+  documentation are current, while custom-material production integration is
+  explicitly deferred to Phase 4.1B.
 
 Implementation notes:
 
