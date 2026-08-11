@@ -1,10 +1,10 @@
 """Production X-Ray material-override lifecycle for DTRS.
 
-Owns transient Session Layer bindings, chassis and telemetry-LED appearance
-arbitration, reversible restoration of composed presentation, and compact
-production performance diagnostics.  Material graph authoring and the
-isolated Custom MDL Debug Probe live in sibling modules.  This module never
-owns Server Enclosure visibility or writes to authored asset layers.
+Owns transient Session Layer bindings for config-driven production target
+groups, chassis telemetry-LED appearance arbitration, reversible restoration
+of composed presentation, and compact performance diagnostics. Material graph
+authoring lives in the sibling material module. This module never owns Server
+Enclosure visibility or writes to authored asset layers.
 
 In the tested Case 03/current Kit environment, Fabric Scene Delegate did not
 visually roll back a material despite restored USD and Fabric composition.
@@ -29,22 +29,25 @@ class XRayRuntimeMixin(XRayMaterialMixin):
 
     ``RuntimeController`` supplies application-lifetime state and the existing
     telemetry appearance updater.  This mixin owns the temporary X-Ray
-    Session Layer opinions and guarantees that static chassis targets release
+    Session Layer opinions and guarantees that static production targets release
     those opinions on OFF rather than binding a guessed original material.
     """
 
-    XRAY_CHASSIS_ROOT_PATH = "/blackwell_rig/chassis"
+    XRAY_CHASSIS_TARGET_ID = "chassis"
     XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/XRayLifecycleControl"
     XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
     XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
-    def apply_xray_material_in_kit(self, xray: XRayMaterialConfig) -> XRayApplyResult:
-        """Apply or release the production control override in the Session Layer.
+    def apply_xray_material_in_kit(
+        self, xray: XRayMaterialConfig, selected_target_ids: frozenset[str]
+    ) -> XRayApplyResult:
+        """Apply or release the production Custom MDL Fresnel override.
 
-        ON gives every resolved chassis mesh the production Fresnel material.
-        OFF removes only opinions owned by X-Ray, so ordinary geometry naturally
-        recomposes to authored USD while LEDs resume their current telemetry
-        state through the existing presentation updater.
+        The UI owns the ephemeral target-id set. ON reconciles its selected
+        configured groups to the production Fresnel material. Deselecting a
+        group removes only X-Ray's Session Layer opinions so the authored USD
+        composition returns naturally. Chassis LEDs resume their current
+        telemetry state only when the chassis group is released.
         """
 
         import carb
@@ -58,7 +61,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
         try:
-            if not xray.chassis_selected:
+            if not selected_target_ids:
                 removed_count, diagnostics = self._clear_xray_session_overrides(
                     stage, Sdf, Usd, UsdShade
                 )
@@ -84,7 +87,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 )
             try:
                 target_count, diagnostics = self._apply_xray_session_overrides(
-                    stage, xray, Gf, Sdf, Usd, UsdShade
+                    stage, xray, selected_target_ids, Gf, Sdf, Usd, UsdShade
                 )
             except RuntimeError as error:
                 carb.log_error(
@@ -95,6 +98,10 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 )
                 carb.log_error(f"DTRS X-Ray apply failed: {error}")
                 return XRayApplyResult(False, f"X-Ray apply failed: {error}")
+            if self.XRAY_CHASSIS_TARGET_ID not in selected_target_ids:
+                self._reapply_front_panel_indicator_current_state(
+                    stage, Gf, Sdf, Usd, UsdShade
+                )
             self._start_xray_material_performance_sampler()
             self._log_xray_lifecycle_diagnostic(
                 carb,
@@ -311,23 +318,21 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         )
 
     def _clear_xray_session_overrides(self, stage, Sdf, Usd, UsdShade):
-        """Remove only X-Ray's binding specs and restore prior Session opinions."""
+        """Release X-Ray specs across configured groups and restore Session state."""
 
         self._discard_stale_xray_binding_snapshots(stage)
         removed_count = 0
         diagnostics = []
-        root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
-        if root and root.IsValid():
-            records = []
-            for prim in Usd.PrimRange(root):
-                if prim.GetTypeName() != "Mesh":
-                    continue
-                relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
-                property_path = relation.GetPath()
-                if not self._session_binding_is_xray_owned(stage, property_path):
-                    continue
+        records = []
+        for group_id, prim in self._resolve_xray_mesh_targets(
+            stage, self._configured_xray_target_groups(), Usd, require_roots=False
+        ):
+            relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+            property_path = relation.GetPath()
+            if self._session_binding_is_xray_owned(stage, property_path):
                 records.append(
                     (
+                        group_id,
                         prim,
                         relation,
                         property_path,
@@ -336,61 +341,73 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                         ),
                     )
                 )
-            with Sdf.ChangeBlock():
-                for _prim, _relation, property_path, _before in records:
-                    self._remove_xray_session_binding_spec(stage, property_path)
-                    prior = self._xray_session_binding_snapshots.pop(
-                        str(property_path), None
+        with Sdf.ChangeBlock():
+            for _group_id, _prim, _relation, property_path, _before in records:
+                self._remove_xray_session_binding_spec(stage, property_path)
+                prior = self._xray_session_binding_snapshots.pop(
+                    str(property_path), None
+                )
+                if prior is not None:
+                    self._restore_xray_session_binding_spec(
+                        stage, property_path, prior, Sdf
                     )
-                    if prior is not None:
-                        self._restore_xray_session_binding_spec(
-                            stage, property_path, prior, Sdf
-                        )
-            cleanup_failures = []
-            for prim, relation, property_path, before in records:
-                after = self._xray_binding_lifecycle_snapshot(
-                    stage, prim, relation, UsdShade
-                )
-                if after["xray_owned_session_binding_after"]:
-                    cleanup_failures.append(str(property_path))
-                diagnostics.append(
-                    {
-                        "before": before,
-                        "after": after,
-                        "is_led": self._is_xray_led_prim(prim),
-                        "baseline_match": (
-                            self._xray_baseline_composed_bindings.get(
-                                str(property_path)
-                            )
-                            == after["composed_binding"]
-                        ),
-                    }
-                )
-                removed_count += 1
-            if cleanup_failures:
-                raise RuntimeError(
-                    "X-Ray binding cleanup did not remove: "
-                    + ", ".join(cleanup_failures)
-                )
+        cleanup_failures = []
+        for group_id, prim, relation, property_path, before in records:
+            after = self._xray_binding_lifecycle_snapshot(
+                stage, prim, relation, UsdShade
+            )
+            if after["xray_owned_session_binding_after"]:
+                cleanup_failures.append(str(property_path))
+            diagnostics.append(
+                {
+                    "target_group": group_id,
+                    "before": before,
+                    "after": after,
+                    "expected_xray_binding": False,
+                    "is_led": self._is_xray_led_prim(prim),
+                    "baseline_match": (
+                        self._xray_baseline_composed_bindings.get(str(property_path))
+                        == after["composed_binding"]
+                    ),
+                }
+            )
+            removed_count += 1
+        if cleanup_failures:
+            raise RuntimeError(
+                "X-Ray binding cleanup did not remove: "
+                + self._format_xray_mismatch_paths(cleanup_failures)
+            )
         self._stop_xray_material_performance_sampler()
         self._xray_session_binding_snapshots.clear()
         self._xray_baseline_composed_bindings.clear()
         self._xray_last_lifecycle_diagnostics = diagnostics
         return removed_count, diagnostics
 
-    def _apply_xray_session_overrides(self, stage, xray, Gf, Sdf, Usd, UsdShade):
-        """Bind production Fresnel to every chassis mesh as one reversible transition.
+    def _apply_xray_session_overrides(
+        self, stage, xray, selected_target_ids, Gf, Sdf, Usd, UsdShade
+    ):
+        """Reconcile selected configured groups to one reversible Fresnel binding.
 
-        Static chassis and telemetry LEDs share the temporary binding while
-        active.  The latter retain their provider state beneath X-Ray, so the
-        application can reapply their *current* appearance when the transition
-        is released.
+        Target descriptions belong to project configuration, while the UI owns
+        the current selection. A single ``ChangeBlock`` releases deselected
+        bindings and authors new ones, avoiding intermediate composed states.
         """
 
         self._discard_stale_xray_binding_snapshots(stage)
-        root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
-        if not root or not root.IsValid():
-            raise RuntimeError("X-Ray chassis target root is unavailable.")
+        configured_groups = self._configured_xray_target_groups()
+        selected_groups = self._selected_xray_target_groups(selected_target_ids)
+        all_targets = self._resolve_xray_mesh_targets(
+            stage, configured_groups, Usd, require_roots=False
+        )
+        selected_targets = self._resolve_xray_mesh_targets(
+            stage, selected_groups, Usd, require_roots=True
+        )
+        if not selected_targets:
+            selected_names = ", ".join(group.group_id for group in selected_groups)
+            raise RuntimeError(
+                "X-Ray selected target groups resolve no mesh targets: "
+                f"{selected_names}."
+            )
         from pxr import UsdGeom
 
         # The operator-owned production X-Ray config is passed directly so
@@ -424,12 +441,31 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             camera_position=camera_position or (0.0, 0.0, 0.0),
         )
         diagnostics = []
-        target_count = 0
         try:
-            records = []
-            for prim in Usd.PrimRange(root):
-                if prim.GetTypeName() != "Mesh":
-                    continue
+            selected_property_paths = {
+                str(prim.GetPath().AppendProperty("material:binding"))
+                for _group_id, prim in selected_targets
+            }
+            release_records = []
+            for group_id, prim in all_targets:
+                relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+                property_path = relation.GetPath()
+                if str(property_path) not in selected_property_paths and (
+                    self._session_binding_is_xray_owned(stage, property_path)
+                ):
+                    release_records.append(
+                        (
+                            group_id,
+                            prim,
+                            relation,
+                            property_path,
+                            self._xray_binding_lifecycle_snapshot(
+                                stage, prim, relation, UsdShade
+                            ),
+                        )
+                    )
+            author_records = []
+            for group_id, prim in selected_targets:
                 relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
                 property_path = relation.GetPath()
                 before = self._xray_binding_lifecycle_snapshot(
@@ -440,28 +476,70 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                     self._xray_baseline_composed_bindings.setdefault(
                         str(property_path), before["composed_binding"]
                     )
-                records.append((prim, relation, property_path, before))
-            # Author every relationship first.  Composed USD queries can be
-            # stale inside a ChangeBlock, so validation intentionally follows
-            # only after the block closes.
+                author_records.append((group_id, prim, relation, property_path, before))
+            # Composed USD queries can be stale inside a ChangeBlock, so all
+            # release/author mutations finish before one post-block validation.
             with Sdf.ChangeBlock():
-                for _prim, _relation, property_path, _before in records:
+                for (
+                    _group_id,
+                    _prim,
+                    _relation,
+                    property_path,
+                    _before,
+                ) in release_records:
+                    self._remove_xray_session_binding_spec(stage, property_path)
+                    prior = self._xray_session_binding_snapshots.pop(
+                        str(property_path), None
+                    )
+                    if prior is not None:
+                        self._restore_xray_session_binding_spec(
+                            stage, property_path, prior, Sdf
+                        )
+                for (
+                    _group_id,
+                    _prim,
+                    _relation,
+                    property_path,
+                    _before,
+                ) in author_records:
                     self._author_xray_session_binding_spec(stage, property_path, Sdf)
             failures = []
-            for prim, relation, property_path, before in records:
+            for group_id, prim, relation, property_path, before in release_records:
                 after = self._xray_binding_lifecycle_snapshot(
                     stage, prim, relation, UsdShade
                 )
                 diagnostics.append(
                     {
+                        "target_group": group_id,
                         "before": before,
                         "after": after,
+                        "expected_xray_binding": False,
+                        "is_led": self._is_xray_led_prim(prim),
+                        "baseline_match": (
+                            self._xray_baseline_composed_bindings.get(
+                                str(property_path)
+                            )
+                            == after["composed_binding"]
+                        ),
+                    }
+                )
+                if after["xray_owned_session_binding_after"]:
+                    failures.append(str(property_path))
+            for group_id, prim, relation, property_path, before in author_records:
+                after = self._xray_binding_lifecycle_snapshot(
+                    stage, prim, relation, UsdShade
+                )
+                diagnostics.append(
+                    {
+                        "target_group": group_id,
+                        "before": before,
+                        "after": after,
+                        "expected_xray_binding": True,
                         "is_led": self._is_xray_led_prim(prim),
                     }
                 )
                 if not after["xray_owned_session_binding_after"]:
                     failures.append(str(property_path))
-                target_count += 1
             if failures:
                 mismatch_paths = self._format_xray_mismatch_paths(failures)
                 raise RuntimeError(
@@ -477,7 +555,54 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             self._xray_last_lifecycle_diagnostics = failed_diagnostics
             raise
         self._xray_last_lifecycle_diagnostics = diagnostics
-        return target_count, diagnostics
+        return len(author_records), diagnostics
+
+    def _configured_xray_target_groups(self):
+        """Return project-configured logical X-Ray target groups in UI order."""
+
+        return self.config.chassis_presentation.xray_target_groups
+
+    def _selected_xray_target_groups(self, selected_target_ids):
+        """Validate runtime-only selection against the configured target groups."""
+
+        selected_ids = frozenset(selected_target_ids)
+        groups = self._configured_xray_target_groups()
+        groups_by_id = {group.group_id: group for group in groups}
+        unknown_ids = selected_ids - groups_by_id.keys()
+        if unknown_ids:
+            names = ", ".join(sorted(unknown_ids))
+            raise RuntimeError(f"X-Ray target selection is not configured: {names}.")
+        return tuple(group for group in groups if group.group_id in selected_ids)
+
+    @staticmethod
+    def _resolve_xray_mesh_targets(stage, groups, Usd, *, require_roots):
+        """Resolve explicit configured render subtrees to distinct Mesh prims.
+
+        Group roots are selection boundaries only: material opinions are still
+        authored on resolved Mesh prims, never blindly on the parent Xform.
+        """
+
+        targets = []
+        seen_paths = set()
+        missing_paths = []
+        for group in groups:
+            for root_path in group.paths:
+                root = stage.GetPrimAtPath(root_path)
+                if not root or not root.IsValid():
+                    if require_roots:
+                        missing_paths.append(root_path)
+                    continue
+                for prim in Usd.PrimRange(root):
+                    if prim.GetTypeName() != "Mesh":
+                        continue
+                    path = str(prim.GetPath())
+                    if path not in seen_paths:
+                        targets.append((group.group_id, prim))
+                        seen_paths.add(path)
+        if missing_paths:
+            displayed = XRayRuntimeMixin._format_xray_mismatch_paths(missing_paths)
+            raise RuntimeError(f"X-Ray target roots are unavailable: {displayed}")
+        return targets
 
     def _is_xray_led_prim(self, prim) -> bool:
         """Identify telemetry-owned LED geometry within the resolved chassis set."""
@@ -664,7 +789,9 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             after = item["after"]
             mismatch = False
             if action.startswith("ON"):
-                mismatch = not after["xray_owned_session_binding_after"]
+                mismatch = bool(item.get("expected_xray_binding", True)) != bool(
+                    after["xray_owned_session_binding_after"]
+                )
             elif action.startswith("OFF"):
                 mismatch = after["xray_owned_session_binding_after"]
             if action.startswith("OFF") and not item.get("is_led", False):
@@ -672,6 +799,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             if mismatch:
                 lines.append(
                     "  mismatch: "
+                    f"group={item.get('target_group', '<unknown>')}; "
                     f"target={after['target_prim_path']}; "
                     f"binding={after['binding']}; "
                     f"composed_binding={after['composed_binding']}; "

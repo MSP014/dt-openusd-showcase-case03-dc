@@ -180,22 +180,38 @@ class FrontPanelIndicatorsConfig:
 
 
 @dataclass(frozen=True)
-class XRayMaterialConfig:
-    """Persisted production X-Ray enablement and Custom MDL parameters."""
+class XRayTargetGroupConfig:
+    """One logical production target with explicit X-Ray render subtrees.
 
-    chassis_selected: bool = False
-    facing_color: tuple[float, float, float] = (1.0, 1.0, 0.0)
-    edge_color: tuple[float, float, float] = (0.0, 0.0, 1.0)
-    edge_center: float = 0.65
-    edge_softness: float = 0.20
+    Project config owns the stable group identity, label, and asset paths. The
+    operator's selected group set remains runtime-only and is never persisted.
+    """
+
+    group_id: str
+    label: str
+    paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class XRayMaterialConfig:
+    """Persisted production Fresnel values, independent of runtime targets."""
+
+    facing_color: tuple[float, float, float] = (
+        0.03137254901960784,
+        0.03137254901960784,
+        0.03137254901960784,
+    )
+    edge_color: tuple[float, float, float] = (0.0, 1.0, 0.0)
+    edge_center: float = 0.64
+    edge_softness: float = 0.36
     edge_sharpness: float = 1.0
-    facing_roughness: float = 0.40
-    edge_roughness: float = 0.30
-    facing_opacity: float = 0.20
-    edge_opacity: float = 0.55
-    facing_emission: float = 0.32
+    facing_roughness: float = 0.10
+    edge_roughness: float = 1.0
+    facing_opacity: float = 0.16
+    edge_opacity: float = 0.85
+    facing_emission: float = 0.10
     edge_emission: float = 3.20
-    emission_scale: float = 10000.0
+    emission_scale: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -208,7 +224,7 @@ class MaterialPresentationConfig:
 
 @dataclass(frozen=True)
 class ChassisPresentationConfig:
-    """Runtime-only presentation state for the server enclosure."""
+    """Server Appearance settings for enclosure presentation and X-Ray groups."""
 
     open_chassis: bool = False
     cover_paths: tuple[str, ...] = ()
@@ -216,6 +232,7 @@ class ChassisPresentationConfig:
     face_panel: FacePanelConfig = FacePanelConfig()
     qled_display: QledDisplayConfig = QledDisplayConfig()
     front_panel_indicators: FrontPanelIndicatorsConfig = FrontPanelIndicatorsConfig()
+    xray_target_groups: tuple[XRayTargetGroupConfig, ...] = ()
     materials: MaterialPresentationConfig = MaterialPresentationConfig()
 
 
@@ -321,6 +338,21 @@ class RuntimeConfig:
     chassis_presentation: ChassisPresentationConfig
     fan_motion_bindings: tuple[FanMotionBindingConfig, ...]
     simulation_cache: SimulationCacheConfig
+
+    @property
+    def display_version(self) -> str:
+        """Return the presentation-only ``major.minor`` form of app version.
+
+        Canonical ``major.minor.patch`` remains the only stored version; UI
+        surfaces derive this shorter label instead of owning a second value.
+        """
+
+        components = self.app_version.split(".")
+        if len(components) < 2:
+            raise ValueError(
+                "Runtime app version must include major and minor components."
+            )
+        return ".".join(components[:2])
 
     @classmethod
     def load(
@@ -580,7 +612,6 @@ def format_runtime_override(
         xray = chassis_presentation.materials.xray
         text += (
             "\n[chassis_presentation.materials.xray]\n"
-            f"chassis_selected = {_toml_bool(xray.chassis_selected)}\n"
             "facing_color = "
             f"[{xray.facing_color[0]:.6g}, "
             f"{xray.facing_color[1]:.6g}, "
@@ -817,6 +848,7 @@ def _parse_chassis_presentation_config(data: Any) -> ChassisPresentationConfig:
         front_panel_indicators=_parse_front_panel_indicators_config(
             data.get("front_panel_indicators")
         ),
+        xray_target_groups=_parse_xray_target_groups(data.get("xray_target_groups")),
         materials=_parse_material_presentation_config(data.get("materials")),
     )
 
@@ -839,9 +871,6 @@ def _parse_xray_material_config(data: Any) -> XRayMaterialConfig:
         return XRayMaterialConfig()
 
     defaults = XRayMaterialConfig()
-    selected = data.get("chassis_selected", defaults.chassis_selected)
-    if not isinstance(selected, bool):
-        raise ValueError("materials.xray.chassis_selected must be a bool.")
 
     def parse_color(field: str, default: tuple[float, float, float]):
         color = _parse_rgb(data.get(field), default, f"materials.xray.{field}")
@@ -886,7 +915,6 @@ def _parse_xray_material_config(data: Any) -> XRayMaterialConfig:
                 f"materials.xray.{field} must be greater than or equal to 0."
             )
     return XRayMaterialConfig(
-        chassis_selected=selected,
         facing_color=parse_color("facing_color", defaults.facing_color),
         edge_color=parse_color("edge_color", defaults.edge_color),
         **values,
@@ -1144,6 +1172,39 @@ def _parse_visibility_groups(data: Any) -> tuple[VisibilityGroupConfig, ...]:
                 paths=paths,
             )
         )
+    return tuple(groups)
+
+
+def _parse_xray_target_groups(data: Any) -> tuple[XRayTargetGroupConfig, ...]:
+    """Parse project-owned X-Ray target groups without persisting selection."""
+
+    if not isinstance(data, dict):
+        return ()
+
+    groups: list[XRayTargetGroupConfig] = []
+    for group_id, entry in data.items():
+        if not isinstance(entry, dict):
+            continue
+        normalised_id = str(group_id).strip()
+        label = str(entry.get("label", normalised_id)).strip()
+        raw_paths = entry.get("paths", ())
+        if not normalised_id or not label:
+            raise ValueError("X-Ray target groups require non-empty ids and labels.")
+        if not isinstance(raw_paths, (list, tuple)):
+            raise ValueError(
+                f"chassis_presentation.xray_target_groups.{normalised_id}.paths "
+                "must be an array."
+            )
+        paths = tuple(str(path).strip() for path in raw_paths if str(path).strip())
+        if not paths:
+            raise ValueError(f"X-Ray target group {normalised_id} has no paths.")
+        if any(not path.startswith("/") for path in paths):
+            raise ValueError(
+                f"X-Ray target group {normalised_id} paths must be absolute USD paths."
+            )
+        groups.append(XRayTargetGroupConfig(normalised_id, label, paths))
+    if len({group.group_id for group in groups}) != len(groups):
+        raise ValueError("X-Ray target group ids must be unique.")
     return tuple(groups)
 
 

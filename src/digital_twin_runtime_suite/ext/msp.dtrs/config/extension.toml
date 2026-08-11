@@ -6,6 +6,7 @@ category = "Viewer"
 keywords = ["openusd", "kit", "viewer", "runtime"]
 
 [dependencies]
+"omni.appwindow" = {}
 "omni.kit.uiapp" = {}
 "omni.kit.viewport.window" = {}
 "omni.kit.usd.mdl" = {}

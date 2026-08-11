@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +34,7 @@ def test_v02_runtime_config_resolves_default_asset():
 
     assert config.app_name == "Digital Twin Runtime Suite"
     assert config.app_version == "0.4.0"
+    assert config.display_version == "0.4"
     assert config.default_asset.asset_id == "blackwell_rig_gb203"
     assert config.default_asset_path.name == "Blackwell_Rig_server_assembly.usd"
     assert config.default_asset_path.exists()
@@ -45,6 +47,23 @@ def test_v02_runtime_config_resolves_default_asset():
     assert config.simulation_cache.resolution_scale == 25
     assert config.simulation_cache.rendering_samples == 1
     assert config.simulation_cache.filter_mode == "nearest"
+
+
+@pytest.mark.parametrize(
+    ("canonical_version", "display_version"),
+    (("0.4.0", "0.4"), ("0.4.1", "0.4"), ("0.4.2", "0.4"), ("0.5.0", "0.5")),
+)
+def test_runtime_display_version_derives_major_minor(
+    canonical_version, display_version
+):
+    config = RuntimeConfig.load(
+        Path("configs/digital_twin_runtime_suite.toml"), apply_local_overrides=False
+    )
+
+    assert (
+        replace(config, app_version=canonical_version).display_version
+        == display_version
+    )
     assert config.simulation_cache.temporal_debug_logging is False
     assert config.simulation_cache.smoke_tuning == SmokeTuningConfig(
         density=0.5,

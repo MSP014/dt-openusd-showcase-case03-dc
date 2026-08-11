@@ -11,6 +11,8 @@ from pathlib import Path
 
 import carb.settings
 import carb.tokens
+import carb.windowing
+import omni.appwindow
 import omni.ext
 import omni.ui as ui
 
@@ -84,7 +86,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._config_tab_button = None
         self._chassis_visibility_models = {}
         self._normal_map_scale_model = None
-        self._xray_chassis_selected_model = None
+        self._xray_target_models = {}
         self._face_panel_open_model = None
         self._face_panel_action_label = None
         self._face_panel_open_state = False
@@ -219,6 +221,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         # isort: on
 
         self._controller = RuntimeController(config_path)
+        self._set_application_title_version(self._controller.config)
         telemetry_config_path = (
             config_path.parent / "telemetry_provider.toml"
         ).resolve()
@@ -232,8 +235,23 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._workload_modes = tuple(telemetry_config.modes)
         self._refresh_intervals = telemetry_config.allowed_refresh_intervals_s
 
+    @staticmethod
+    def _set_application_title_version(config) -> None:
+        """Apply the derived display version without subscribing to USD titles."""
+
+        app_window = (
+            omni.appwindow.acquire_app_window_factory_interface().get_default_window()
+        )
+        if app_window is None or app_window.get_window() is None:
+            carb.log_warn("DTRS could not access the native application window.")
+            return
+        carb.windowing.acquire_windowing_interface().set_window_title(
+            app_window.get_window(), f"{config.app_name} {config.display_version}"
+        )
+
     def _build_window(self) -> None:
         config = self._controller.config
+        display_version = config.display_version
         default_asset = config.default_asset.label
         lighting = config.lighting
 
@@ -278,17 +296,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._install_camera_edit_callbacks()
 
         self._window = ui.Window(
-            "Digital Twin Runtime Suite",
+            f"{config.app_name} {display_version}",
             width=PANEL_WIDTH,
             height=620,
         )
         with self._window.frame:
             with ui.VStack(spacing=6, content_clipping=True):
                 ui.Label(
-                    f"{config.app_name} v{config.app_version}",
+                    f"{config.app_name} {display_version}",
                     height=20,
                     elided_text=True,
-                    tooltip=f"{config.app_name} v{config.app_version}",
+                    tooltip=f"{config.app_name} {display_version}",
                 )
                 with ui.HStack(height=28, spacing=4):
                     self._telemetry_tab_button = ui.Button(
@@ -379,13 +397,14 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             )
             self._build_config_section(
                 "Materials",
-                lambda: self._build_material_controls(presentation.materials),
+                lambda: self._build_material_controls(presentation),
             )
 
-    def _build_material_controls(self, materials) -> None:
+    def _build_material_controls(self, presentation) -> None:
+        materials = presentation.materials
         self._build_config_section(
             "X-Ray",
-            lambda: self._build_xray_controls(materials.xray),
+            lambda: self._build_xray_controls(presentation),
             collapsed=True,
         )
         self._build_config_section(
@@ -394,21 +413,29 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             collapsed=True,
         )
 
-    def _build_xray_controls(self, xray) -> None:
-        if self._xray_chassis_selected_model is None:
-            # X-Ray bindings are transient Session Layer state. Parameters
-            # persist, but a fresh app/config lifecycle always starts OFF.
-            self._xray_chassis_selected_model = ui.SimpleBoolModel(False)
+    def _build_xray_controls(self, presentation) -> None:
+        """Build transient target selection before persistent Fresnel values.
 
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label(
-                "Chassis - SilverStone RM44",
-                width=SERVER_VIEW_LABEL_WIDTH,
-                elided_text=True,
-                tooltip="Apply or release the production Fresnel material.",
+        The config defines available groups; these Kit models deliberately hold
+        no saved selection so every startup and reload begins with X-Ray OFF.
+        """
+
+        for group in presentation.xray_target_groups:
+            model = self._xray_target_models.setdefault(
+                group.group_id,
+                # X-Ray bindings are transient Session Layer state. Parameters
+                # persist, but a fresh app/config lifecycle always starts OFF.
+                ui.SimpleBoolModel(False),
             )
-            ui.CheckBox(model=self._xray_chassis_selected_model)
-        self._build_xray_fresnel_controls(xray)
+            with ui.HStack(height=24, spacing=6, content_clipping=True):
+                ui.Label(
+                    group.label,
+                    width=SERVER_VIEW_LABEL_WIDTH,
+                    elided_text=True,
+                    tooltip="Apply or release the production Fresnel material.",
+                )
+                ui.CheckBox(model=model)
+        self._build_xray_fresnel_controls(presentation.materials.xray)
         ui.Button(
             "Apply",
             clicked_fn=self._apply_xray_material,
@@ -1775,7 +1802,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         except ValueError as error:
             self._set_status(f"X-Ray settings are invalid: {error}")
             return
-        result = self._controller.apply_xray_material_in_kit(xray)
+        result = self._controller.apply_xray_material_in_kit(
+            xray, self._selected_xray_target_ids()
+        )
         try:
             self._controller.save_xray_material_override(xray)
         except OSError as error:
@@ -1788,13 +1817,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _xray_config_from_controls(self):
         from digital_twin_runtime_suite.app.config import XRayMaterialConfig
-        from digital_twin_runtime_suite.app.view_controls import bool_model_value
 
-        if self._xray_chassis_selected_model is None:
-            raise ValueError("controls are unavailable")
         values = self._xray_fresnel_values()
         return XRayMaterialConfig(
-            chassis_selected=bool_model_value(self._xray_chassis_selected_model),
             facing_color=values[0],
             edge_color=values[1],
             edge_center=values[2],
@@ -1807,6 +1832,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             facing_emission=values[9],
             edge_emission=values[10],
             emission_scale=values[11],
+        )
+
+    def _selected_xray_target_ids(self) -> frozenset[str]:
+        """Return the UI-owned target selection without persisting it to config."""
+
+        from digital_twin_runtime_suite.app.view_controls import bool_model_value
+
+        return frozenset(
+            group_id
+            for group_id, model in self._xray_target_models.items()
+            if bool_model_value(model)
         )
 
     def _xray_fresnel_values(self):
@@ -1932,8 +1968,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 presentation.materials.normal_map_scale
             )
         xray = presentation.materials.xray
-        if self._xray_chassis_selected_model is not None:
-            self._xray_chassis_selected_model.set_value(False)
+        # Material values reload from config, while target selection is runtime
+        # state and must never silently re-author Session Layer bindings.
+        for model in self._xray_target_models.values():
+            model.set_value(False)
         if hasattr(self, "_xray_fresnel_models"):
             from digital_twin_runtime_suite.app.view_controls import rgb_to_hex
 

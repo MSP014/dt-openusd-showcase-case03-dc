@@ -34,7 +34,79 @@ cover_paths = []
 normal_map_scale = 2.0
 
 [chassis_presentation.materials.xray]
-chassis_selected = false
+facing_color = [0.03137254901960784, 0.03137254901960784, 0.03137254901960784]
+edge_color = [0.0, 1.0, 0.0]
+edge_center = 0.64
+edge_softness = 0.36
+edge_sharpness = 1.0
+facing_roughness = 0.1
+edge_roughness = 1.0
+facing_opacity = 0.16
+edge_opacity = 0.85
+facing_emission = 0.1
+edge_emission = 3.2
+emission_scale = 0.0
+
+# Project-owned production X-Ray groups. Operator selection remains runtime-only;
+# only explicit visual subtrees participate in Session Layer material overrides.
+[chassis_presentation.xray_target_groups.chassis]
+label = "Chassis - SilverStone RM44"
+paths = ["/blackwell_rig/chassis"]
+
+[chassis_presentation.xray_target_groups.front_fans]
+label = "Front fans - Bionix P120"
+paths = [
+  "/blackwell_rig/fans/p120_01/geo/render/bionix_p120",
+  "/blackwell_rig/fans/p120_02/geo/render/bionix_p120",
+  "/blackwell_rig/fans/p120_03/geo/render/bionix_p120",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_a",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_b",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_c",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_d",
+]
+
+[chassis_presentation.xray_target_groups.rear_fans]
+label = "Rear fans - P8 Max"
+paths = [
+  "/blackwell_rig/fans/p8_01/geo/render/p8_max",
+  "/blackwell_rig/fans/p8_02/geo/render/p8_max",
+  "/blackwell_rig/power/cables/geo/render/cables/p8_fan_cable_a",
+  "/blackwell_rig/power/cables/geo/render/cables/p8_fan_cable_b",
+]
+
+[chassis_presentation.xray_target_groups.cpu_cooler_fans]
+label = "CPU cooler fans"
+paths = [
+  "/blackwell_rig/cpu_cooler/geo/render/cpu_cooler/cpu_fan",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_cpu_fan_cable_left",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_cpu_fan_cable_right",
+]
+
+[chassis_presentation.xray_target_groups.gpu_shrouds]
+label = "GPU shrouds"
+paths = [
+  "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/shroud",
+  "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/blower",
+  "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/power",
+  "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/shroud",
+  "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/blower",
+  "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/power",
+  "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/shroud",
+  "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/blower",
+  "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/power",
+  "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_1",
+  "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_2",
+  "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_3",
+]
+
+[chassis_presentation.xray_target_groups.psu_enclosure]
+label = "PSU enclosure"
+paths = [
+  "/blackwell_rig/power/psu/geo/render/psu/cooling",
+  "/blackwell_rig/power/psu/geo/render/psu/housing",
+  "/blackwell_rig/power/psu/geo/render/psu/dc_panel",
+  "/blackwell_rig/power/psu/geo/render/psu/ac_panel",
+]
 
 [chassis_presentation.visibility_groups.top_cover]
 label = "Top cover"
