@@ -85,16 +85,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._chassis_visibility_models = {}
         self._normal_map_scale_model = None
         self._xray_chassis_selected_model = None
-        self._xray_part_a_opacity_model = None
-        self._xray_part_a_roughness_model = None
-        self._xray_part_a_fallback_color_model = None
-        self._xray_part_b_color_model = None
-        self._xray_part_b_opacity_model = None
-        self._xray_part_b_roughness_model = None
-        self._xray_part_b_emission_intensity_model = None
-        self._xray_edge_falloff_model = None
-        self._xray_color_models = {}
-        self._updating_xray_color_controls = False
         self._face_panel_open_model = None
         self._face_panel_action_label = None
         self._face_panel_open_state = False
@@ -406,70 +396,52 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _build_xray_controls(self, xray) -> None:
         if self._xray_chassis_selected_model is None:
-            self._xray_chassis_selected_model = ui.SimpleBoolModel(
-                xray.chassis_selected
-            )
-            self._xray_part_a_opacity_model = ui.SimpleFloatModel(xray.part_a_opacity)
-            self._xray_part_a_roughness_model = ui.SimpleFloatModel(
-                xray.part_a_roughness
-            )
+            # X-Ray bindings are transient Session Layer state. Parameters
+            # persist, but a fresh app/config lifecycle always starts OFF.
+            self._xray_chassis_selected_model = ui.SimpleBoolModel(False)
 
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label(
                 "Chassis - SilverStone RM44",
                 width=SERVER_VIEW_LABEL_WIDTH,
                 elided_text=True,
-                tooltip="Apply the temporary Part A lifecycle control material.",
+                tooltip="Apply or release the production Fresnel material.",
             )
             ui.CheckBox(model=self._xray_chassis_selected_model)
-        ui.Label("Part A - Facing surface", height=18)
-        self._build_xray_float_row("Opacity", self._xray_part_a_opacity_model, 2)
-        self._build_xray_float_row("Roughness", self._xray_part_a_roughness_model, 2)
-        self._build_xray_color_controls(
-            "fallback",
-            "Fallback Color",
-            xray.part_a_fallback_color,
-            "Used only when base_lod00_mat Base Color is unavailable.",
-        )
+        self._build_xray_fresnel_controls(xray)
         ui.Button(
             "Apply",
             clicked_fn=self._apply_xray_material,
             height=26,
             width=ui.Percent(100),
         )
-        self._build_config_section(
-            "Debug - Custom MDL Fresnel",
-            self._build_xray_fresnel_probe_controls,
-            collapsed=True,
-        )
 
-    def _build_xray_fresnel_probe_controls(self) -> None:
-        """Build temporary controls for the isolated renderer experiment."""
+    def _build_xray_fresnel_controls(self, xray) -> None:
+        """Build the single production-owned Fresnel parameter set."""
 
         from digital_twin_runtime_suite.app.view_controls import rgb_to_hex
 
-        if not hasattr(self, "_xray_probe_models"):
-            materials = self._controller.config.chassis_presentation.materials
-            fresnel_probe = materials.xray_fresnel_probe
-            self._xray_probe_models = {
-                "facing": ui.SimpleStringModel(rgb_to_hex(fresnel_probe.facing_color)),
-                "edge": ui.SimpleStringModel(rgb_to_hex(fresnel_probe.edge_color)),
-                "center": ui.SimpleFloatModel(fresnel_probe.edge_center),
-                "softness": ui.SimpleFloatModel(fresnel_probe.edge_softness),
-                "sharpness": ui.SimpleFloatModel(fresnel_probe.edge_sharpness),
-                "facing_roughness": ui.SimpleFloatModel(fresnel_probe.facing_roughness),
-                "edge_roughness": ui.SimpleFloatModel(fresnel_probe.edge_roughness),
-                "facing_opacity": ui.SimpleFloatModel(fresnel_probe.facing_opacity),
-                "edge_opacity": ui.SimpleFloatModel(fresnel_probe.edge_opacity),
-                "facing_emission": ui.SimpleFloatModel(fresnel_probe.facing_emission),
-                "edge_emission": ui.SimpleFloatModel(fresnel_probe.edge_emission),
-                "emission_scale": ui.SimpleFloatModel(fresnel_probe.emission_scale),
+        if not hasattr(self, "_xray_fresnel_models"):
+            self._xray_fresnel_models = {
+                "facing": ui.SimpleStringModel(rgb_to_hex(xray.facing_color)),
+                "edge": ui.SimpleStringModel(rgb_to_hex(xray.edge_color)),
+                "center": ui.SimpleFloatModel(xray.edge_center),
+                "softness": ui.SimpleFloatModel(xray.edge_softness),
+                "sharpness": ui.SimpleFloatModel(xray.edge_sharpness),
+                "facing_roughness": ui.SimpleFloatModel(xray.facing_roughness),
+                "edge_roughness": ui.SimpleFloatModel(xray.edge_roughness),
+                "facing_opacity": ui.SimpleFloatModel(xray.facing_opacity),
+                "edge_opacity": ui.SimpleFloatModel(xray.edge_opacity),
+                "facing_emission": ui.SimpleFloatModel(xray.facing_emission),
+                "edge_emission": ui.SimpleFloatModel(xray.edge_emission),
+                "emission_scale": ui.SimpleFloatModel(xray.emission_scale),
             }
-        ui.Label("Static controllable NdotV mask", height=18)
         for label, key in (("Facing Color", "facing"), ("Edge Color", "edge")):
             with ui.HStack(height=24):
                 ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
-                ui.StringField(model=self._xray_probe_models[key], width=ui.Fraction(1))
+                ui.StringField(
+                    model=self._xray_fresnel_models[key], width=ui.Fraction(1)
+                )
         for label, key in (
             ("Edge Center", "center"),
             ("Edge Softness", "softness"),
@@ -485,150 +457,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             with ui.HStack(height=24):
                 ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
                 ui.FloatDrag(
-                    model=self._xray_probe_models[key],
+                    model=self._xray_fresnel_models[key],
                     width=ui.Fraction(1),
                     precision=3,
                 )
-        with ui.HStack(height=26, spacing=4):
-            ui.Button(
-                "Probe 01",
-                clicked_fn=lambda: self._apply_xray_fresnel_probe(True),
-                width=ui.Fraction(1),
-            )
-            ui.Button(
-                "Apply Probe Parameters",
-                clicked_fn=lambda: self._apply_xray_fresnel_probe(False),
-                width=ui.Fraction(1),
-            )
-            ui.Button(
-                "Clear Probe",
-                clicked_fn=self._clear_xray_fresnel_probe,
-                width=ui.Fraction(1),
-            )
-
-    @staticmethod
-    def _build_xray_float_row(label: str, model, precision: int) -> None:
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH, elided_text=True)
-            ui.FloatDrag(model=model, width=ui.Fraction(1), precision=precision)
-
-    def _build_xray_color_controls(
-        self,
-        key: str,
-        label: str,
-        color: tuple[float, float, float],
-        tooltip: str,
-    ) -> None:
-        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
-
-        models = self._xray_color_models.get(key)
-        if models is None:
-            hue, saturation, value = rgb_to_hsv(color)
-            models = {
-                "hex": ui.SimpleStringModel(rgb_to_hex(color)),
-                "hue": ui.SimpleFloatModel(hue),
-                "saturation": ui.SimpleFloatModel(saturation),
-                "value": ui.SimpleFloatModel(value),
-                "preview": None,
-            }
-            self._xray_color_models[key] = models
-            if key == "fallback":
-                self._xray_part_a_fallback_color_model = models["hex"]
-            else:
-                self._xray_part_b_color_model = models["hex"]
-            models["hex"].add_value_changed_fn(
-                lambda model, color_key=key: self._on_xray_color_hex_changed(
-                    color_key, model
-                )
-            )
-            on_hsv_changed = self._on_xray_color_hsv_changed
-            for model in (models["hue"], models["saturation"], models["value"]):
-                model.add_value_changed_fn(
-                    lambda changed_model, color_key=key: on_hsv_changed(
-                        color_key, changed_model
-                    )
-                )
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH, elided_text=True)
-            ui.StringField(model=models["hex"], width=ui.Fraction(1), tooltip=tooltip)
-            models["preview"] = ui.Frame(width=32, height=20)
-        with ui.HStack(height=24, spacing=6, content_clipping=True):
-            ui.Label("HSV", width=SERVER_VIEW_LABEL_WIDTH)
-            ui.Label("H", width=12)
-            ui.FloatField(model=models["hue"], width=ui.Fraction(1))
-            ui.Label("S", width=12)
-            ui.FloatField(model=models["saturation"], width=ui.Fraction(1))
-            ui.Label("V", width=12)
-            ui.FloatField(model=models["value"], width=ui.Fraction(1))
-        self._set_pending_xray_color(key, color)
-
-    def _set_pending_xray_color(
-        self,
-        key: str,
-        color: tuple[float, float, float],
-    ) -> None:
-        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
-
-        models = self._xray_color_models[key]
-        self._updating_xray_color_controls = True
-        try:
-            hue, saturation, value = rgb_to_hsv(color)
-            models["hex"].set_value(rgb_to_hex(color))
-            models["hue"].set_value(hue)
-            models["saturation"].set_value(saturation)
-            models["value"].set_value(value)
-        finally:
-            self._updating_xray_color_controls = False
-        self._refresh_xray_color_preview(key, color)
-
-    def _refresh_xray_color_preview(
-        self,
-        key: str,
-        color: tuple[float, float, float],
-    ) -> None:
-        from digital_twin_runtime_suite.app.view_controls import rgb_to_omniui_color
-
-        preview = self._xray_color_models[key]["preview"]
-        with preview:
-            ui.Rectangle(
-                style={"background_color": rgb_to_omniui_color(color)},
-                width=ui.Percent(100),
-                height=ui.Percent(100),
-            )
-
-    def _on_xray_color_hex_changed(self, key: str, _model) -> None:
-        if self._updating_xray_color_controls:
-            return
-        from digital_twin_runtime_suite.app.view_controls import (
-            hex_to_rgb,
-            string_model_value,
-        )
-
-        try:
-            color = hex_to_rgb(string_model_value(self._xray_color_models[key]["hex"]))
-        except ValueError:
-            return
-        self._set_pending_xray_color(key, color)
-
-    def _on_xray_color_hsv_changed(self, key: str, _model) -> None:
-        if self._updating_xray_color_controls:
-            return
-        from digital_twin_runtime_suite.app.view_controls import (
-            build_smoke_base_color_from_models,
-        )
-
-        models = self._xray_color_models[key]
-        try:
-            color = build_smoke_base_color_from_models(
-                source="hsv",
-                hex_model=models["hex"],
-                hue_model=models["hue"],
-                saturation_model=models["saturation"],
-                value_model=models["value"],
-            )
-        except ValueError:
-            return
-        self._set_pending_xray_color(key, color)
 
     def _build_normal_map_scale_controls(self, materials) -> None:
         if self._normal_map_scale_model is None:
@@ -1955,27 +1787,37 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_status(f"{result.message} Saved to local config.")
 
     def _xray_config_from_controls(self):
-        from digital_twin_runtime_suite.app.view_controls import (
-            xray_lifecycle_config_from_models,
-        )
+        from digital_twin_runtime_suite.app.config import XRayMaterialConfig
+        from digital_twin_runtime_suite.app.view_controls import bool_model_value
 
-        models = (
-            self._xray_chassis_selected_model,
-            self._xray_part_a_opacity_model,
-            self._xray_part_a_roughness_model,
-            self._xray_part_a_fallback_color_model,
-        )
-        if any(model is None for model in models):
+        if self._xray_chassis_selected_model is None:
             raise ValueError("controls are unavailable")
-        return xray_lifecycle_config_from_models(*models)
+        values = self._xray_fresnel_values()
+        return XRayMaterialConfig(
+            chassis_selected=bool_model_value(self._xray_chassis_selected_model),
+            facing_color=values[0],
+            edge_color=values[1],
+            edge_center=values[2],
+            edge_softness=values[3],
+            edge_sharpness=values[4],
+            facing_roughness=values[5],
+            edge_roughness=values[6],
+            facing_opacity=values[7],
+            edge_opacity=values[8],
+            facing_emission=values[9],
+            edge_emission=values[10],
+            emission_scale=values[11],
+        )
 
-    def _xray_fresnel_probe_values(self):
+    def _xray_fresnel_values(self):
+        """Read the production-owned Fresnel parameter set from X-Ray controls."""
+
         from digital_twin_runtime_suite.app.view_controls import (
             hex_to_rgb,
             string_model_value,
         )
 
-        models = self._xray_probe_models
+        models = self._xray_fresnel_models
         center = models["center"].get_value_as_float()
         softness = models["softness"].get_value_as_float()
         sharpness = models["sharpness"].get_value_as_float()
@@ -1998,7 +1840,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             or edge_emission < 0.0
             or emission_scale < 0.0
         ):
-            raise ValueError("Probe values are outside their allowed range.")
+            raise ValueError("X-Ray Fresnel values are outside their allowed range.")
         return (
             hex_to_rgb(string_model_value(models["facing"])),
             hex_to_rgb(string_model_value(models["edge"])),
@@ -2013,45 +1855,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             edge_emission,
             emission_scale,
         )
-
-    def _apply_xray_fresnel_probe(self, rebuild: bool) -> None:
-        try:
-            values = self._xray_fresnel_probe_values()
-        except ValueError as error:
-            self._set_status(f"Fresnel probe settings are invalid: {error}")
-            return
-        result = self._controller.apply_xray_fresnel_probe_in_kit(
-            values, rebuild=rebuild
-        )
-        from digital_twin_runtime_suite.app.config import XRayFresnelProbeConfig
-
-        try:
-            self._controller.save_xray_fresnel_probe_override(
-                XRayFresnelProbeConfig(
-                    facing_color=values[0],
-                    edge_color=values[1],
-                    edge_center=values[2],
-                    edge_softness=values[3],
-                    edge_sharpness=values[4],
-                    facing_roughness=values[5],
-                    edge_roughness=values[6],
-                    facing_opacity=values[7],
-                    edge_opacity=values[8],
-                    facing_emission=values[9],
-                    edge_emission=values[10],
-                    emission_scale=values[11],
-                )
-            )
-        except OSError as error:
-            self._set_status(f"Fresnel probe was applied but not saved: {error}")
-            return
-        if not result.success:
-            self._set_status(result.message)
-            return
-        self._set_status(f"{result.message} Saved to local config.")
-
-    def _clear_xray_fresnel_probe(self) -> None:
-        self._set_status(self._controller.clear_xray_fresnel_probe_in_kit().message)
 
     def _schedule_apply_chassis_visibility_controls(self) -> None:
         self._view_task = asyncio.ensure_future(
@@ -2130,13 +1933,26 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             )
         xray = presentation.materials.xray
         if self._xray_chassis_selected_model is not None:
-            self._xray_chassis_selected_model.set_value(xray.chassis_selected)
-        if self._xray_part_a_opacity_model is not None:
-            self._xray_part_a_opacity_model.set_value(xray.part_a_opacity)
-        if self._xray_part_a_roughness_model is not None:
-            self._xray_part_a_roughness_model.set_value(xray.part_a_roughness)
-        if "fallback" in self._xray_color_models:
-            self._set_pending_xray_color("fallback", xray.part_a_fallback_color)
+            self._xray_chassis_selected_model.set_value(False)
+        if hasattr(self, "_xray_fresnel_models"):
+            from digital_twin_runtime_suite.app.view_controls import rgb_to_hex
+
+            models = self._xray_fresnel_models
+            models["facing"].set_value(rgb_to_hex(xray.facing_color))
+            models["edge"].set_value(rgb_to_hex(xray.edge_color))
+            for key, value in (
+                ("center", xray.edge_center),
+                ("softness", xray.edge_softness),
+                ("sharpness", xray.edge_sharpness),
+                ("facing_roughness", xray.facing_roughness),
+                ("edge_roughness", xray.edge_roughness),
+                ("facing_opacity", xray.facing_opacity),
+                ("edge_opacity", xray.edge_opacity),
+                ("facing_emission", xray.facing_emission),
+                ("edge_emission", xray.edge_emission),
+                ("emission_scale", xray.emission_scale),
+            ):
+                models[key].set_value(value)
         self._face_panel_open_state = presentation.face_panel.default_open
         self._set_face_panel_action_label(self._face_panel_open_state)
 
@@ -2274,7 +2090,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             panel_counter = 0
             while self._controller and self._window:
                 await app.next_update_async()
-                self._controller.sync_xray_fresnel_probe_camera_in_kit()
+                self._controller.sync_xray_fresnel_material_camera_in_kit()
                 self._controller.advance_xray_material_performance_sampler_in_kit()
                 panel_counter += 1
                 if panel_counter < 15:

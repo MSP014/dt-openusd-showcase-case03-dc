@@ -1,8 +1,7 @@
 """Shared viewport-performance measurements for DTRS X-Ray features.
 
-Owns only generic sampling and aggregation of Kit viewport statistics.  Both
-the production binding lifecycle and Debug Probe 01 consume these helpers;
-this module has no material, Session Layer, camera, or geometry ownership.
+Owns only generic sampling and aggregation of Kit viewport statistics. This
+module has no material, Session Layer, camera, or geometry ownership.
 """
 
 from __future__ import annotations

@@ -35,14 +35,6 @@ normal_map_scale = 2.0
 
 [chassis_presentation.materials.xray]
 chassis_selected = false
-part_a_opacity = 0.1
-part_a_roughness = 0.4
-part_a_fallback_color = [0.72, 0.36, 1.0]
-part_b_color = [0.08, 1.0, 0.42]
-part_b_opacity = 0.6
-part_b_roughness = 0.3
-part_b_emission_intensity = 1.5
-edge_falloff = 0.5
 
 [chassis_presentation.visibility_groups.top_cover]
 label = "Top cover"
