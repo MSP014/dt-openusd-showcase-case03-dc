@@ -143,6 +143,11 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._camera_rotation_order = "YXZ"
 
         self._settings = carb.settings.get_settings()
+        carb.log_info(
+            "DTRS renderer delegate\n"
+            "/app/useFabricSceneDelegate = "
+            f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
+        )
         self._build_controller()
         self._build_window()
         asyncio.ensure_future(self._dock_left())
@@ -175,6 +180,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._telemetry_task.cancel()
             self._telemetry_task = None
         if self._controller:
+            try:
+                self._controller.clear_xray_material_in_kit()
+            except RuntimeError as error:
+                carb.log_error(f"DTRS X-Ray shutdown cleanup failed: {error}")
             self._controller.stop_flow_runtime_callbacks()
             self._controller.clear_flow_validation_cache()
         if self._motion_controller:
@@ -404,21 +413,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._xray_part_a_roughness_model = ui.SimpleFloatModel(
                 xray.part_a_roughness
             )
-            self._xray_part_b_opacity_model = ui.SimpleFloatModel(xray.part_b_opacity)
-            self._xray_part_b_roughness_model = ui.SimpleFloatModel(
-                xray.part_b_roughness
-            )
-            self._xray_part_b_emission_intensity_model = ui.SimpleFloatModel(
-                xray.part_b_emission_intensity
-            )
-            self._xray_edge_falloff_model = ui.SimpleFloatModel(xray.edge_falloff)
 
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Label(
                 "Chassis - SilverStone RM44",
                 width=SERVER_VIEW_LABEL_WIDTH,
                 elided_text=True,
-                tooltip="Apply xray_material to the chassis asset.",
+                tooltip="Apply the temporary Part A lifecycle control material.",
             )
             ui.CheckBox(model=self._xray_chassis_selected_model)
         ui.Label("Part A - Facing surface", height=18)
@@ -430,19 +431,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             xray.part_a_fallback_color,
             "Used only when base_lod00_mat Base Color is unavailable.",
         )
-        ui.Label("Part B - Hologram edge", height=18)
-        self._build_xray_color_controls(
-            "edge",
-            "Edge Color",
-            xray.part_b_color,
-            "Drives both Base Color and Emission Color.",
-        )
-        self._build_xray_float_row("Opacity", self._xray_part_b_opacity_model, 2)
-        self._build_xray_float_row("Roughness", self._xray_part_b_roughness_model, 2)
-        self._build_xray_float_row(
-            "Emission", self._xray_part_b_emission_intensity_model, 2
-        )
-        self._build_xray_float_row("Edge Falloff", self._xray_edge_falloff_model, 2)
         ui.Button(
             "Apply",
             clicked_fn=self._apply_xray_material,
@@ -1738,6 +1726,14 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     async def _reload_config_and_stage(self) -> None:
         try:
+            cleanup = self._controller.clear_xray_material_in_kit()
+        except RuntimeError as error:
+            self._set_status(f"X-Ray cleanup before Reload Config failed: {error}")
+            return
+        if not cleanup.success:
+            self._set_status(cleanup.message)
+            return
+        try:
             config = self._controller.reload_config()
         except RuntimeError:
             self._set_status("Detach airflow before reloading config")
@@ -1960,7 +1956,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _xray_config_from_controls(self):
         from digital_twin_runtime_suite.app.view_controls import (
-            xray_material_config_from_models,
+            xray_lifecycle_config_from_models,
         )
 
         models = (
@@ -1968,15 +1964,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._xray_part_a_opacity_model,
             self._xray_part_a_roughness_model,
             self._xray_part_a_fallback_color_model,
-            self._xray_part_b_color_model,
-            self._xray_part_b_opacity_model,
-            self._xray_part_b_roughness_model,
-            self._xray_part_b_emission_intensity_model,
-            self._xray_edge_falloff_model,
         )
         if any(model is None for model in models):
             raise ValueError("controls are unavailable")
-        return xray_material_config_from_models(*models)
+        return xray_lifecycle_config_from_models(*models)
 
     def _xray_fresnel_probe_values(self):
         from digital_twin_runtime_suite.app.view_controls import (
@@ -2146,18 +2137,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._xray_part_a_roughness_model.set_value(xray.part_a_roughness)
         if "fallback" in self._xray_color_models:
             self._set_pending_xray_color("fallback", xray.part_a_fallback_color)
-        if "edge" in self._xray_color_models:
-            self._set_pending_xray_color("edge", xray.part_b_color)
-        if self._xray_part_b_opacity_model is not None:
-            self._xray_part_b_opacity_model.set_value(xray.part_b_opacity)
-        if self._xray_part_b_roughness_model is not None:
-            self._xray_part_b_roughness_model.set_value(xray.part_b_roughness)
-        if self._xray_part_b_emission_intensity_model is not None:
-            self._xray_part_b_emission_intensity_model.set_value(
-                xray.part_b_emission_intensity
-            )
-        if self._xray_edge_falloff_model is not None:
-            self._xray_edge_falloff_model.set_value(xray.edge_falloff)
         self._face_panel_open_state = presentation.face_panel.default_open
         self._set_face_panel_action_label(self._face_panel_open_state)
 
@@ -2296,6 +2275,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             while self._controller and self._window:
                 await app.next_update_async()
                 self._controller.sync_xray_fresnel_probe_camera_in_kit()
+                self._controller.advance_xray_material_performance_sampler_in_kit()
                 panel_counter += 1
                 if panel_counter < 15:
                     continue

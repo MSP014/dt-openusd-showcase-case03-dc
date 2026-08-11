@@ -153,7 +153,7 @@ def test_xray_controls_reject_invalid_numeric_values(model_index, value, message
         xray_material_config_from_models(*models)
 
 
-def test_xray_clear_removes_only_session_binding_and_reveals_authored_source():
+def test_xray_clear_removes_only_session_binding_and_reveals_authored_source(tmp_path):
     from pxr import Sdf, Usd, UsdGeom, UsdShade
 
     stage = Usd.Stage.CreateInMemory()
@@ -178,8 +178,9 @@ def test_xray_clear_removes_only_session_binding_and_reveals_authored_source():
     assert _bound_material_path(mesh, UsdShade) == RuntimeController.XRAY_MATERIAL_PATH
     assert stage.GetSessionLayer().GetPropertyAtPath(binding_path) is not None
 
-    removed_count = RuntimeController._clear_xray_session_overrides(
-        stage, Usd, UsdShade
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    removed_count, _diagnostics = controller._clear_xray_session_overrides(
+        stage, Sdf, Usd, UsdShade
     )
 
     assert removed_count == 1
@@ -188,11 +189,289 @@ def test_xray_clear_removes_only_session_binding_and_reveals_authored_source():
     assert list(root_binding.targetPathList.explicitItems) == [
         Sdf.Path("/Looks/Source")
     ]
-    assert (
-        stage.GetSessionLayer().GetPrimAtPath(RuntimeController.XRAY_MATERIAL_PATH)
-        is None
-    )
+    assert stage.GetPrimAtPath(RuntimeController.XRAY_MATERIAL_PATH).IsValid()
     assert UsdGeom.Imageable(mesh).GetVisibilityAttr().Get() == UsdGeom.Tokens.invisible
+
+
+def test_xray_batched_authoring_validates_all_targets_then_removes_every_owned_spec(
+    tmp_path,
+):
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    stage, meshes, baseline = _production_xray_stage(Usd, UsdGeom, UsdShade, 2)
+    stage.SetEditTarget(stage.GetSessionLayer())
+    xray = XRayMaterialConfig(chassis_selected=True, part_a_opacity=0.2)
+
+    for _ in range(3):
+        for mesh in meshes:
+            binding_path = mesh.GetPath().AppendProperty("material:binding")
+            assert stage.GetSessionLayer().GetPropertyAtPath(binding_path) is None
+        target_count, diagnostics = controller._apply_xray_session_overrides(
+            stage, xray, Gf, Sdf, Usd, UsdShade
+        )
+        assert target_count == len(meshes)
+        # The returned diagnostics are created after the full ChangeBlock, so
+        # every target is validated together rather than incrementally.
+        assert len(diagnostics) == len(meshes)
+        for mesh in meshes:
+            binding_path = mesh.GetPath().AppendProperty("material:binding")
+            assert (
+                _bound_material_path(mesh, UsdShade)
+                == RuntimeController.XRAY_MATERIAL_PATH
+            )
+            assert stage.GetSessionLayer().GetPropertyAtPath(binding_path) is not None
+
+        removed_count, diagnostics = controller._clear_xray_session_overrides(
+            stage, Sdf, Usd, UsdShade
+        )
+        assert removed_count == len(meshes)
+        assert len(diagnostics) == len(meshes)
+        for mesh in meshes:
+            binding_path = mesh.GetPath().AppendProperty("material:binding")
+            assert _bound_material_path(mesh, UsdShade) == baseline
+            # This is the critical lifecycle invariant: composition may look
+            # correct only because a stronger Session spec was left behind.
+            assert stage.GetSessionLayer().GetPropertyAtPath(binding_path) is None
+            assert not controller._session_binding_is_xray_owned(stage, binding_path)
+            assert stage.GetPrimAtPath(RuntimeController.XRAY_MATERIAL_PATH).IsValid()
+
+
+def test_xray_led_ownership_suppresses_telemetry_then_reapplies_current_state(
+    tmp_path, monkeypatch
+):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    from digital_twin_runtime_suite.app import commands
+    from digital_twin_runtime_suite.app.config import FrontPanelIndicatorsConfig
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    paths = tuple(
+        f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/FrontPanel{suffix}"
+        for suffix in ("Power", "HDD", "LAN01", "LAN02")
+    )
+    indicators = FrontPanelIndicatorsConfig(
+        enabled=True,
+        power_path=paths[0],
+        hdd_path=paths[1],
+        lan_01_path=paths[2],
+        lan_02_path=paths[3],
+    )
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            front_panel_indicators=indicators,
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(stage, RuntimeController.XRAY_CHASSIS_ROOT_PATH)
+    for path in paths:
+        UsdGeom.Mesh.Define(stage, path)
+    stage.SetEditTarget(stage.GetSessionLayer())
+    on_state = SimpleNamespace(power=True, hdd=True, lan_01=True, lan_02=True)
+    off_state = SimpleNamespace(power=False, hdd=False, lan_01=False, lan_02=False)
+    assert controller._apply_front_panel_indicator_state(
+        stage, indicators, on_state, Gf, Sdf, Usd, UsdShade
+    )
+
+    controller._apply_xray_session_overrides(
+        stage,
+        XRayMaterialConfig(chassis_selected=True),
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    )
+    # Telemetry state changes, but its material writer may not replace the
+    # stronger X-Ray binding while the lifecycle control owns these LEDs.
+    assert (
+        controller._apply_front_panel_indicator_state(
+            stage, indicators, off_state, Gf, Sdf, Usd, UsdShade
+        )
+        is False
+    )
+    for path in paths:
+        assert (
+            _bound_material_path(stage.GetPrimAtPath(path), UsdShade)
+            == RuntimeController.XRAY_MATERIAL_PATH
+        )
+
+    controller._clear_xray_session_overrides(stage, Sdf, Usd, UsdShade)
+    controller._front_panel_indicator_last_snapshot = SimpleNamespace(metrics={})
+    monkeypatch.setattr(
+        commands, "front_panel_indicator_state", lambda *_args, **_kwargs: off_state
+    )
+    reapplied, matches = controller._reapply_front_panel_indicator_current_state(
+        stage, Gf, Sdf, Usd, UsdShade
+    )
+
+    assert reapplied is True
+    assert matches is True
+    for path in paths:
+        assert (
+            _bound_material_path(stage.GetPrimAtPath(path), UsdShade)
+            == RuntimeController.FRONT_PANEL_MATERIAL_PATHS["off"]
+        )
+
+
+def test_xray_failed_mixed_target_batch_rolls_back_all_ownership(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    from digital_twin_runtime_suite.app.config import FrontPanelIndicatorsConfig
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    static_path = f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/StaticPanel"
+    led_path = f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/FrontPanelPower"
+    indicators = FrontPanelIndicatorsConfig(enabled=True, power_path=led_path)
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            front_panel_indicators=indicators,
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.Xform.Define(stage, RuntimeController.XRAY_CHASSIS_ROOT_PATH)
+    static = UsdGeom.Mesh.Define(stage, static_path).GetPrim()
+    led = UsdGeom.Mesh.Define(stage, led_path).GetPrim()
+    stage.SetEditTarget(stage.GetSessionLayer())
+    telemetry_material = UsdShade.Material.Define(stage, "/Looks/TelemetryPrior")
+    UsdShade.MaterialBindingAPI.Apply(led).Bind(telemetry_material)
+    static_binding = static.GetPath().AppendProperty("material:binding")
+    led_binding = led.GetPath().AppendProperty("material:binding")
+    assert stage.GetSessionLayer().GetPropertyAtPath(static_binding) is None
+
+    original_author = controller._author_xray_session_binding_spec
+
+    def _skip_static(stage, property_path, sdf):
+        if property_path == static_binding:
+            return
+        original_author(stage, property_path, sdf)
+
+    monkeypatch.setattr(controller, "_author_xray_session_binding_spec", _skip_static)
+
+    with pytest.raises(RuntimeError, match="mismatch_count=1"):
+        controller._apply_xray_session_overrides(
+            stage,
+            XRayMaterialConfig(chassis_selected=True),
+            Gf,
+            Sdf,
+            Usd,
+            UsdShade,
+        )
+
+    assert stage.GetSessionLayer().GetPropertyAtPath(static_binding) is None
+    assert not controller._session_binding_is_xray_owned(stage, led_binding)
+    assert _bound_material_path(led, UsdShade) == "/Looks/TelemetryPrior"
+
+
+def test_xray_off_is_idempotent_and_preserves_preexisting_session_binding(tmp_path):
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    stage, meshes, _baseline = _production_xray_stage(Usd, UsdGeom, UsdShade, 1)
+    mesh = meshes[0]
+    session_material = UsdShade.Material.Define(stage, "/Looks/SessionPrior")
+    stage.SetEditTarget(stage.GetSessionLayer())
+    UsdShade.MaterialBindingAPI.Apply(mesh).Bind(session_material)
+    binding_path = mesh.GetPath().AppendProperty("material:binding")
+    prior_spec = stage.GetSessionLayer().GetPropertyAtPath(binding_path)
+    prior_targets = list(prior_spec.targetPathList.explicitItems)
+
+    controller._apply_xray_session_overrides(
+        stage,
+        XRayMaterialConfig(chassis_selected=True),
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    )
+    assert _bound_material_path(mesh, UsdShade) == RuntimeController.XRAY_MATERIAL_PATH
+
+    removed_count, _diagnostics = controller._clear_xray_session_overrides(
+        stage, Sdf, Usd, UsdShade
+    )
+    assert removed_count == 1
+    restored_spec = stage.GetSessionLayer().GetPropertyAtPath(binding_path)
+    assert restored_spec is not None
+    assert list(restored_spec.targetPathList.explicitItems) == prior_targets
+    assert _bound_material_path(mesh, UsdShade) == "/Looks/SessionPrior"
+    assert not controller._session_binding_is_xray_owned(stage, binding_path)
+
+    removed_count, diagnostics = controller._clear_xray_session_overrides(
+        stage, Sdf, Usd, UsdShade
+    )
+    assert removed_count == 0
+    assert diagnostics == []
+    assert (
+        list(
+            stage.GetSessionLayer()
+            .GetPropertyAtPath(binding_path)
+            .targetPathList.explicitItems
+        )
+        == prior_targets
+    )
+
+
+def test_xray_stage_loss_discards_stale_snapshot_and_config_cleanup_removes_binding(
+    tmp_path,
+):
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    stage, meshes, baseline = _production_xray_stage(Usd, UsdGeom, UsdShade, 1)
+    stage.SetEditTarget(stage.GetSessionLayer())
+    controller._apply_xray_session_overrides(
+        stage,
+        XRayMaterialConfig(chassis_selected=True),
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    )
+
+    replacement = Usd.Stage.CreateInMemory()
+    replacement.SetEditTarget(replacement.GetSessionLayer())
+    removed_count, _diagnostics = controller._clear_xray_session_overrides(
+        replacement, Sdf, Usd, UsdShade
+    )
+    assert removed_count == 0
+    assert controller._xray_session_binding_snapshots == {}
+
+    # Reapply on the still-open original stage after the stale state has been
+    # discarded, then model Reload Config cleanup on that active stage.
+    controller._apply_xray_session_overrides(
+        stage,
+        XRayMaterialConfig(chassis_selected=True),
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+    )
+    controller._clear_xray_session_overrides(stage, Sdf, Usd, UsdShade)
+    binding_path = meshes[0].GetPath().AppendProperty("material:binding")
+    assert _bound_material_path(meshes[0], UsdShade) == baseline
+    assert stage.GetSessionLayer().GetPropertyAtPath(binding_path) is None
+
+
+def _production_xray_stage(Usd, UsdGeom, UsdShade, mesh_count):
+    stage = Usd.Stage.CreateInMemory()
+    source = UsdShade.Material.Define(stage, "/Looks/AuthoredChassis")
+    UsdGeom.Xform.Define(stage, RuntimeController.XRAY_CHASSIS_ROOT_PATH)
+    meshes = []
+    for index in range(mesh_count):
+        mesh = UsdGeom.Mesh.Define(
+            stage, f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/mesh_{index}"
+        ).GetPrim()
+        UsdShade.MaterialBindingAPI.Apply(mesh).Bind(source)
+        meshes.append(mesh)
+    return stage, meshes, str(source.GetPath())
 
 
 def test_fresnel_probe_sphere_is_a_smooth_high_resolution_mesh():
@@ -823,6 +1102,67 @@ def test_live_fresnel_probe_performance_stop_clears_sampler_state(tmp_path):
     assert controller._xray_probe_performance_samples == []
 
 
+def test_production_xray_performance_sampler_logs_hud_interval_without_new_task(
+    tmp_path, monkeypatch
+):
+    from digital_twin_runtime_suite.app import commands
+    from digital_twin_runtime_suite.app.flow.performance import (
+        ViewportPerformanceSample,
+    )
+
+    class _Carb:
+        def __init__(self):
+            self.messages = []
+
+        def log_warn(self, message):
+            self.messages.append(message)
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    samples = iter(
+        (
+            ViewportPerformanceSample(0.0, 60.0, 16.0, 4.0, 6.0),
+            ViewportPerformanceSample(10.0, 50.0, 20.0, 4.5, 6.5),
+        )
+    )
+    monkeypatch.setattr(
+        controller,
+        "_capture_xray_fresnel_probe_performance_sample",
+        lambda: next(samples),
+    )
+    monkeypatch.setattr(commands.time, "monotonic", lambda: 10.0)
+
+    controller._start_xray_material_performance_sampler()
+    carb = _Carb()
+    controller._advance_xray_material_performance_sampler(carb)
+
+    assert len(carb.messages) == 1
+    assert "DTRS X-Ray binding lifecycle - PERFORMANCE" in carb.messages[0]
+    controller._stop_xray_material_performance_sampler()
+
+    assert controller._xray_material_performance_started_at is None
+    assert controller._xray_material_performance_samples == []
+
+
+def test_production_xray_performance_interval_records_hud_metrics(tmp_path):
+    from digital_twin_runtime_suite.app.flow.performance import (
+        ViewportPerformanceSample,
+    )
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    controller._xray_material_performance_started_at = 0.0
+    output = controller._format_xray_material_performance_interval(
+        [
+            ViewportPerformanceSample(0.0, 60.0, 16.0, 4.0, 6.0),
+            ViewportPerformanceSample(1.0, 50.0, 20.0, 4.5, 6.5),
+        ]
+    )
+
+    assert "DTRS X-Ray binding lifecycle - PERFORMANCE" in output
+    assert "current=50.00" in output
+    assert "average=55.00" in output
+    assert "gpu_used_gib=4.50" in output
+
+
 def test_live_fresnel_probe_performance_unavailable_values_are_non_fatal(tmp_path):
     from digital_twin_runtime_suite.app.flow.performance import (
         ViewportPerformanceSample,
@@ -865,6 +1205,94 @@ def test_fresnel_probe_diagnostic_failure_cannot_escape_runtime_operation():
         "  action: Probe 01\n"
         "  diagnostic: <inspection failed: inspection failed>"
     ]
+
+
+def test_xray_lifecycle_diagnostic_failure_cannot_escape_runtime_operation():
+    class _Carb:
+        def __init__(self):
+            self.messages = []
+
+        def log_warn(self, message):
+            self.messages.append(message)
+
+    carb = _Carb()
+    RuntimeController._log_xray_lifecycle_diagnostic(
+        carb,
+        action="OFF",
+        formatter=lambda: (_ for _ in ()).throw(RuntimeError("inspection failed")),
+    )
+
+    assert carb.messages == [
+        "DTRS X-Ray binding lifecycle\n"
+        "  action: OFF\n"
+        "  diagnostic: <inspection failed: inspection failed>"
+    ]
+
+
+def test_xray_usd_fabric_diagnostic_classifies_binding_match():
+    output = RuntimeController._format_xray_usd_fabric_diagnostic(
+        "immediate",
+        "/blackwell_rig/chassis/mesh_01",
+        "/Looks/AuthoredChassis",
+        "/Looks/AuthoredChassis",
+    )
+
+    assert "target=/blackwell_rig/chassis/mesh_01" in output
+    assert "usd_binding=/Looks/AuthoredChassis" in output
+    assert "fabric_binding=/Looks/AuthoredChassis" in output
+    assert "match=True" in output
+    assert "USD PASS; Fabric PASS" in output
+
+
+def test_xray_usd_fabric_diagnostic_classifies_stale_fabric():
+    output = RuntimeController._format_xray_usd_fabric_diagnostic(
+        "immediate",
+        "/blackwell_rig/chassis/mesh_01",
+        "/Looks/AuthoredChassis",
+        "/DTRS_Runtime/Looks/XRayLifecycleControl",
+    )
+
+    assert "match=False" in output
+    assert "classification=USD PASS; Fabric STALE" in output
+
+
+def test_xray_ab_probe_uses_a_visible_render_purpose_prim():
+    assert RuntimeController.XRAY_AB_RENDER_PROBE_PATH == (
+        "/blackwell_rig/chassis/geo/render/chassis/front_side/face_grill/face_grill"
+    )
+
+
+def test_rprim_rebuild_restore_removes_session_active_opinion_without_active_true():
+    from pxr import Usd, UsdGeom
+
+    stage = Usd.Stage.CreateInMemory()
+    prim = UsdGeom.Mesh.Define(stage, "/RenderFaceGrill").GetPrim()
+    stage.SetEditTarget(stage.GetSessionLayer())
+    prim.SetActive(False)
+    session_spec = stage.GetSessionLayer().GetPrimAtPath(prim.GetPath())
+
+    assert session_spec.HasInfo("active")
+    session_spec.ClearInfo("active")
+
+    assert not session_spec.HasInfo("active")
+    assert stage.GetPrimAtPath(prim.GetPath()).IsActive()
+
+
+def test_xray_off_diagnostic_uses_the_first_static_target_from_this_transition():
+    diagnostics = [
+        {
+            "is_led": True,
+            "after": {"target_prim_path": "/blackwell_rig/chassis/FrontPanelPower"},
+        },
+        {
+            "is_led": False,
+            "after": {"target_prim_path": "/blackwell_rig/chassis/StaticPanel"},
+        },
+    ]
+
+    assert RuntimeController._xray_static_target_path(diagnostics) == (
+        "/blackwell_rig/chassis/StaticPanel"
+    )
 
 
 def _bound_material_path(mesh, UsdShade) -> str | None:
