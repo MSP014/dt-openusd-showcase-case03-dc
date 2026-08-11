@@ -1,8 +1,9 @@
-"""Focused production X-Ray lifecycle, material, and telemetry tests."""
+"""Focused production X-Ray config, lifecycle, camera, and telemetry tests."""
 
 from __future__ import annotations
 
 import sys
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -14,6 +15,7 @@ from digital_twin_runtime_suite.app.config import (
     FrontPanelIndicatorsConfig,
     RuntimeConfig,
     XRayMaterialConfig,
+    XRayTargetGroupConfig,
 )
 from digital_twin_runtime_suite.app.view_controls import bool_model_value
 
@@ -30,10 +32,12 @@ def test_bool_model_prefers_kit_value_accessor_over_legacy_attribute():
     assert bool_model_value(_KitBoolModel()) is False
 
 
-def test_xray_parameters_round_trip_without_persisting_runtime_activation(tmp_path):
+XRAY_CHASSIS_ROOT_PATH = "/blackwell_rig/chassis"
+
+
+def test_xray_parameters_round_trip_without_persisting_runtime_selection(tmp_path):
     controller = RuntimeController(_write_xray_config(tmp_path))
     xray = XRayMaterialConfig(
-        chassis_selected=True,
         facing_color=(0.1, 0.2, 0.3),
         edge_color=(0.4, 0.5, 0.6),
         edge_center=0.5,
@@ -52,10 +56,56 @@ def test_xray_parameters_round_trip_without_persisting_runtime_activation(tmp_pa
     reloaded = RuntimeConfig.load(_write_xray_config(tmp_path))
 
     assert saved.exists()
-    assert reloaded.chassis_presentation.materials.xray == replace(
-        xray, chassis_selected=False
+    assert reloaded.chassis_presentation.materials.xray == xray
+    assert "chassis_selected" not in saved.read_text(encoding="utf-8")
+
+
+def test_project_xray_target_groups_are_explicit_and_render_scoped():
+    config = RuntimeConfig.load(Path("configs/digital_twin_runtime_suite.toml"))
+    with Path("configs/digital_twin_runtime_suite.toml").open("rb") as config_file:
+        project_xray = tomllib.load(config_file)["chassis_presentation"]["materials"][
+            "xray"
+        ]
+    groups = {
+        group.group_id: group
+        for group in config.chassis_presentation.xray_target_groups
+    }
+
+    assert XRayMaterialConfig().facing_color == pytest.approx((8 / 255,) * 3)
+    assert XRayMaterialConfig().edge_color == pytest.approx((0.0, 1.0, 0.0))
+    assert project_xray == {
+        "facing_color": pytest.approx([8 / 255, 8 / 255, 8 / 255]),
+        "edge_color": pytest.approx([0.0, 1.0, 0.0]),
+        "edge_center": pytest.approx(0.64),
+        "edge_softness": pytest.approx(0.36),
+        "edge_sharpness": pytest.approx(1.0),
+        "facing_roughness": pytest.approx(0.1),
+        "edge_roughness": pytest.approx(1.0),
+        "facing_opacity": pytest.approx(0.16),
+        "edge_opacity": pytest.approx(0.85),
+        "facing_emission": pytest.approx(0.1),
+        "edge_emission": pytest.approx(3.2),
+        "emission_scale": pytest.approx(0.0),
+    }
+    assert tuple(groups) == (
+        "chassis",
+        "front_fans",
+        "rear_fans",
+        "cpu_cooler_fans",
+        "gpu_shrouds",
+        "psu_enclosure",
     )
-    assert "chassis_selected = false" in saved.read_text(encoding="utf-8")
+    assert groups["front_fans"].paths[-1].endswith("p120_fan_cable_d")
+    assert groups["rear_fans"].paths[-1].endswith("p8_fan_cable_b")
+    assert groups["cpu_cooler_fans"].paths[0].endswith("cpu_fan")
+    assert any(path.endswith("RTX4500/power") for path in groups["gpu_shrouds"].paths)
+    assert any(path.endswith("cables_gpu_3") for path in groups["gpu_shrouds"].paths)
+    assert groups["psu_enclosure"].paths == (
+        "/blackwell_rig/power/psu/geo/render/psu/cooling",
+        "/blackwell_rig/power/psu/geo/render/psu/housing",
+        "/blackwell_rig/power/psu/geo/render/psu/dc_panel",
+        "/blackwell_rig/power/psu/geo/render/psu/ac_panel",
+    )
 
 
 def test_xray_on_off_cycles_restore_authored_binding_and_remove_session_spec(tmp_path):
@@ -65,7 +115,6 @@ def test_xray_on_off_cycles_restore_authored_binding_and_remove_session_spec(tmp
     stage, meshes, baseline = _production_xray_stage(Usd, UsdGeom, UsdShade, 2)
     stage.SetEditTarget(stage.GetSessionLayer())
     xray = XRayMaterialConfig(
-        chassis_selected=True,
         facing_color=(0.1, 0.2, 0.3),
         edge_center=0.5,
         edge_emission=5.0,
@@ -73,7 +122,7 @@ def test_xray_on_off_cycles_restore_authored_binding_and_remove_session_spec(tmp
 
     for _ in range(3):
         target_count, _diagnostics = controller._apply_xray_session_overrides(
-            stage, xray, Gf, Sdf, Usd, UsdShade
+            stage, xray, {"chassis"}, Gf, Sdf, Usd, UsdShade
         )
         assert target_count == len(meshes)
         shader = UsdShade.Shader.Get(
@@ -107,6 +156,54 @@ def test_xray_on_off_cycles_restore_authored_binding_and_remove_session_spec(tmp
             assert not controller._session_binding_is_xray_owned(stage, binding_path)
 
 
+def test_xray_reconciles_configured_target_groups_without_persisting_selection(
+    tmp_path,
+):
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    front_root = "/blackwell_rig/fans/p120_01/geo/render/bionix_p120"
+    groups = (
+        XRayTargetGroupConfig("chassis", "Chassis", (XRAY_CHASSIS_ROOT_PATH,)),
+        XRayTargetGroupConfig("front_fans", "Front fans", (front_root,)),
+    )
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            xray_target_groups=groups,
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    authored = UsdShade.Material.Define(stage, "/Looks/Authored")
+    chassis = UsdGeom.Mesh.Define(stage, f"{XRAY_CHASSIS_ROOT_PATH}/Panel").GetPrim()
+    front_fan = UsdGeom.Mesh.Define(stage, f"{front_root}/body").GetPrim()
+    UsdShade.MaterialBindingAPI.Apply(chassis).Bind(authored)
+    UsdShade.MaterialBindingAPI.Apply(front_fan).Bind(authored)
+    stage.SetEditTarget(stage.GetSessionLayer())
+
+    controller._apply_xray_session_overrides(
+        stage, XRayMaterialConfig(), {"chassis"}, Gf, Sdf, Usd, UsdShade
+    )
+    controller._apply_xray_session_overrides(
+        stage, XRayMaterialConfig(), {"front_fans"}, Gf, Sdf, Usd, UsdShade
+    )
+
+    chassis_binding = chassis.GetPath().AppendProperty("material:binding")
+    front_binding = front_fan.GetPath().AppendProperty("material:binding")
+    assert _bound_material_path(chassis, UsdShade) == str(authored.GetPath())
+    assert stage.GetSessionLayer().GetPropertyAtPath(chassis_binding) is None
+    assert (
+        _bound_material_path(front_fan, UsdShade)
+        == RuntimeController.XRAY_MATERIAL_PATH
+    )
+    assert controller._session_binding_is_xray_owned(stage, front_binding)
+
+    controller._clear_xray_session_overrides(stage, Sdf, Usd, UsdShade)
+    assert _bound_material_path(front_fan, UsdShade) == str(authored.GetPath())
+    assert stage.GetSessionLayer().GetPropertyAtPath(front_binding) is None
+
+
 def test_xray_off_is_idempotent_and_restores_prior_session_binding(tmp_path):
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
@@ -124,7 +221,7 @@ def test_xray_off_is_idempotent_and_restores_prior_session_binding(tmp_path):
     )
 
     controller._apply_xray_session_overrides(
-        stage, XRayMaterialConfig(chassis_selected=True), Gf, Sdf, Usd, UsdShade
+        stage, XRayMaterialConfig(), {"chassis"}, Gf, Sdf, Usd, UsdShade
     )
     controller._clear_xray_session_overrides(stage, Sdf, Usd, UsdShade)
 
@@ -145,7 +242,7 @@ def test_xray_stage_loss_discards_stale_session_snapshot(tmp_path):
     stage, meshes, baseline = _production_xray_stage(Usd, UsdGeom, UsdShade, 1)
     stage.SetEditTarget(stage.GetSessionLayer())
     controller._apply_xray_session_overrides(
-        stage, XRayMaterialConfig(chassis_selected=True), Gf, Sdf, Usd, UsdShade
+        stage, XRayMaterialConfig(), {"chassis"}, Gf, Sdf, Usd, UsdShade
     )
 
     replacement = Usd.Stage.CreateInMemory()
@@ -170,8 +267,8 @@ def test_xray_failed_mixed_target_batch_rolls_back_all_ownership(tmp_path, monke
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
     controller = RuntimeController(_write_xray_config(tmp_path))
-    static_path = f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/StaticPanel"
-    led_path = f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/FrontPanelPower"
+    static_path = f"{XRAY_CHASSIS_ROOT_PATH}/StaticPanel"
+    led_path = f"{XRAY_CHASSIS_ROOT_PATH}/FrontPanelPower"
     indicators = FrontPanelIndicatorsConfig(enabled=True, power_path=led_path)
     controller.config = replace(
         controller.config,
@@ -181,7 +278,7 @@ def test_xray_failed_mixed_target_batch_rolls_back_all_ownership(tmp_path, monke
         ),
     )
     stage = Usd.Stage.CreateInMemory()
-    UsdGeom.Xform.Define(stage, RuntimeController.XRAY_CHASSIS_ROOT_PATH)
+    UsdGeom.Xform.Define(stage, XRAY_CHASSIS_ROOT_PATH)
     static = UsdGeom.Mesh.Define(stage, static_path).GetPrim()
     led = UsdGeom.Mesh.Define(stage, led_path).GetPrim()
     stage.SetEditTarget(stage.GetSessionLayer())
@@ -198,7 +295,7 @@ def test_xray_failed_mixed_target_batch_rolls_back_all_ownership(tmp_path, monke
     monkeypatch.setattr(controller, "_author_xray_session_binding_spec", _skip_static)
     with pytest.raises(RuntimeError, match="mismatch_count=1"):
         controller._apply_xray_session_overrides(
-            stage, XRayMaterialConfig(chassis_selected=True), Gf, Sdf, Usd, UsdShade
+            stage, XRayMaterialConfig(), {"chassis"}, Gf, Sdf, Usd, UsdShade
         )
 
     assert stage.GetSessionLayer().GetPropertyAtPath(static_binding) is None
@@ -215,7 +312,7 @@ def test_xray_led_ownership_reapplies_current_telemetry_state_after_off(
 
     controller = RuntimeController(_write_xray_config(tmp_path))
     paths = tuple(
-        f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/FrontPanel{suffix}"
+        f"{XRAY_CHASSIS_ROOT_PATH}/FrontPanel{suffix}"
         for suffix in ("Power", "HDD", "LAN01", "LAN02")
     )
     indicators = FrontPanelIndicatorsConfig(
@@ -233,7 +330,7 @@ def test_xray_led_ownership_reapplies_current_telemetry_state_after_off(
         ),
     )
     stage = Usd.Stage.CreateInMemory()
-    UsdGeom.Xform.Define(stage, RuntimeController.XRAY_CHASSIS_ROOT_PATH)
+    UsdGeom.Xform.Define(stage, XRAY_CHASSIS_ROOT_PATH)
     for path in paths:
         UsdGeom.Mesh.Define(stage, path)
     stage.SetEditTarget(stage.GetSessionLayer())
@@ -244,7 +341,7 @@ def test_xray_led_ownership_reapplies_current_telemetry_state_after_off(
     )
 
     controller._apply_xray_session_overrides(
-        stage, XRayMaterialConfig(chassis_selected=True), Gf, Sdf, Usd, UsdShade
+        stage, XRayMaterialConfig(), {"chassis"}, Gf, Sdf, Usd, UsdShade
     )
     assert (
         controller._apply_front_panel_indicator_state(
@@ -356,11 +453,11 @@ def test_production_xray_performance_and_diagnostics_are_non_fatal(
 def _production_xray_stage(Usd, UsdGeom, UsdShade, mesh_count):
     stage = Usd.Stage.CreateInMemory()
     source = UsdShade.Material.Define(stage, "/Looks/AuthoredChassis")
-    UsdGeom.Xform.Define(stage, RuntimeController.XRAY_CHASSIS_ROOT_PATH)
+    UsdGeom.Xform.Define(stage, XRAY_CHASSIS_ROOT_PATH)
     meshes = []
     for index in range(mesh_count):
         mesh = UsdGeom.Mesh.Define(
-            stage, f"{RuntimeController.XRAY_CHASSIS_ROOT_PATH}/Static{index}"
+            stage, f"{XRAY_CHASSIS_ROOT_PATH}/Static{index}"
         ).GetPrim()
         UsdShade.MaterialBindingAPI.Apply(mesh).Bind(source)
         meshes.append(mesh)
@@ -409,7 +506,10 @@ def _write_xray_config(tmp_path) -> Path:
                 'kind = "usd_stage"',
                 "",
                 "[chassis_presentation.materials.xray]",
-                "chassis_selected = false",
+                "",
+                "[chassis_presentation.xray_target_groups.chassis]",
+                'label = "Chassis - SilverStone RM44"',
+                'paths = ["/blackwell_rig/chassis"]',
             )
         ),
         encoding="utf-8",

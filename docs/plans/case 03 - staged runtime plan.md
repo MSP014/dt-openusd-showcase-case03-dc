@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
-**Status**: Active roadmap; Stage 6 complete
-**Last Updated**: 2026-07-27
+**Status**: Active roadmap; Stages 1–7 complete
+**Last Updated**: 2026-08-11
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -11,8 +11,8 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and the first six completed Digital Twin Runtime Suite
-slices through cached airflow playback.
+external asset layout, and the first seven completed Digital Twin Runtime Suite
+slices through Engineering X-Ray visual mode.
 
 Current decisions already made:
 
@@ -62,6 +62,22 @@ Current decisions already made:
   FPS budget.
 - The completed Stage 6 runtime contract and validation evidence are preserved
   in the [Stage 6 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice).
+- Stage 7 delivers the production Custom MDL Fresnel X-Ray material with
+  config-driven multi-target selection, Session Layer-only reversible
+  bindings, live ReviewCamera response, and telemetry LED ownership that
+  resumes from current telemetry state after X-Ray is removed.
+- X-Ray target selections are runtime-only and start OFF after startup or
+  configuration reload; approved Fresnel parameters persist as project
+  defaults and may be locally overridden without auto-applying X-Ray.
+- In the tested Case 03/current Kit environment, Fabric Scene Delegate did not
+  visually roll back restored bindings. The validated OmniHydra launch
+  workaround is therefore retained; this is a narrow tested runtime limitation,
+  not a general USD lifecycle failure.
+- Combined X-Ray and RTX Flow validation passed on the RTX 3080, including
+  typical X-Ray at approximately 25–27 FPS and all configured X-Ray targets at
+  approximately 20–25+ FPS.
+- The completed Stage 7 runtime contract and validation evidence are preserved
+  in the [Stage 7 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-7---engineering-x-ray-visual-mode-slice).
 - Heavy USD, texture, HDRI, temporal VTI, and future runtime assets stay
   outside the source package and are hydrated through `assets/_external/`.
 - The application source root is `src/digital_twin_runtime_suite/`.
@@ -89,6 +105,10 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 - Completed implementation task: `DC-44` - Stage 5 Full Blackwell Rig server
   review.
 - Completed implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
+- Completed implementation task: `DC-48` - Stage 7 Engineering X-Ray Visual
+  Mode Slice.
+- Next planned implementation task: `DC-46` - Stage 8 Workload-to-Cache State
+  Binding Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
@@ -96,35 +116,45 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-The next runtime slice is Stage 7, Engineering X-Ray. Before implementation,
-confirm the RTX-compatible runtime material path for reversible chassis opacity
-and finalise the camera-local fade thresholds and hysteresis. Keep the accepted
-Stage 6 airflow contract intact: Stage 7 may reveal its internal targets but
-must not replace the VTI, Kit-CAE, Flow, smoke, or operator-persistence route.
+The next runtime slice is Stage 8, Workload-to-Cache State Binding. Before
+implementation, verify that the completed Stage 7 closure is protected by a Git
+checkpoint commit; create one if it is not. Then refine the Stage 8 cache/layer
+mapping contract and connect the existing global workload modes only to real
+hydrated Houdini caches or USD layers.
 
-Do not move `DC-48` to In Progress until active Stage 7 work begins. Publish
-the accepted Stage 6 change set through the normal validation and commit flow
-before that handoff.
+Keep the accepted Stage 6 airflow and Stage 7 X-Ray contracts intact. Stage 8
+must not introduce a parallel workload-state model, fabricate unsupported
+caches, or alter the validated X-Ray material lifecycle. Do not move `DC-46`
+to In Progress until active Stage 8 work begins.
 
 ---
 
 ## Runtime Versioning
 
-Digital Twin Runtime Suite uses semantic versioning for public runtime
-milestones. A minor `0.x.0` release represents a coherent operator-visible
-capability, not an automatic increment for every delivery stage. Patch releases
-such as `0.3.1` are reserved for fixes to an already released milestone.
+Digital Twin Runtime Suite uses a canonical three-component semantic version
+(`x.y.z`) for public runtime milestones. A minor `0.x.0` release represents a
+coherent operator-visible capability, not an automatic increment for every
+delivery stage. Patch releases such as `0.4.1` are reserved for fixes to an
+already released milestone.
 
-The current runtime build is `0.4.0` on the Stage 6-8 release track. The
-last completed release milestone is `0.3.0`, after Stage 5. Future release
-milestones are:
+The canonical version is the sole source of truth for runtime configuration,
+code and package metadata, release history, Git tags, and internal version
+comparisons. The current Stage 7 release is `0.4.0`; subsequent hotfixes use
+`0.4.1`, `0.4.2`, and so on. The next feature release, containing Velocity
+Trails and Thermal Map, is `0.5.0`.
+
+Human-facing application UI derives a display version from the canonical value
+by showing only `x.y`: `0.4.0`, `0.4.1`, and `0.4.2` display as `0.4`, while
+`0.5.0` displays as `0.5`. Display version is never stored independently.
+
+Release milestones are:
 
 | Completed through | Version | Runtime milestone |
 | :--- | :--- | :--- |
 | Stage 4 | `0.2.0` | Telemetry and CPU fan motion. |
 | Stage 5 | `0.3.0` | Full Server Runtime; last completed release. |
-| Stage 8 | `0.4.0` | Cached Simulation Review; current release track. |
-| Stage 10 | `0.5.0` | Server Visual Analytics. |
+| Stage 7 | `0.4.0` | Engineering X-Ray; current release. |
+| Stage 10 | `0.5.0` | Velocity Trails and Thermal Map. |
 | Stage 12 | `0.6.0` | Multi-Scale Runtime Foundation. |
 | Stage 14 | `0.7.0` | Multi-Scale Visual Analytics. |
 | Stage 16 | `0.8.0` | Operational Runtime. |
@@ -138,6 +168,8 @@ Versioning rules:
   intermediate build must be distributed or recorded explicitly;
 - increment the patch number for fixes to a released milestone, not for the
   next roadmap stage;
+- derive every human-facing display version from the canonical major and minor
+  components; never introduce an independently stored UI version;
 - update package, extension, Kit application, runtime config, tests, and public
   documentation version metadata together when a milestone is released;
 - release `1.0.0` only after Stage 17 also passes the end-to-end launch and demo
@@ -619,367 +651,13 @@ Detailed plans for completed runtime stages are preserved in
 | Stage 4 - Telemetry Driven Motion | `DC-43` | Implemented | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
 | Stage 5 - Server Review | `DC-44` | Implemented | [Stage 5 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-5---server-review-slice) |
 | Stage 6 - Cached Simulation Playback | `DC-45` | Implemented | [Stage 6 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice) |
+| Stage 7 - Engineering X-Ray | `DC-48` | Validated | [Stage 7 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-7---engineering-x-ray-visual-mode-slice) |
 
 When a runtime stage is completed, move its detailed plan from this document to
 the completed-stage archive, update this table with a direct link, and keep only
 the active and future stage details here. Cross-stage contracts that still
 govern future work remain in this plan.
 
-### Stage 7 - Engineering X-Ray Visual Mode Slice
-
-Jira: `DC-48`
-
-#### Stage 7.0 - Material recovery and temporary normal-map tuning
-
-0. Record this agreed plan before implementation of the X-Ray Visual Mode slice.
-1. During USD preflight, inspect only materials bound to server meshes. Where a Houdini-exported MaterialX texture map is present but the bound `UsdPreviewSurface` omits the equivalent renderer-facing input, create the missing connection in the session layer. Support base colour, roughness, metallic, normal, opacity and emission maps; never fabricate a map that the asset does not contain.
-2. Keep the master USD untouched. Log every actual repair with the asset id, material path, map role, texture filename and repaired `UsdPreviewSurface` input. Re-running preflight must not duplicate a repair or its log entry.
-3. In `View`, add a permanent `Server Appearance` section. Move the existing `Server enclosure` controls inside it and add a permanent `Materials` subsection.
-4. Inside `Materials`, add only one temporary debug subsection: `Normal Map Scale`. Its single control adjusts the `scale` input of renderer-facing normal-map texture nodes after the material-recovery pass has connected them.
-5. After the intended normal-map values are established, remove or hide only the `Normal Map Scale` debug subsection; retain `Materials`.
-6. Cover the material repair and normal-map scale control with focused automated tests, then perform scoped Kit validation.
-
-
-#### Stage 7.1 - Engineering X-Ray Visual Mode Slice
-
-> [!NOTE] IMPLEMENTATION IN PROGRESS — CUSTOM MDL ISOLATED MATERIAL PROOF VALIDATED
-> The Session Layer override architecture, target UI/configuration, and
-> reversible-binding requirements remain valid. The originally selected
-> `nvidia::core_definitions::surface_falloff` route was rejected after
-> reproducible incorrect behaviour in the tested Kit 110.1 / RTX environment,
-> independently of DTRS runtime authoring; a bug report was submitted to
-> NVIDIA. Stage 7.1 therefore uses a project-owned custom MDL view-angle mask,
-> validated for Base Color, Glossy Roughness, Opacity, and Emission on isolated
-> Cube/Sphere probe geometry in DTRS. Shared-mask interpolation, reversed
-> Roughness endpoints, and live ReviewCamera response are manually validated;
-> production chassis integration remains next.
-
-Release track: `0.4.0` (released on Stage 8 completion).
-
-Introduce a manually controlled, reversible runtime visual override that lets
-the operator inspect internal server components and simulation layers through
-otherwise occluding chassis geometry.
-
-Required scope:
-
-- expose Engineering X-Ray target selection, an `Apply` action, and visible
-  applied or error status;
-- apply runtime or Session Layer overrides without editing authored USD assets
-  or MDL sources;
-- restore the original presentation when a target is unchecked and `Apply` is
-  pressed, on stage reload, and on application startup;
-- initially target the outer chassis and other documented occluding components,
-  including the SilverStone RM44 walls and covers;
-- keep production X-Ray operator values applied only by `Apply`. Live
-  ReviewCamera updates are validated only for the isolated custom-MDL probe;
-  do not extend camera observation, interpolation, or hysteresis to production
-  chassis materials in this slice;
-- author a dedicated runtime-only material override or material binding for
-  the selected logical asset. Do not mutate a shared Houdini-authored chassis
-  material;
-  validate the chosen Omniverse renderer material path before depending on
-  smooth opacity in RTX;
-- retain `Server Enclosure` as the sole owner of top-cover and panel visibility;
-  X-Ray must leave existing visibility choices intact, including when a
-  material reaches zero opacity;
-- establish an override boundary that later LED, heatmap, and other material
-  states can compose with instead of silently replacing.
-
-Implementation contract — material and Session Layer:
-
-- retain the Houdini-authored chassis materials and bindings unchanged;
-- identify the effective material binding on every intended side-panel mesh or
-  geometry subset before authoring an override; a binding on a parent Xform is
-  not assumed to replace stronger descendant bindings;
-- apply the dedicated runtime-only `xray_material` binding through the Session
-  Layer to resolved geometry targets of a selected logical asset, never blindly
-  to a parent Xform. The initial and only debug-selectable target is
-  `Chassis - SilverStone RM44`;
-- `Server Appearance > Materials > X-Ray` must mirror the existing enclosure
-  interaction pattern: its target checkbox is the enable state. When checked,
-  `Apply` authors the X-Ray material override for that target; when unchecked,
-  `Apply` removes that target's X-Ray overrides and restores the original
-  appearance. No separate global X-Ray enable control is required. On
-  application startup and stage reload, X-Ray begins inactive even if the
-  persisted target checkbox remains checked; it becomes active only after a
-  new `Apply`;
-- persist the X-Ray target selection and all exposed X-Ray settings in the
-  local configuration file. Persist logical target identifiers and user values,
-  not transient Session Layer paths or generated MDL prim paths;
-- `xray_material` has two service-oriented parts. Part A is the near-transparent
-  facing surface: expose only opacity and roughness. It should use the source
-  Base Color map from `base_lod00_mat`; otherwise use a configurable lilac
-  fallback Base Color and report the fallback through the UI status channel.
-  Multiple source materials on one selected asset are outside this slice;
-- Part B is the grazing-edge hologram treatment: expose edge colour, opacity,
-  roughness, and emission intensity. Its single edge-colour control drives
-  both Base Color and Emission Color; keep the emission restrained pending
-  renderer validation;
-- reserve one normalised `Edge Falloff` operator control with default `0.5`.
-  Its mapping is an alternative-shader design decision; do not retain an
-  implicit `surface_falloff` / `blend_bias` mapping merely because that was the
-  first candidate;
-- do not expose or plan controls for Part A colour, metalness, IOR, or separate
-  facing and edge weights. X-Ray is a diagnostic material, not a general
-  photorealistic material editor;
-- do not use the X-Ray material as a substitute for existing enclosure
-  presentation controls. X-Ray may modify only its own material bindings and
-  material parameters, never top-cover or side-panel visibility;
-- on disable, stage reload, and shutdown, remove the Session Layer override
-  property specifications rather than authoring an empty binding target, so
-  the lower authored binding becomes effective again;
-- keep runtime-only X-Ray material and binding opinions in a dedicated,
-  transient runtime namespace. Establish the precedence contract with future
-  LED, heatmap, and material-state layers before implementation;
-- validate opacity behaviour, edge emission, and full-server performance before
-  accepting the corresponding production X-Ray phase.
-
-Surface Falloff investigation outcome — rejected implementation path:
-
-- The proposed graph was `Part A` (transparent-facing) and `Part B`
-  (coloured/emissive hologram edge) through
-  `nvidia::core_definitions::surface_falloff`, with
-  `facing_weight`, `edge_weight`, and `blend_bias` controlling the
-  view-dependent blend.
-- DTRS validated the surrounding runtime architecture: all 44 chassis meshes
-  received the intended Session Layer binding; the material terminal and
-  `base`/`blend` connections were composed correctly; Sdr registry types and
-  material-struct metadata matched the registered MDL definition; and the
-  Neuray renderer-side call contained the expected material references and
-  scalar values.
-- In the strongest DTRS control, both inputs referenced the same opaque yellow
-  Part A material, with `facing_weight = 1.0`, `edge_weight = 1.0`, and
-  `blend_bias = 5.0`. Neuray confirmed the same Part A call, yellow diffuse
-  colour `(1.0, 1.0, 0.0)`, and disabled opacity, while RTX rendered an
-  incorrect grey result. The defect is therefore below DTRS USD/MDL graph
-  authoring.
-- The failure was independently reproduced in a clean standalone Kit 110.1
-  Material Graph scene, without DTRS, Python, Session Layers, runtime
-  `UsdShade` authoring, chassis geometry, or DTRS bindings. `Part A` and
-  `Part B` connected directly to Material Output rendered correctly, but
-  `A/A` and `A/B` through Surface Falloff did not. RTX Real-Time 2.0 produced a
-  black/dark result; RTX Interactive (Path Tracing) removed that artifact but
-  still failed to evaluate Blend Material correctly.
-- A minimal reproduction scene and screenshots were submitted to the NVIDIA
-  Developer Forums under `Omniverse → Core Platform → RTX Renderer`. Do not
-  resume debugging or artist-tuning this Surface Falloff graph unless NVIDIA
-  provides new information or a fix.
-- `nvidia::core_definitions::apply_colorfalloff_v2` was separately observed to
-  work view-dependently in RTX Interactive but to be effectively ignored in
-  RTX Real-Time 2.0. This is a related renderer-mode observation, not a proven
-  replacement or the next implementation decision.
-Custom MDL validation outcome:
-
-- `DTRS_Fresnel_Test.mdl` is the selected project-owned replacement path.
-  Its view-angle mask is conceptually derived from `N = state::normal()`,
-  `P = state::position()`, `V = camera_position - P`,
-  `NdotV = abs(dot(N, V))`, and `raw_edge = 1 - NdotV`, then remapped through
-  Edge Center, Edge Softness, and Edge Sharpness.
-- The permanent semantic contract is `mask = 0` for the facing surface and
-  `mask = 1` for the grazing / silhouette edge. `state::direction()` was
-  rejected for this route; the current material explicitly receives the
-  ReviewCamera world position through its `camera_position` input.
-- One project-owned camera-reactive NdotV mask drives all tested material
-  channels:
-
-  ```text
-                          ┌→ Base Color
-                          ├→ Roughness
-  ReviewCamera → NdotV ───┼→ Opacity
-       mask               │
-                          └→ Emission
-  ```
-
-  Edge Center, Edge Softness, and Edge Sharpness remain the shared shape
-  controls for all four consumers.
-
-#### Custom MDL X-Ray material phases
-
-Phase 1 — Base-colour view-angle proof — VALIDATED
-
-- The project-owned custom MDL material is evaluated on isolated Cube and
-  smooth Sphere probe geometry.
-- The same controllable NdotV mask drives interpolation between Facing Color
-  and Edge Color.
-- Edge Center, Edge Softness, and Edge Sharpness have been manually validated.
-- ReviewCamera world position is synchronised live into the MDL
-  `camera_position` input while the probe is active.
-- The mask follows camera movement without requiring Apply or rebuild.
-- Probe creation, parameter updates, cleanup, camera preservation, and live
-  camera synchronisation are covered by focused tests and manual Kit
-  validation.
-
-Phase 2 — Controllable opacity — VALIDATED
-
-Opacity is remapped between independently controllable artist endpoints,
-rather than driven directly by the `0..1` mask output:
-
-```text
-final_opacity =
-    facing_opacity * (1 - mask)
-  + edge_opacity   * mask
-```
-
-Facing Opacity and Edge Opacity have been manually validated on Cube/Sphere
-Probe 01 and remain independently controllable.
-
-Final Probe control pass — Fresnel-driven Glossy Roughness — VALIDATED
-
-- Facing Roughness and Edge Roughness are independent `0..1` artist controls
-  that use the same shared mask:
-
-  ```text
-  final_roughness =
-      facing_roughness * (1 - mask)
-    + edge_roughness   * mask
-  ```
-
-- The endpoints are authored, persisted, and covered by focused tests. They
-  safely clamp in the custom MDL and do not alter Color, Opacity, Emission,
-  Emission Scale, Fresnel shape controls, camera input, live synchronisation,
-  or the performance sampler.
-- The initial `df::diffuse_reflection_bsdf` Oren–Nayar route was rejected
-  because it did not provide PBR-style environment/specular reflections. The
-  corrected material layers a fixed-strength GGX microfacet reflection over a
-  simple diffuse base, with `final_roughness` driving the isotropic GGX
-  `roughness_u` and `roughness_v` inputs.
-- Facing / Edge Roughness, shared Fresnel-mask interpolation, glossy/specular
-  reflection response, reversed endpoint relationship, and live ReviewCamera
-  response are all manually validated on the isolated Cube/Sphere probe.
-
-Phase 3 — Controllable emission — VALIDATED
-
-Emission uses the same mask:
-
-```text
-artist_emission =
-    facing_emission * (1 - mask)
-  + edge_emission   * mask
-```
-
-Manual isolation proved both directions: strong Facing Emission makes the
-facing region emissive, while strong Edge Emission makes the grazing region
-emissive. Early apparently ineffective values were an intensity-scale and
-HDRI/exposure calibration issue, not a Fresnel-routing or MDL surface-emission
-failure.
-
-The debug material additionally applies `final_emission = artist_emission *
-emission_scale`. Facing / Edge Emission define relative artistic balance;
-Emission Scale defines global strength against HDRI/exposure. Emission Scale is
-an artist-facing presentation control, not a calibrated physical unit.
-
-The complete Debug - Custom MDL Fresnel parameter set persists through the
-local `.local.toml` override: Facing Color, Edge Color, Edge Center, Edge
-Softness, Edge Sharpness, Facing Roughness, Edge Roughness, Facing Opacity,
-Edge Opacity, Facing Emission, Edge Emission, and Emission Scale. Only values
-persist; probe geometry, material, and Session Layer state remain transient and
-are not reconstructed at startup.
-
-ReviewCamera position is synchronised live into the custom MDL, so Base Color,
-Glossy Roughness, Opacity, and Emission follow the current view without Apply.
-HUD-backed probe sampling uses the established Stage 6 viewport-statistics
-source and reports FPS, frame time, GPU memory, and process memory every 10
-seconds.
-
-The custom MDL Probe remained interactively usable on the RTX 3080, with most
-rolling ten-second averages during the latest validation around 60–80 FPS;
-transient sampled lows still occurred. As an observed development comparison,
-this was materially more stable than the earlier rejected `surface_falloff`
-experiments, where viewport performance was observed degrading toward
-approximately 20–25 FPS. This is not a controlled benchmark or a universal
-renderer-performance claim.
-
-Phase 4.0 — Production X-Ray binding / ownership lifecycle — VALIDATED
-
-With Fabric Scene Delegate disabled (`/app/useFabricSceneDelegate=false`),
-manual validation confirmed repeated X-Ray cycles: ON bound the Part A control
-material to 40/40 static chassis targets and 4/4 telemetry LED targets; OFF
-restored baseline material bindings for all 40 static targets, left zero
-X-Ray-owned bindings, and resumed LED appearance from current telemetry state.
-No green fallback state, Reload Config, or restart was required.
-
-FSD limitation: in the tested Case 03 / current Kit environment, the same
-lifecycle is problematic specifically with Fabric Scene Delegate enabled:
-USD lifecycle PASS, Fabric binding PASS, viewport rollback FAIL. Launching
-with `--/app/useFabricSceneDelegate=0` restores correctly. Treat this as a
-tested FSD runtime limitation; a minimal standalone reproduction and potential
-NVIDIA bug report are deferred to later work. Do not investigate FSD further in
-this phase.
-
-Phase 4.1A — X-Ray subsystem refactor — VALIDATED
-
-The validated binding lifecycle, material construction, isolated probe, and
-ReviewCamera synchronisation now have clear ownership boundaries before
-production shading becomes more complex. This was a behaviour-preserving
-refactor only.
-
-Phase 4.1B.1 — Production Fresnel material integration — VALIDATED
-
-The temporary `XRayLifecycleControl` payload now uses the validated
-project-owned custom Fresnel MDL from the Cube/Sphere debug proof. Manual
-validation confirmed live ReviewCamera response and preserved production
-ON/OFF restoration.
-
-Phase 4.1B.2 — Remove obsolete Part A controls — VALIDATED
-
-Phase 4.1B.3 — Move Fresnel controls from Debug to X-Ray — VALIDATED
-
-Phase 4.1B.4 — Remove Debug Fresnel probe + cleanup — CURRENT
-
-Phase 4.2 — Full chassis visual/performance tuning — PLANNED
-
-Phase 4.3 — Final pass through the X-Ray codebase to ensure it is sufficiently annotated and commented — PLANNED
-
-Tune and validate the final production chassis appearance and performance only
-after Phase 4.1 integration.
-
-Phase 2 passed before Phase 3. The binding/ownership prerequisite is now
-validated; Phase 4.1B.3 is the current implementation step.
-
-- The isolated custom-material proof is complete for Base Color, Glossy
-  Roughness, Opacity, Emission, Emission Scale, and live ReviewCamera
-  synchronisation; production chassis integration remains unimplemented.
-- Stage 7.1 architecture remains valid: UI/config persistence, logical target
-  selection, Session Layer runtime binding, reversible material override, and
-  `Server Enclosure` visibility ownership. The custom shader proof and the
-  production binding lifecycle are validated; Fresnel control ownership moves
-  from Debug to X-Ray in Phase 4.1B.3.
-
-Implementation notes:
-
-- NVIDIA documents `core_definitions::surface_falloff` as an MDL material
-  modifier with `base`, `blend`, `facing_weight`, `edge_weight`, and
-  `blend_bias` inputs, but it is no longer a viable Stage 7.1 implementation
-  candidate in the tested Kit/RTX stack (see investigation outcome above);
-- for OmniSurface, the candidate facing material must explicitly enable opacity
-  and use `geometry_opacity`; `0.0` is invisible to camera rays and `1.0` is
-  fully opaque. Opacity is the preferred candidate mechanism for the fade;
-  specular transmission is not a substitute for this visibility control;
-- an emissive edge treatment is technically supported, but it must remain
-  restrained. RTX Interactive path tracing can require a higher sample budget
-  to control emissive noise;
-- material binding is applied to a prim through `UsdShade.MaterialBindingAPI`.
-  The eventual runtime inspection must record the effective binding target and
-  winning binding for each proposed X-Ray panel;
-- static runtime-dependency check confirmed that DTRS includes
-  `omni.hydra.rtx`, which resolves the MDL runtime through
-  `omni.mdl.neuraylib` and `omni.kit.usd.mdl`. The resolving Kit release bundles
-  `nvidia::core_definitions::surface_falloff` and OmniSurface MDL modules;
-  adding the Material Graph editor UI extension is neither required nor
-  appropriate for the operator-facing application;
-- the first implementation slice validates the Session Layer graph and its USD
-  wiring with focused tests. The custom MDL Base Color, Opacity, Emission,
-  artist-facing Emission Scale, Glossy Roughness, and live camera-reactive
-  mask are validated. Production full-server integration and performance
-  validation remain next.
-
-Done when Engineering X-Ray can be enabled and disabled reproducibly through
-the target checkbox and `Apply`, uses a validated alternative view-dependent
-shader, restores the original material presentation by removing its own Session
-Layer binding opinions, does not change `Server Enclosure` visibility choices,
-persists its operator settings locally without auto-applying after startup or
-stage reload, reveals the documented internal review targets, and does not dirty
-authored assets.
 
 ### Stage 8 - Workload-to-Cache State Binding Slice
 
@@ -1290,9 +968,8 @@ Required scope:
 - place a global, mutually exclusive `Server | Rack | Data Hall` scale control
   outside the contextual sidebar, with the viewport toolbar as the current
   preferred location;
-- expose a chassis presentation controller with `Auto fade`, `Open`, and
-  `Closed` modes. `Auto fade` uses the Stage 7 camera-aware opacity policy;
-  `Open` and `Closed` use reversible session-layer visibility overrides;
+- expose a chassis presentation controller with `Open` and `Closed` modes
+  using reversible session-layer visibility overrides;
   decide then whether the SilverStone RM44 rack ears remain visible when the
   side panels are open;
 - keep the active scale visible and consolidate or remove duplicated controls;

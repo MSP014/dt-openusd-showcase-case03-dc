@@ -330,9 +330,7 @@ class RuntimeController(FlowRuntimeMixin, XRayRuntimeMixin):
         )
 
     def save_xray_material_override(self, xray: XRayMaterialConfig) -> Path:
-        """Persist Fresnel parameters, never transient X-Ray activation state."""
-
-        xray = replace(xray, chassis_selected=False)
+        """Persist Fresnel parameters, never runtime target selection."""
 
         presentation = replace(
             self.config.chassis_presentation,

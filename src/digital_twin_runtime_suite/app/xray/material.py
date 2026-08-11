@@ -14,7 +14,7 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class XRayApplyResult:
-    """Public result returned by X-Ray production and probe commands."""
+    """Public result returned by production X-Ray lifecycle commands."""
 
     success: bool
     message: str
@@ -99,7 +99,7 @@ class XRayMaterialMixin:
 
     @staticmethod
     def _xray_camera_positions_match(current, authored, tolerance=1.0e-4):
-        """Compare MDL camera vectors without coupling the caller to a probe."""
+        """Compare camera vectors without coupling callers to a material lifecycle."""
 
         if current is None or authored is None:
             raise ValueError("camera position is missing")
