@@ -889,31 +889,46 @@ experiments, where viewport performance was observed degrading toward
 approximately 20–25 FPS. This is not a controlled benchmark or a universal
 renderer-performance claim.
 
-Phase 4 — Production X-Ray chassis integration — NEXT
+Phase 4.0 — Production X-Ray binding / ownership lifecycle — VALIDATED
 
-Transfer the proven Base Color, Glossy Roughness, Opacity, Emission, Emission
-Scale, and live ReviewCamera mask from Cube/Sphere Probe 01 to the selected
-production X-Ray chassis targets.
-Preserve the existing Session Layer-only, reversible material-binding
-architecture, authored Houdini/OpenUSD assets, and Server Enclosure visibility
-ownership. Revalidate performance on real chassis geometry; Probe performance
-is not proof of full-server production performance.
+With Fabric Scene Delegate disabled (`/app/useFabricSceneDelegate=false`),
+manual validation confirmed repeated X-Ray cycles: ON bound the Part A control
+material to 40/40 static chassis targets and 4/4 telemetry LED targets; OFF
+restored baseline material bindings for all 40 static targets, left zero
+X-Ray-owned bindings, and resumed LED appearance from current telemetry state.
+No green fallback state, Reload Config, or restart was required.
 
-Phase 2 passed before Phase 3. Phase 3 passed before production chassis
-integration; Phase 4 is now the next implementation step.
+FSD limitation: in the tested Case 03 / current Kit environment, the same
+lifecycle is problematic specifically with Fabric Scene Delegate enabled:
+USD lifecycle PASS, Fabric binding PASS, viewport rollback FAIL. Launching
+with `--/app/useFabricSceneDelegate=0` restores correctly. Treat this as a
+tested FSD runtime limitation; a minimal standalone reproduction and potential
+NVIDIA bug report are deferred to later work. Do not investigate FSD further in
+this phase.
+
+Phase 4.1 — Custom MDL production integration — NEXT / DEFERRED
+
+Phase 4.1 will replace the temporary Part A lifecycle material with the
+already validated custom Fresnel X-Ray material from the Cube/Sphere debug
+proof, then transfer it to the production RM44 chassis. It does not begin as
+part of Phase 4.0.
+
+Phase 4.2 — Full chassis visual/performance tuning — PLANNED
+
+Tune and validate the final production chassis appearance and performance only
+after Phase 4.1 integration.
+
+Phase 2 passed before Phase 3. The binding/ownership prerequisite is now
+validated; Phase 4.1 is the next deferred implementation step.
 
 - The isolated custom-material proof is complete for Base Color, Glossy
   Roughness, Opacity, Emission, Emission Scale, and live ReviewCamera
   synchronisation; production chassis integration remains unimplemented.
-- Stage 7.1 itself is not blocked: UI/config persistence, logical target
+- Stage 7.1 architecture remains valid: UI/config persistence, logical target
   selection, Session Layer runtime binding, reversible material override, and
-  `Server Enclosure` visibility ownership remain the valid architecture. The
-  custom shading design and isolated material proof are validated; production
-  integration is next, and Stage 7.1 remains implementation in progress.
-- Separately, the known X-Ray OFF lifecycle defect remains open: disabling
-  X-Ray currently leaves a Session Layer material-binding opinion instead of
-  removing the X-Ray-created binding property specification. It was not part of
-  the Surface Falloff investigation and must be fixed independently.
+  `Server Enclosure` visibility ownership. The custom shader proof and the
+  production binding lifecycle are validated; custom-material production
+  integration is explicitly deferred to Phase 4.1.
 
 Implementation notes:
 

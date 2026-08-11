@@ -112,6 +112,29 @@ def xray_material_config_from_models(
     )
 
 
+def xray_lifecycle_config_from_models(
+    chassis_selected_model: Any,
+    part_a_opacity_model: Any,
+    part_a_roughness_model: Any,
+    part_a_fallback_color_model: Any,
+) -> XRayMaterialConfig:
+    """Build the temporarily exposed Phase 4.0 Part A controls only."""
+
+    opacity = float_model_value(part_a_opacity_model)
+    roughness = float_model_value(part_a_roughness_model)
+    for label, value in (("Part A opacity", opacity), ("Part A roughness", roughness)):
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError(f"{label} must be between 0 and 1.")
+    return XRayMaterialConfig(
+        chassis_selected=bool_model_value(chassis_selected_model),
+        part_a_opacity=opacity,
+        part_a_roughness=roughness,
+        part_a_fallback_color=hex_to_rgb(
+            string_model_value(part_a_fallback_color_model)
+        ),
+    )
+
+
 def rgb_to_hex(color: tuple[float, float, float]) -> str:
     """Format a normalized Flow RGB color as an operator-facing HEX value."""
 

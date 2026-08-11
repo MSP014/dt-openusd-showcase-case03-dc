@@ -94,6 +94,15 @@ class XRayApplyResult:
 
 
 @dataclass(frozen=True)
+class XRayRPrimRebuildProbe:
+    target_path: str
+    binding_before_rebuild: str
+    active_before: bool
+    prim_disappeared: bool | None = None
+    active_opinion_removed: bool | None = None
+
+
+@dataclass(frozen=True)
 class FacePanelApplyResult:
     """Result of preparing or applying the runtime front-panel hinge."""
 
@@ -143,7 +152,10 @@ class RuntimeController(FlowRuntimeMixin):
     }
     XRAY_CHASSIS_ROOT_PATH = "/blackwell_rig/chassis"
     XRAY_SOURCE_MATERIAL_PATH = "/blackwell_rig/chassis/mtl/base_lod00_mat"
-    XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/xray_material"
+    XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/XRayLifecycleControl"
+    XRAY_AB_RENDER_PROBE_PATH = (
+        "/blackwell_rig/chassis/geo/render/chassis/front_side/face_grill/face_grill"
+    )
     XRAY_PROBE_ROOT_PATH = "/DTRS_Runtime/Debug/XRayProbe01"
     XRAY_PROBE_MATERIAL_PATH = "/DTRS_Runtime/Debug/Looks/FresnelProbe01"
     XRAY_PROBE_SERVER_PATH = "/blackwell_rig"
@@ -163,9 +175,20 @@ class RuntimeController(FlowRuntimeMixin):
     XRAY_PROBE_SPHERE_LATITUDE_SEGMENTS = 32
     XRAY_PROBE_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
     XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
+    XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
+    XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
     def __init__(self, config_path: Path | str):
         self._config_path = Path(config_path)
+        # Snapshots contain only a previous Session Layer material-binding
+        # property spec, never prim or stage references.  They make X-Ray an
+        # overlay rather than an owner of somebody else's Session opinion.
+        self._xray_session_binding_layer_id: str | None = None
+        self._xray_session_binding_snapshots: dict[str, object] = {}
+        self._xray_baseline_composed_bindings: dict[str, str] = {}
+        self._xray_last_lifecycle_diagnostics: list[dict[str, object]] = []
+        self._front_panel_indicator_last_snapshot = None
+        self._front_panel_indicator_last_state = None
         self._xray_probe_visibility_state: tuple[bool, object | None] | None = None
         self._xray_probe_server_bbox_snapshot = None
         self._xray_probe_last_values = None
@@ -175,6 +198,11 @@ class RuntimeController(FlowRuntimeMixin):
         self._xray_probe_performance_next_log_at: float | None = None
         self._xray_probe_performance_interval_started_at: float | None = None
         self._xray_probe_performance_samples: list[ViewportPerformanceSample] = []
+        self._xray_material_performance_started_at: float | None = None
+        self._xray_material_performance_next_sample_at: float | None = None
+        self._xray_material_performance_next_log_at: float | None = None
+        self._xray_material_performance_interval_started_at: float | None = None
+        self._xray_material_performance_samples: list[ViewportPerformanceSample] = []
         self.config = RuntimeConfig.load(self._config_path)
         self._simulation_cache_contract: SimulationCacheContract | None = None
         self._simulation_cache_time_code: int | None = None
@@ -907,6 +935,8 @@ class RuntimeController(FlowRuntimeMixin):
             lan_01_metric_id=indicators.lan_01_metric_id,
             lan_02_metric_id=indicators.lan_02_metric_id,
         )
+        self._front_panel_indicator_last_snapshot = snapshot
+        self._front_panel_indicator_last_state = state
         state_key = (id(stage), state.power, state.hdd, state.lan_01, state.lan_02)
         if state_key == self._front_panel_indicator_state_key:
             return True
@@ -1258,7 +1288,7 @@ class RuntimeController(FlowRuntimeMixin):
 
         import carb
         import omni.usd
-        from pxr import Usd, UsdShade
+        from pxr import Gf, Sdf, Usd, UsdShade
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
@@ -1268,41 +1298,55 @@ class RuntimeController(FlowRuntimeMixin):
         stage.SetEditTarget(stage.GetSessionLayer())
         try:
             if not xray.chassis_selected:
-                removed_count = self._clear_xray_session_overrides(stage, Usd, UsdShade)
-                carb.log_warn(
-                    self._format_xray_action_state(
-                        stage,
-                        Usd,
-                        UsdShade,
-                        action="Apply / X-Ray OFF",
-                        requested_selected=False,
-                        result=(
-                            f"removed_session_xray_bindings={removed_count}; "
-                            "original bindings compose naturally"
-                        ),
+                removed_count, diagnostics = self._clear_xray_session_overrides(
+                    stage, Sdf, Usd, UsdShade
+                )
+                led_reapplied, led_matches_current_state = (
+                    self._reapply_front_panel_indicator_current_state(
+                        stage, Gf, Sdf, Usd, UsdShade
                     )
+                )
+                self._log_xray_lifecycle_diagnostic(
+                    carb,
+                    action="OFF",
+                    formatter=lambda: self._format_xray_lifecycle_diagnostics(
+                        "OFF",
+                        diagnostics,
+                        led_current_state_reapplied=led_reapplied,
+                        led_binding_matches_current_state=led_matches_current_state,
+                    ),
                 )
                 return XRayApplyResult(
                     True,
                     "X-Ray removed; original chassis materials restored.",
                     removed_count,
                 )
-            carb.log_warn(
-                self._format_xray_action_state(
-                    stage,
-                    Usd,
-                    UsdShade,
-                    action="Apply / X-Ray ON",
-                    requested_selected=True,
-                    result=(
-                        "rejected shader is unavailable; "
-                        "no runtime material mutation"
-                    ),
+            try:
+                target_count, diagnostics = self._apply_xray_session_overrides(
+                    stage, xray, Gf, Sdf, Usd, UsdShade
                 )
+            except RuntimeError as error:
+                carb.log_error(
+                    self._format_xray_lifecycle_diagnostics(
+                        "ON FAILED", self._xray_last_lifecycle_diagnostics
+                    )
+                    + f"\n  error: {error}"
+                )
+                carb.log_error(f"DTRS X-Ray apply failed: {error}")
+                return XRayApplyResult(False, f"X-Ray apply failed: {error}")
+            self._start_xray_material_performance_sampler()
+            self._log_xray_lifecycle_diagnostic(
+                carb,
+                action="ON",
+                formatter=lambda: self._format_xray_lifecycle_diagnostics(
+                    "ON", diagnostics
+                ),
             )
             return XRayApplyResult(
-                False,
-                "X-Ray shading unavailable: alternative shader pending validation.",
+                True,
+                "X-Ray Part A control material applied.",
+                target_count,
+                used_fallback_color=True,
             )
         finally:
             stage.SetEditTarget(previous_target)
@@ -1548,6 +1592,128 @@ class RuntimeController(FlowRuntimeMixin):
         self._xray_probe_performance_interval_started_at = sample.captured_at
         self._xray_probe_performance_next_log_at = (
             now + self.XRAY_PROBE_PERFORMANCE_LOG_INTERVAL_SECONDS
+        )
+
+    def advance_xray_material_performance_sampler_in_kit(self) -> bool:
+        """Sample production X-Ray only while its transient material is active."""
+
+        import carb
+        import omni.usd
+
+        try:
+            stage = omni.usd.get_context().get_stage()
+            material = stage.GetPrimAtPath(self.XRAY_MATERIAL_PATH) if stage else None
+            if not material or not material.IsValid():
+                self._stop_xray_material_performance_sampler()
+                return False
+            self._advance_xray_material_performance_sampler(carb)
+            return True
+        except Exception as error:  # Diagnostics must not interrupt Kit updates.
+            self._log_xray_lifecycle_diagnostic(
+                carb,
+                action="PERFORMANCE",
+                formatter=lambda error=error: (_ for _ in ()).throw(error),
+            )
+            return False
+
+    def _start_xray_material_performance_sampler(self) -> None:
+        """Start a HUD-backed interval for one production X-Ray activation."""
+
+        initial_sample = self._capture_xray_fresnel_probe_performance_sample()
+        started_at = initial_sample.captured_at
+        self._xray_material_performance_started_at = started_at
+        self._xray_material_performance_next_sample_at = (
+            started_at + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
+        )
+        self._xray_material_performance_next_log_at = (
+            started_at + self.XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS
+        )
+        self._xray_material_performance_interval_started_at = started_at
+        self._xray_material_performance_samples = [initial_sample]
+
+    def _stop_xray_material_performance_sampler(self) -> None:
+        self._xray_material_performance_started_at = None
+        self._xray_material_performance_next_sample_at = None
+        self._xray_material_performance_next_log_at = None
+        self._xray_material_performance_interval_started_at = None
+        self._xray_material_performance_samples = []
+
+    def _advance_xray_material_performance_sampler(self, carb) -> None:
+        started_at = self._xray_material_performance_started_at
+        next_sample_at = self._xray_material_performance_next_sample_at
+        next_log_at = self._xray_material_performance_next_log_at
+        if started_at is None or next_sample_at is None or next_log_at is None:
+            self._start_xray_material_performance_sampler()
+            return
+        now = time.monotonic()
+        if now < next_sample_at:
+            return
+        try:
+            sample = self._capture_xray_fresnel_probe_performance_sample()
+        except Exception as error:
+            self._xray_material_performance_next_sample_at = (
+                now + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
+            )
+            self._log_xray_lifecycle_diagnostic(
+                carb,
+                action="PERFORMANCE",
+                formatter=lambda error=error: (_ for _ in ()).throw(error),
+            )
+            return
+        self._xray_material_performance_samples.append(sample)
+        self._xray_material_performance_next_sample_at = (
+            now + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
+        )
+        if now < next_log_at:
+            return
+        interval_started_at = self._xray_material_performance_interval_started_at
+        interval_samples = [
+            item
+            for item in self._xray_material_performance_samples
+            if interval_started_at is None or item.captured_at >= interval_started_at
+        ]
+        self._log_xray_lifecycle_diagnostic(
+            carb,
+            action="PERFORMANCE",
+            formatter=lambda: self._format_xray_material_performance_interval(
+                interval_samples
+            ),
+        )
+        self._xray_material_performance_interval_started_at = sample.captured_at
+        self._xray_material_performance_next_log_at = (
+            now + self.XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS
+        )
+
+    def _format_xray_material_performance_interval(
+        self, samples: list[ViewportPerformanceSample]
+    ) -> str:
+        performance = self._xray_fresnel_probe_performance_state(samples)
+        latest = samples[-1] if samples else None
+        started_at = self._xray_material_performance_started_at
+        elapsed = (
+            latest.captured_at - started_at
+            if latest is not None and started_at is not None
+            else None
+        )
+        elapsed_text = f"{elapsed:.1f} s" if elapsed is not None else "<unavailable>"
+        return "\n".join(
+            (
+                "DTRS X-Ray binding lifecycle - PERFORMANCE",
+                f"  elapsed={elapsed_text}",
+                f"  control_material_path={self.XRAY_MATERIAL_PATH}",
+                f"  samples={len(samples)}",
+                "  FPS: "
+                f"current={performance['fps_current']}; "
+                f"average={performance['probe_avg_fps']}; "
+                f"minimum={performance['probe_min_fps']}; "
+                f"maximum={performance['probe_max_fps']}",
+                "  Frame time: "
+                f"current={performance['frame_time_ms_current']} ms; "
+                f"average={performance['probe_avg_frame_time_ms']} ms",
+                "  Memory: "
+                f"gpu_used_gib={performance['gpu_used_gib']}; "
+                f"process_used_gib={performance['process_used_gib']}",
+            )
         )
 
     def _xray_fresnel_probe_performance_state(
@@ -2331,8 +2497,9 @@ class RuntimeController(FlowRuntimeMixin):
     def clear_xray_material_in_kit(self) -> XRayApplyResult:
         """Clear transient X-Ray bindings without changing persisted UI settings."""
 
+        import carb
         import omni.usd
-        from pxr import Usd, UsdShade
+        from pxr import Gf, Sdf, Usd, UsdShade
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
@@ -2340,13 +2507,309 @@ class RuntimeController(FlowRuntimeMixin):
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
         try:
-            removed_count = self._clear_xray_session_overrides(stage, Usd, UsdShade)
+            removed_count, diagnostics = self._clear_xray_session_overrides(
+                stage, Sdf, Usd, UsdShade
+            )
+            led_reapplied, led_matches_current_state = (
+                self._reapply_front_panel_indicator_current_state(
+                    stage, Gf, Sdf, Usd, UsdShade
+                )
+            )
         finally:
             stage.SetEditTarget(previous_target)
+        self._log_xray_lifecycle_diagnostic(
+            carb,
+            action="OFF / cleanup",
+            formatter=lambda: self._format_xray_lifecycle_diagnostics(
+                "OFF / cleanup",
+                diagnostics,
+                led_current_state_reapplied=led_reapplied,
+                led_binding_matches_current_state=led_matches_current_state,
+            ),
+        )
         return XRayApplyResult(
             True,
             "X-Ray disabled; original chassis materials restored.",
             removed_count,
+        )
+
+    def diagnose_xray_usd_fabric_after_off_in_kit(
+        self, *, target_path: str, timing: str
+    ) -> None:
+        """Compare one post-OFF binding against the current attached Fabric stage."""
+
+        import carb
+        import omni.usd
+        from pxr import UsdShade
+
+        try:
+            context = omni.usd.get_context()
+            stage = context.get_stage()
+            target = stage.GetPrimAtPath(target_path) if stage else None
+            if not target:
+                raise RuntimeError("representative static chassis mesh is unavailable")
+            usd_binding = self._xray_composed_material_path(target, UsdShade)
+            fabric_binding, _fabric_stage = self._xray_fabric_material_path(
+                context, target.GetPath()
+            )
+            self._log_xray_lifecycle_diagnostic(
+                carb,
+                action=f"USD/Fabric {timing}",
+                formatter=lambda: self._format_xray_usd_fabric_diagnostic(
+                    timing,
+                    target.GetPath(),
+                    usd_binding,
+                    fabric_binding,
+                ),
+            )
+        except Exception as error:
+            carb.log_warn(
+                "DTRS X-Ray USD/Fabric diagnostic\n"
+                f"  timing={timing}\n"
+                f"  diagnostic: <inspection failed: {error}>"
+            )
+
+    def _capture_xray_ab_original_material_baseline(self, stage, UsdShade) -> None:
+        try:
+            target = stage.GetPrimAtPath(self.XRAY_AB_RENDER_PROBE_PATH)
+            if not target or not target.IsValid():
+                self._xray_ab_original_material_fingerprint = None
+                return
+            material, _binding = UsdShade.MaterialBindingAPI(
+                target
+            ).ComputeBoundMaterial()
+            if not material or not material.GetPrim().IsValid():
+                self._xray_ab_original_material_fingerprint = None
+                return
+            self._xray_ab_original_material_fingerprint = (
+                self._xray_material_fingerprint(stage, target, UsdShade)
+            )
+        except Exception:
+            self._xray_ab_original_material_fingerprint = None
+
+    def _log_xray_ab_original_material_after_off(self, stage, UsdShade) -> None:
+        import carb
+
+        try:
+            target = stage.GetPrimAtPath(self.XRAY_AB_RENDER_PROBE_PATH)
+            fingerprint = (
+                self._xray_material_fingerprint(stage, target, UsdShade)
+                if target and target.IsValid()
+                else None
+            )
+            original_material_network_match = bool(
+                fingerprint
+                and self._xray_ab_original_material_fingerprint == fingerprint
+            )
+            original_material_path = (
+                fingerprint["material"] if fingerprint else "<none>"
+            )
+            material_session_spec = stage.GetSessionLayer().GetPrimAtPath(
+                original_material_path
+            )
+            session_override_count = (
+                len(material_session_spec.properties) if material_session_spec else 0
+            )
+            carb.log_warn(
+                "DTRS X-Ray A/B material baseline\n"
+                f"  target={self.XRAY_AB_RENDER_PROBE_PATH}\n"
+                f"  original_material={original_material_path}\n"
+                "  original_material_network_match="
+                f"{original_material_network_match}\n"
+                "  session_overrides_on_original_material="
+                f"{session_override_count}"
+            )
+        except Exception as error:
+            carb.log_warn(
+                "DTRS X-Ray A/B material baseline\n"
+                f"  diagnostic: <inspection failed: {error}>"
+            )
+
+    def apply_xray_ab_render_probe_in_kit(self, phase: str) -> bool:
+        """Bind one visible render prim for manual A/B observation only."""
+
+        import carb
+        import omni.usd
+        from pxr import UsdShade
+
+        try:
+            stage = omni.usd.get_context().get_stage()
+            target = (
+                stage.GetPrimAtPath(self.XRAY_AB_RENDER_PROBE_PATH) if stage else None
+            )
+            if not target or not target.IsValid():
+                raise RuntimeError("configured render face_grill target is unavailable")
+            if phase == "A":
+                material = UsdShade.Material.Get(stage, self.XRAY_MATERIAL_PATH)
+            elif phase == "B" and self._xray_ab_original_material_fingerprint:
+                material = UsdShade.Material.Get(
+                    stage, self._xray_ab_original_material_fingerprint["material"]
+                )
+            else:
+                raise RuntimeError("original A/B material baseline is unavailable")
+            if not material or not material.GetPrim().IsValid():
+                raise RuntimeError(f"A/B material for phase {phase} is unavailable")
+            previous_target = stage.GetEditTarget()
+            stage.SetEditTarget(stage.GetSessionLayer())
+            try:
+                UsdShade.MaterialBindingAPI.Apply(target).Bind(material)
+            finally:
+                stage.SetEditTarget(previous_target)
+            return True
+        except Exception as error:
+            carb.log_warn(
+                "DTRS X-Ray A/B visual probe\n"
+                f"  phase={phase}\n"
+                f"  diagnostic: <inspection failed: {error}>"
+            )
+            return False
+
+    def log_xray_ab_render_probe_phase_in_kit(self, phase: str) -> None:
+        import carb
+        import omni.usd
+        from pxr import UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        target = stage.GetPrimAtPath(self.XRAY_AB_RENDER_PROBE_PATH) if stage else None
+        binding = (
+            self._xray_composed_material_path(target, UsdShade) if target else "<none>"
+        )
+        carb.log_warn(
+            "DTRS X-Ray A/B visual probe\n"
+            f"  phase={phase}\n"
+            f"  target={self.XRAY_AB_RENDER_PROBE_PATH}\n"
+            f"  binding={binding}"
+        )
+
+    def start_xray_hydra_rprim_rebuild_probe_in_kit(
+        self,
+    ) -> XRayRPrimRebuildProbe | None:
+        """Remove one render rprim from participation for exactly one Kit update."""
+
+        import carb
+        import omni.usd
+        from pxr import UsdShade
+
+        try:
+            stage = omni.usd.get_context().get_stage()
+            target = (
+                stage.GetPrimAtPath(self.XRAY_AB_RENDER_PROBE_PATH) if stage else None
+            )
+            if not target or not target.IsValid():
+                raise RuntimeError("configured render face_grill target is unavailable")
+            probe = XRayRPrimRebuildProbe(
+                target_path=self.XRAY_AB_RENDER_PROBE_PATH,
+                binding_before_rebuild=self._xray_composed_material_path(
+                    target, UsdShade
+                ),
+                active_before=target.IsActive(),
+            )
+            previous_target = stage.GetEditTarget()
+            stage.SetEditTarget(stage.GetSessionLayer())
+            try:
+                target.SetActive(False)
+            finally:
+                stage.SetEditTarget(previous_target)
+            return probe
+        except Exception as error:
+            carb.log_warn(
+                "DTRS X-Ray rprim rebuild probe\n"
+                f"  diagnostic: <inspection failed: {error}>"
+            )
+            return None
+
+    def restore_xray_hydra_rprim_rebuild_probe_in_kit(
+        self, probe: XRayRPrimRebuildProbe
+    ) -> XRayRPrimRebuildProbe:
+        """Remove our Session active opinion; never author active=true as restore."""
+
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        target = stage.GetPrimAtPath(probe.target_path) if stage else None
+        prim_disappeared = bool(target and not target.IsActive())
+        session = stage.GetSessionLayer() if stage else None
+        prim_spec = session.GetPrimAtPath(probe.target_path) if session else None
+        if prim_spec is None:
+            raise RuntimeError("temporary Session active opinion is missing")
+        prim_spec.ClearInfo("active")
+        active_opinion_removed = not prim_spec.HasInfo("active")
+        return XRayRPrimRebuildProbe(
+            target_path=probe.target_path,
+            binding_before_rebuild=probe.binding_before_rebuild,
+            active_before=probe.active_before,
+            prim_disappeared=prim_disappeared,
+            active_opinion_removed=active_opinion_removed,
+        )
+
+    def log_xray_hydra_rprim_rebuild_probe_in_kit(
+        self, probe: XRayRPrimRebuildProbe
+    ) -> None:
+        import carb
+        import omni.usd
+        from pxr import UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        target = stage.GetPrimAtPath(probe.target_path) if stage else None
+        binding_after = self._xray_composed_material_path(target, UsdShade)
+        carb.log_warn(
+            "DTRS X-Ray rprim rebuild probe\n"
+            f"  target={probe.target_path}\n"
+            f"  binding_before_rebuild={probe.binding_before_rebuild}\n"
+            f"  active_before={probe.active_before}\n"
+            f"  prim_disappeared={probe.prim_disappeared}\n"
+            f"  active_opinion_removed={probe.active_opinion_removed}\n"
+            f"  binding_after_rebuild={binding_after}"
+        )
+
+    @staticmethod
+    def _xray_composed_material_path(prim, UsdShade) -> str:
+        material, _binding = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+        return str(material.GetPath()) if material else "<none>"
+
+    @staticmethod
+    def _xray_fabric_material_path(context, target_path):
+        """Attach only to Kit's current stage ID; never construct a second scene."""
+
+        try:
+            import usdrt
+            from usdrt import Sdf as RtSdf
+
+            fabric_stage = usdrt.Usd.Stage.Attach(context.get_stage_id())
+            fabric_stage.SynchronizeToFabric()
+            fabric_prim = fabric_stage.GetPrimAtPath(RtSdf.Path(str(target_path)))
+            if not fabric_prim or not fabric_prim.IsValid():
+                return "<unavailable: target absent>", fabric_stage
+            relationship = fabric_prim.GetRelationship("material:binding")
+            targets = relationship.GetTargets() if relationship else []
+            return (str(targets[0]) if targets else "<none>"), fabric_stage
+        except Exception as error:
+            return f"<unavailable: {error}>", None
+
+    @staticmethod
+    def _format_xray_usd_fabric_diagnostic(
+        timing, target, usd_binding, fabric_binding
+    ) -> str:
+        match = usd_binding == fabric_binding
+        if fabric_binding.startswith("<unavailable:"):
+            classification = "Fabric probe unavailable"
+        elif match:
+            classification = (
+                "USD PASS; Fabric PASS; green viewport would be downstream "
+                "Hydra/RTX state FAIL"
+            )
+        else:
+            classification = "USD PASS; Fabric STALE"
+        return "\n".join(
+            (
+                "DTRS X-Ray USD/Fabric diagnostic",
+                f"  timing={timing}",
+                f"  target={target}",
+                f"  usd_binding={usd_binding}",
+                f"  fabric_binding={fabric_binding}",
+                f"  match={match}",
+                f"  classification={classification}",
+            )
         )
 
     @classmethod
@@ -2477,71 +2940,6 @@ class RuntimeController(FlowRuntimeMixin):
             "identical" if not differences else "different: " + ", ".join(differences)
         )
 
-    @classmethod
-    def _xray_graph_diagnostic_lines(
-        cls, stage, material, representative, Sdf, UsdShade
-    ) -> list[str]:
-        """Expose composed MDL connections and the small session-layer fragment."""
-
-        part_a = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartA")
-        part_b = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/PartB")
-        falloff = UsdShade.Shader.Get(stage, f"{cls.XRAY_MATERIAL_PATH}/SurfaceFalloff")
-        terminal = material.GetSurfaceOutput("mdl")
-        session = stage.GetSessionLayer()
-        representative_session_spec = (
-            session.GetPrimAtPath(representative.GetPath()) if representative else None
-        )
-        part_b_emission_intensity = cls._xray_input_value(part_b, "emission_intensity")
-        part_b_base_owner = cls._xray_property_owners(
-            part_b.GetInput("diffuse_reflection_color")
-        )
-        part_b_emission_owner = cls._xray_property_owners(
-            part_b.GetInput("emission_color")
-        )
-        lines = [
-            "  xray_graph:",
-            f"    material.outputs:mdl:surface -> {cls._xray_connection(terminal)}",
-            f"    terminal_owner: {cls._xray_property_owners(terminal)}",
-            "    session_specs: "
-            f"material={bool(session.GetPrimAtPath(material.GetPath()))}; "
-            f"representative_binding={bool(representative_session_spec)}",
-            "    SurfaceFalloff: "
-            f"asset={cls._xray_shader_asset(falloff)}; "
-            f"subIdentifier={cls._xray_shader_subidentifier(falloff)}; "
-            f"output={cls._xray_output(falloff, 'out')}",
-            f"      base -> {cls._xray_connection(falloff.GetInput('base'))}",
-            f"      blend -> {cls._xray_connection(falloff.GetInput('blend'))}",
-            "      weights: "
-            f"facing={cls._xray_input_value(falloff, 'facing_weight')}; "
-            f"edge={cls._xray_input_value(falloff, 'edge_weight')}; "
-            f"bias={cls._xray_input_value(falloff, 'blend_bias')}",
-            "    PartA: "
-            f"asset={cls._xray_shader_asset(part_a)}; "
-            f"subIdentifier={cls._xray_shader_subidentifier(part_a)}; "
-            f"output={cls._xray_output(part_a, 'out')}",
-            "    PartB: "
-            f"asset={cls._xray_shader_asset(part_b)}; "
-            f"subIdentifier={cls._xray_shader_subidentifier(part_b)}; "
-            f"output={cls._xray_output(part_b, 'out')}",
-            "      composed: "
-            f"base_color={cls._xray_input_value(part_b, 'diffuse_reflection_color')}; "
-            f"emission_color={cls._xray_input_value(part_b, 'emission_color')}; "
-            f"emission_intensity={part_b_emission_intensity}",
-            "    owners: "
-            f"material={cls._xray_prim_owners(material.GetPrim())}; "
-            f"PartA={cls._xray_prim_owners(part_a.GetPrim())}; "
-            f"PartB={cls._xray_prim_owners(part_b.GetPrim())}; "
-            f"SurfaceFalloff={cls._xray_prim_owners(falloff.GetPrim())}",
-            "    input_owners: "
-            f"base={cls._xray_property_owners(falloff.GetInput('base'))}; "
-            f"blend={cls._xray_property_owners(falloff.GetInput('blend'))}; "
-            f"PartB.base={part_b_base_owner}; "
-            f"PartB.emission={part_b_emission_owner}",
-            "  session_fragment:",
-            cls._xray_session_fragment(stage, representative, Sdf),
-        ]
-        return lines
-
     @staticmethod
     def _xray_input_value(shader, name: str) -> str:
         shader_input = shader.GetInput(name) if shader else None
@@ -2611,101 +3009,367 @@ class RuntimeController(FlowRuntimeMixin):
         exported = fragment.ExportToString().strip()
         return "\n".join(f"    {line}" for line in exported.splitlines())
 
-    @classmethod
-    def _clear_xray_session_overrides(cls, stage, Usd, UsdShade) -> int:
-        """Remove X-Ray-owned session specs and reveal weaker authored bindings."""
+    def _clear_xray_session_overrides(self, stage, Sdf, Usd, UsdShade):
+        """Remove only X-Ray's binding specs and restore prior Session opinions."""
 
+        self._discard_stale_xray_binding_snapshots(stage)
         removed_count = 0
-        xray_path = str(cls.XRAY_MATERIAL_PATH)
-        root = stage.GetPrimAtPath(cls.XRAY_CHASSIS_ROOT_PATH)
-        if not root or not root.IsValid():
-            stage.RemovePrim(cls.XRAY_MATERIAL_PATH)
-            return removed_count
-        for prim in Usd.PrimRange(root):
-            if prim.GetTypeName() != "Mesh":
-                continue
-            direct_binding = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
-            target_paths = {str(path) for path in direct_binding.GetTargets()}
-            if xray_path in target_paths:
-                # Removing the relationship through Usd keeps normal stage change
-                # notices while deleting only this Session Layer opinion.  Do not
-                # rebind the resolved source material: its authored binding then
-                # composes naturally from the weaker asset layer.
-                prim.RemoveProperty(direct_binding.GetName())
+        diagnostics = []
+        root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
+        if root and root.IsValid():
+            records = []
+            for prim in Usd.PrimRange(root):
+                if prim.GetTypeName() != "Mesh":
+                    continue
+                relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+                property_path = relation.GetPath()
+                if not self._session_binding_is_xray_owned(stage, property_path):
+                    continue
+                records.append(
+                    (
+                        prim,
+                        relation,
+                        property_path,
+                        self._xray_binding_lifecycle_snapshot(
+                            stage, prim, relation, UsdShade
+                        ),
+                    )
+                )
+            with Sdf.ChangeBlock():
+                for _prim, _relation, property_path, _before in records:
+                    self._remove_xray_session_binding_spec(stage, property_path)
+                    prior = self._xray_session_binding_snapshots.pop(
+                        str(property_path), None
+                    )
+                    if prior is not None:
+                        self._restore_xray_session_binding_spec(
+                            stage, property_path, prior, Sdf
+                        )
+            cleanup_failures = []
+            for prim, relation, property_path, before in records:
+                after = self._xray_binding_lifecycle_snapshot(
+                    stage, prim, relation, UsdShade
+                )
+                if after["xray_owned_session_binding_after"]:
+                    cleanup_failures.append(str(property_path))
+                diagnostics.append(
+                    {
+                        "before": before,
+                        "after": after,
+                        "is_led": self._is_xray_led_prim(prim),
+                        "baseline_match": (
+                            self._xray_baseline_composed_bindings.get(
+                                str(property_path)
+                            )
+                            == after["composed_binding"]
+                        ),
+                    }
+                )
                 removed_count += 1
-        stage.RemovePrim(cls.XRAY_MATERIAL_PATH)
-        return removed_count
+            if cleanup_failures:
+                raise RuntimeError(
+                    "X-Ray binding cleanup did not remove: "
+                    + ", ".join(cleanup_failures)
+                )
+        self._stop_xray_material_performance_sampler()
+        self._xray_session_binding_snapshots.clear()
+        self._xray_baseline_composed_bindings.clear()
+        self._xray_last_lifecycle_diagnostics = diagnostics
+        return removed_count, diagnostics
+
+    def _apply_xray_session_overrides(self, stage, xray, Gf, Sdf, Usd, UsdShade):
+        """Bind the simple Part A control material to resolved chassis meshes."""
+
+        self._discard_stale_xray_binding_snapshots(stage)
+        root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
+        if not root or not root.IsValid():
+            raise RuntimeError("X-Ray chassis target root is unavailable.")
+        self._define_xray_control_material(stage, xray, Gf, Sdf, UsdShade)
+        diagnostics = []
+        target_count = 0
+        try:
+            records = []
+            for prim in Usd.PrimRange(root):
+                if prim.GetTypeName() != "Mesh":
+                    continue
+                relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+                property_path = relation.GetPath()
+                before = self._xray_binding_lifecycle_snapshot(
+                    stage, prim, relation, UsdShade
+                )
+                if not self._session_binding_is_xray_owned(stage, property_path):
+                    self._capture_xray_session_binding_spec(stage, property_path, Sdf)
+                    self._xray_baseline_composed_bindings.setdefault(
+                        str(property_path), before["composed_binding"]
+                    )
+                records.append((prim, relation, property_path, before))
+            with Sdf.ChangeBlock():
+                for _prim, _relation, property_path, _before in records:
+                    self._author_xray_session_binding_spec(stage, property_path, Sdf)
+            failures = []
+            for prim, relation, property_path, before in records:
+                after = self._xray_binding_lifecycle_snapshot(
+                    stage, prim, relation, UsdShade
+                )
+                diagnostics.append(
+                    {
+                        "before": before,
+                        "after": after,
+                        "is_led": self._is_xray_led_prim(prim),
+                    }
+                )
+                if not after["xray_owned_session_binding_after"]:
+                    failures.append(str(property_path))
+                target_count += 1
+            if failures:
+                mismatch_paths = self._format_xray_mismatch_paths(failures)
+                raise RuntimeError(
+                    "X-Ray binding mismatch_count="
+                    f"{len(failures)}; paths={mismatch_paths}"
+                )
+        except Exception:
+            failed_diagnostics = diagnostics
+            self._clear_xray_session_overrides(stage, Sdf, Usd, UsdShade)
+            self._reapply_front_panel_indicator_current_state(
+                stage, Gf, Sdf, Usd, UsdShade
+            )
+            self._xray_last_lifecycle_diagnostics = failed_diagnostics
+            raise
+        self._xray_last_lifecycle_diagnostics = diagnostics
+        return target_count, diagnostics
 
     @classmethod
-    def _define_xray_material(
-        cls,
-        stage,
-        surface_falloff_weights: tuple[float, float],
-        blend_part: str,
-        Gf,
-        Sdf,
-        UsdShade,
-        UsdMdl=None,
-    ):
-        """Author the temporary opaque yellow/blue Surface Falloff isolation graph."""
-
-        if UsdMdl is None:
-            import omni.UsdMdl as UsdMdl
+    def _define_xray_control_material(cls, stage, xray, Gf, Sdf, UsdShade):
+        """Create once per stage; update only Part A controls on later ON cycles."""
 
         material_path = Sdf.Path(cls.XRAY_MATERIAL_PATH)
         material = UsdShade.Material.Define(stage, material_path)
-        part_a = cls._define_omni_surface_part(
-            stage,
-            material_path.AppendChild("PartA"),
-            cls.XRAY_ISOLATION_PART_A_COLOR,
-            cls.XRAY_ISOLATION_ROUGHNESS,
-            Gf,
-            Sdf,
-            UsdShade,
+        shader = UsdShade.Shader.Define(stage, material_path.AppendChild("PartA"))
+        shader.CreateImplementationSourceAttr().Set(UsdShade.Tokens.sourceAsset)
+        shader.SetSourceAsset(Sdf.AssetPath("OmniSurface.mdl"), "mdl")
+        shader.SetSourceAssetSubIdentifier("OmniSurface", "mdl")
+        shader.CreateInput("diffuse_reflection_color", Sdf.ValueTypeNames.Color3f).Set(
+            Gf.Vec3f(*xray.part_a_fallback_color)
         )
-        part_b = cls._define_omni_surface_part(
-            stage,
-            material_path.AppendChild("PartB"),
-            cls.XRAY_ISOLATION_PART_B_COLOR,
-            cls.XRAY_ISOLATION_ROUGHNESS,
-            Gf,
-            Sdf,
-            UsdShade,
-        )
-        falloff = UsdShade.Shader.Define(
-            stage, material_path.AppendChild("SurfaceFalloff")
-        )
-        falloff.CreateImplementationSourceAttr().Set(UsdShade.Tokens.sourceAsset)
-        falloff.SetSourceAsset(Sdf.AssetPath("nvidia/core_definitions.mdl"), "mdl")
-        falloff.SetSourceAssetSubIdentifier("surface_falloff", "mdl")
-        shader_node = UsdMdl.RegistryUtils.GetShaderNodeForPrim(falloff.GetPrim())
-        if not shader_node:
-            raise RuntimeError(
-                "MDL registry could not resolve "
-                "nvidia/core_definitions.mdl::surface_falloff."
+        for name in ("diffuse_reflection_roughness", "specular_reflection_roughness"):
+            shader.CreateInput(name, Sdf.ValueTypeNames.Float).Set(
+                xray.part_a_roughness
             )
-        falloff.SetSdrMetadata(shader_node.GetMetadata())
-        cls._create_mdl_registry_input(
-            falloff, shader_node, "base", Sdf
-        ).ConnectToSource(part_a.ConnectableAPI(), "out")
-        blend_source = part_a if blend_part == "PartA" else part_b
-        cls._create_mdl_registry_input(
-            falloff, shader_node, "blend", Sdf
-        ).ConnectToSource(blend_source.ConnectableAPI(), "out")
-        facing_weight, edge_weight = surface_falloff_weights
-        falloff.CreateInput("facing_weight", Sdf.ValueTypeNames.Float).Set(
-            facing_weight
+        shader.CreateInput("enable_opacity", Sdf.ValueTypeNames.Bool).Set(True)
+        shader.CreateInput("geometry_opacity", Sdf.ValueTypeNames.Float).Set(
+            xray.part_a_opacity
         )
-        falloff.CreateInput("edge_weight", Sdf.ValueTypeNames.Float).Set(edge_weight)
-        falloff.CreateInput("blend_bias", Sdf.ValueTypeNames.Float).Set(
-            cls.XRAY_ISOLATION_BLEND_BIAS
-        )
-        output = falloff.CreateOutput("out", Sdf.ValueTypeNames.Token)
+        output = shader.CreateOutput("out", Sdf.ValueTypeNames.Token)
         output.SetRenderType("material")
         material.CreateSurfaceOutput("mdl").ConnectToSource(
-            falloff.ConnectableAPI(), "out"
+            shader.ConnectableAPI(), "out"
         )
         return material
+
+    def _is_xray_led_prim(self, prim) -> bool:
+        indicators = self.config.chassis_presentation.front_panel_indicators
+        target_path = str(prim.GetPath())
+        return any(
+            path and (target_path == path or target_path.startswith(f"{path}/"))
+            for path in (
+                indicators.power_path,
+                indicators.hdd_path,
+                indicators.lan_01_path,
+                indicators.lan_02_path,
+            )
+        )
+
+    def _discard_stale_xray_binding_snapshots(self, stage) -> None:
+        layer_id = stage.GetSessionLayer().identifier
+        if self._xray_session_binding_layer_id != layer_id:
+            self._xray_session_binding_layer_id = layer_id
+            self._xray_session_binding_snapshots.clear()
+
+    def _capture_xray_session_binding_spec(self, stage, property_path, Sdf) -> None:
+        key = str(property_path)
+        if key in self._xray_session_binding_snapshots:
+            return
+        session = stage.GetSessionLayer()
+        if session.GetPropertyAtPath(property_path) is None:
+            self._xray_session_binding_snapshots[key] = None
+            return
+        snapshot = Sdf.Layer.CreateAnonymous("DTRS_XRayBindingSnapshot.usda")
+        Sdf.CreatePrimInLayer(snapshot, property_path.GetPrimPath())
+        if not Sdf.CopySpec(session, property_path, snapshot, property_path):
+            raise RuntimeError(f"Could not snapshot Session binding {property_path}.")
+        self._xray_session_binding_snapshots[key] = snapshot
+
+    @classmethod
+    def _author_xray_session_binding_spec(cls, stage, property_path, Sdf) -> None:
+        """Create or retarget exactly one Session Layer material-binding spec."""
+
+        session = stage.GetSessionLayer()
+        relationship_spec = session.GetRelationshipAtPath(property_path)
+        if relationship_spec is None:
+            prim_spec = session.GetPrimAtPath(property_path.GetPrimPath())
+            if prim_spec is None:
+                prim_spec = Sdf.CreatePrimInLayer(session, property_path.GetPrimPath())
+            relationship_spec = Sdf.RelationshipSpec(
+                prim_spec,
+                property_path.name,
+                custom=False,
+            )
+        relationship_spec.targetPathList.explicitItems = [
+            Sdf.Path(cls.XRAY_MATERIAL_PATH)
+        ]
+
+    @staticmethod
+    def _format_xray_mismatch_paths(paths: list[str]) -> str:
+        displayed = paths[:5]
+        suffix = f", ... +{len(paths) - len(displayed)} more" if len(paths) > 5 else ""
+        return ", ".join(displayed) + suffix
+
+    @staticmethod
+    def _remove_xray_session_binding_spec(stage, property_path) -> None:
+        session = stage.GetSessionLayer()
+        property_spec = session.GetPropertyAtPath(property_path)
+        if property_spec is None:
+            return
+        prim_spec = session.GetPrimAtPath(property_path.GetPrimPath())
+        if prim_spec is None:
+            raise RuntimeError(f"Session binding owner is missing for {property_path}.")
+        prim_spec.RemoveProperty(property_spec)
+        if session.GetPropertyAtPath(property_path) is not None:
+            raise RuntimeError(
+                f"Could not remove Session binding spec {property_path}."
+            )
+
+    @staticmethod
+    def _restore_xray_session_binding_spec(stage, property_path, snapshot, Sdf) -> None:
+        if not Sdf.CopySpec(
+            snapshot, property_path, stage.GetSessionLayer(), property_path
+        ):
+            raise RuntimeError(f"Could not restore Session binding {property_path}.")
+
+    @classmethod
+    def _session_binding_is_xray_owned(cls, stage, property_path) -> bool:
+        spec = stage.GetSessionLayer().GetPropertyAtPath(property_path)
+        return bool(
+            spec
+            and str(cls.XRAY_MATERIAL_PATH)
+            in {str(path) for path in spec.targetPathList.explicitItems}
+        )
+
+    @classmethod
+    def _xray_binding_lifecycle_snapshot(cls, stage, prim, relation, UsdShade):
+        session_spec = stage.GetSessionLayer().GetPropertyAtPath(relation.GetPath())
+        material, _binding = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
+        direct_targets = (
+            ", ".join(str(path) for path in relation.GetTargets()) or "<none>"
+        )
+        composed = str(material.GetPath()) if material else "<none>"
+        return {
+            "target_prim_path": str(prim.GetPath()),
+            "control_material_path": str(cls.XRAY_MATERIAL_PATH),
+            "binding": direct_targets,
+            "session_binding_spec": "present" if session_spec else "absent",
+            "composed_binding": composed,
+            "control_material_alive": stage.GetPrimAtPath(
+                cls.XRAY_MATERIAL_PATH
+            ).IsValid(),
+            "xray_owned_session_binding_after": cls._session_binding_is_xray_owned(
+                stage, relation.GetPath()
+            ),
+        }
+
+    @staticmethod
+    def _format_xray_lifecycle_diagnostics(
+        action,
+        diagnostics,
+        *,
+        led_current_state_reapplied=None,
+        led_binding_matches_current_state=None,
+    ) -> str:
+        static = [item for item in diagnostics if not item.get("is_led", False)]
+        leds = [item for item in diagnostics if item.get("is_led", False)]
+        static_baseline_matches = sum(
+            bool(item.get("baseline_match")) for item in static
+        )
+        static_xray_remaining = sum(
+            bool(item["after"]["xray_owned_session_binding_after"]) for item in static
+        )
+        led_xray_remaining = sum(
+            bool(item["after"]["xray_owned_session_binding_after"]) for item in leds
+        )
+        control_material_alive = any(
+            item["after"].get("control_material_alive", False) for item in diagnostics
+        )
+        led_reapplied_value = (
+            led_current_state_reapplied
+            if led_current_state_reapplied is not None
+            else "<not requested>"
+        )
+        led_matches_value = (
+            led_binding_matches_current_state
+            if led_binding_matches_current_state is not None
+            else "<not requested>"
+        )
+        lines = [
+            "DTRS X-Ray binding lifecycle",
+            f"  action: {action}",
+            f"  static_targets_total={len(static)}",
+            f"  static_baseline_matches={static_baseline_matches}",
+            f"  static_xray_bindings_remaining={static_xray_remaining}",
+            f"  led_targets_total={len(leds)}",
+            f"  led_xray_bindings_remaining={led_xray_remaining}",
+            f"  led_current_state_reapplied={led_reapplied_value}",
+            f"  led_binding_matches_current_state={led_matches_value}",
+            f"  control_material_alive={control_material_alive}",
+        ]
+        if action.startswith("OFF") and static:
+            if static_baseline_matches == len(static) and static_xray_remaining == 0:
+                lines.extend(
+                    (
+                        "  USD lifecycle: PASS",
+                        "  renderer synchronisation: manual visual validation required",
+                    )
+                )
+            else:
+                lines.append("  USD lifecycle: FAIL")
+        for item in diagnostics:
+            after = item["after"]
+            mismatch = False
+            if action.startswith("ON"):
+                mismatch = not after["xray_owned_session_binding_after"]
+            elif action.startswith("OFF"):
+                mismatch = after["xray_owned_session_binding_after"]
+            if action.startswith("OFF") and not item.get("is_led", False):
+                mismatch = mismatch or not item.get("baseline_match", False)
+            if mismatch:
+                lines.append(
+                    "  mismatch: "
+                    f"target={after['target_prim_path']}; "
+                    f"binding={after['binding']}; "
+                    f"composed_binding={after['composed_binding']}; "
+                    "session_binding_spec="
+                    f"{after['session_binding_spec']}"
+                )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _xray_static_target_path(diagnostics) -> str | None:
+        for diagnostic in diagnostics:
+            if not diagnostic.get("is_led", False):
+                return str(diagnostic["after"]["target_prim_path"])
+        return None
+
+    @staticmethod
+    def _log_xray_lifecycle_diagnostic(carb, *, action: str, formatter) -> None:
+        """Keep lifecycle diagnostics non-fatal after a binding mutation succeeds."""
+
+        try:
+            carb.log_warn(formatter())
+        except Exception as error:
+            carb.log_warn(
+                "DTRS X-Ray binding lifecycle\n"
+                f"  action: {action}\n"
+                f"  diagnostic: <inspection failed: {error}>"
+            )
 
     @staticmethod
     def _create_mdl_registry_input(shader, shader_node, name: str, Sdf):
@@ -3149,14 +3813,71 @@ class RuntimeController(FlowRuntimeMixin):
 
         matched_count = 0
         edit_target = stage.GetEditTargetForLocalLayer(stage.GetSessionLayer())
-        with Usd.EditContext(stage, edit_target):
-            for path, material in bindings:
-                prim = stage.GetPrimAtPath(path)
-                if not prim or not prim.IsValid():
-                    continue
-                UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
-                matched_count += 1
+        with Sdf.ChangeBlock():
+            with Usd.EditContext(stage, edit_target):
+                for path, material in bindings:
+                    prim = stage.GetPrimAtPath(path)
+                    if not prim or not prim.IsValid():
+                        continue
+                    relation = UsdShade.MaterialBindingAPI(prim).GetDirectBindingRel()
+                    if cls._session_binding_is_xray_owned(stage, relation.GetPath()):
+                        continue
+                    UsdShade.MaterialBindingAPI.Apply(prim).Bind(material)
+                    matched_count += 1
         return matched_count > 0
+
+    def _reapply_front_panel_indicator_current_state(
+        self, stage, Gf, Sdf, Usd, UsdShade
+    ) -> tuple[bool, bool]:
+        """Release X-Ray, then reuse the latest telemetry state without a copy."""
+
+        snapshot = self._front_panel_indicator_last_snapshot
+        if snapshot is None:
+            return False, False
+        indicators = self.config.chassis_presentation.front_panel_indicators
+        now_seconds = time.monotonic()
+        state = front_panel_indicator_state(
+            snapshot.metrics,
+            now_seconds,
+            storage_metric_id=indicators.storage_metric_id,
+            lan_01_metric_id=indicators.lan_01_metric_id,
+            lan_02_metric_id=indicators.lan_02_metric_id,
+        )
+        self._front_panel_indicator_last_state = state
+        self._front_panel_indicator_state_key = None
+        reapplied = self._apply_front_panel_indicator_state(
+            stage, indicators, state, Gf, Sdf, Usd, UsdShade
+        )
+        return reapplied, self._front_panel_indicator_bindings_match_state(
+            stage, indicators, state, UsdShade
+        )
+
+    @classmethod
+    def _front_panel_indicator_bindings_match_state(
+        cls, stage, indicators, state, UsdShade
+    ) -> bool:
+        expected = (
+            (indicators.power_path, "power" if state.power else "off"),
+            (indicators.hdd_path, "hdd" if state.hdd else "off"),
+            (indicators.lan_01_path, "lan_01" if state.lan_01 else "off"),
+            (indicators.lan_02_path, "lan_02" if state.lan_02 else "off"),
+        )
+        checked_count = 0
+        for path, material_key in expected:
+            prim = stage.GetPrimAtPath(path)
+            if not prim or not prim.IsValid():
+                continue
+            material, _binding = UsdShade.MaterialBindingAPI(
+                prim
+            ).ComputeBoundMaterial()
+            if (
+                not material
+                or str(material.GetPath())
+                != cls.FRONT_PANEL_MATERIAL_PATHS[material_key]
+            ):
+                return False
+            checked_count += 1
+        return checked_count > 0
 
     @classmethod
     def _ensure_front_panel_indicator_materials(
