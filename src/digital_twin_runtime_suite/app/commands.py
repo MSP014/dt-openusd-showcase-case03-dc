@@ -41,6 +41,7 @@ from digital_twin_runtime_suite.app.flow.runtime import (
     SimulationCacheResult,
 )
 from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin
+from digital_twin_runtime_suite.app.xray.probe import XRayProbeMixin
 from digital_twin_runtime_suite.app.qled import SEGMENTS, qled_state_from_temperature
 from digital_twin_runtime_suite.app.simulation_cache import (
     SimulationCacheContract,
@@ -92,7 +93,7 @@ class FacePanelApplyResult:
     rotate_op: object | None = None
 
 
-class RuntimeController(FlowRuntimeMixin, XRayRuntimeMixin):
+class RuntimeController(FlowRuntimeMixin, XRayProbeMixin, XRayRuntimeMixin):
     """Coordinate config-backed application commands for the DTRS viewer.
 
     The controller remains the public command facade and application-lifecycle

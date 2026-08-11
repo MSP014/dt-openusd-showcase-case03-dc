@@ -43,6 +43,16 @@ def test_bool_model_prefers_kit_value_accessor_over_legacy_attribute():
     assert bool_model_value(_KitBoolModel()) is False
 
 
+def test_xray_runtime_boundary_does_not_depend_on_debug_probe():
+    from digital_twin_runtime_suite.app.xray import __all__
+    from digital_twin_runtime_suite.app.xray.probe import XRayProbeMixin
+    from digital_twin_runtime_suite.app.xray.runtime import XRayRuntimeMixin
+
+    assert __all__ == ("XRayRuntimeMixin",)
+    assert not issubclass(XRayRuntimeMixin, XRayProbeMixin)
+    assert not hasattr(XRayRuntimeMixin, "XRAY_PROBE_ROOT_PATH")
+
+
 def test_xray_controls_build_the_persisted_operator_state():
     xray = xray_material_config_from_models(
         _BoolModel(True),
@@ -1014,6 +1024,7 @@ def test_live_fresnel_probe_performance_sampler_resets_without_duplicates(
     from digital_twin_runtime_suite.app.flow.performance import (
         ViewportPerformanceSample,
     )
+    from digital_twin_runtime_suite.app.xray import performance as xray_performance
 
     controller = RuntimeController(_write_xray_config(tmp_path))
     samples = iter(
@@ -1023,8 +1034,8 @@ def test_live_fresnel_probe_performance_sampler_resets_without_duplicates(
         )
     )
     monkeypatch.setattr(
-        controller,
-        "_capture_xray_fresnel_probe_performance_sample",
+        xray_performance,
+        "capture_viewport_performance_sample",
         lambda: next(samples),
     )
 
@@ -1044,6 +1055,7 @@ def test_live_fresnel_probe_performance_sampler_respects_sample_interval(
     from digital_twin_runtime_suite.app.flow.performance import (
         ViewportPerformanceSample,
     )
+    from digital_twin_runtime_suite.app.xray import performance as xray_performance
 
     controller = RuntimeController(_write_xray_config(tmp_path))
     samples = iter(
@@ -1054,8 +1066,8 @@ def test_live_fresnel_probe_performance_sampler_respects_sample_interval(
     )
     clock = iter((0.25, 0.5))
     monkeypatch.setattr(
-        controller,
-        "_capture_xray_fresnel_probe_performance_sample",
+        xray_performance,
+        "capture_viewport_performance_sample",
         lambda: next(samples),
     )
     monkeypatch.setattr(commands.time, "monotonic", lambda: next(clock))
@@ -1071,6 +1083,7 @@ def test_live_fresnel_probe_performance_uses_viewport_statistics(tmp_path):
     from digital_twin_runtime_suite.app.flow.performance import (
         ViewportPerformanceSample,
     )
+    from digital_twin_runtime_suite.app.xray import performance as xray_performance
 
     controller = RuntimeController(_write_xray_config(tmp_path))
     controller._xray_probe_performance_samples = [
@@ -1079,13 +1092,15 @@ def test_live_fresnel_probe_performance_uses_viewport_statistics(tmp_path):
         ViewportPerformanceSample(1.0, 60.0, 16.0, 4.7, 6.2),
     ]
 
-    assert controller._xray_fresnel_probe_performance_state() == {
+    assert xray_performance.viewport_performance_state(
+        controller._xray_probe_performance_samples
+    ) == {
         "fps_current": "60.00",
         "frame_time_ms_current": "16.00",
-        "probe_avg_fps": "50.00",
-        "probe_min_fps": "40.00",
-        "probe_max_fps": "60.00",
-        "probe_avg_frame_time_ms": "20.33",
+        "average_fps": "50.00",
+        "minimum_fps": "40.00",
+        "maximum_fps": "60.00",
+        "average_frame_time_ms": "20.33",
         "gpu_used_gib": "4.70",
         "process_used_gib": "6.20",
     }
@@ -1109,6 +1124,7 @@ def test_production_xray_performance_sampler_logs_hud_interval_without_new_task(
     from digital_twin_runtime_suite.app.flow.performance import (
         ViewportPerformanceSample,
     )
+    from digital_twin_runtime_suite.app.xray import performance as xray_performance
 
     class _Carb:
         def __init__(self):
@@ -1125,8 +1141,8 @@ def test_production_xray_performance_sampler_logs_hud_interval_without_new_task(
         )
     )
     monkeypatch.setattr(
-        controller,
-        "_capture_xray_fresnel_probe_performance_sample",
+        xray_performance,
+        "capture_viewport_performance_sample",
         lambda: next(samples),
     )
     monkeypatch.setattr(commands.time, "monotonic", lambda: 10.0)
@@ -1167,19 +1183,22 @@ def test_live_fresnel_probe_performance_unavailable_values_are_non_fatal(tmp_pat
     from digital_twin_runtime_suite.app.flow.performance import (
         ViewportPerformanceSample,
     )
+    from digital_twin_runtime_suite.app.xray import performance as xray_performance
 
     controller = RuntimeController(_write_xray_config(tmp_path))
     controller._xray_probe_performance_samples = [
         ViewportPerformanceSample(0.0, None, None, None, None)
     ]
 
-    assert controller._xray_fresnel_probe_performance_state() == {
+    assert xray_performance.viewport_performance_state(
+        controller._xray_probe_performance_samples
+    ) == {
         "fps_current": "<unavailable>",
         "frame_time_ms_current": "<unavailable>",
-        "probe_avg_fps": "<unavailable>",
-        "probe_min_fps": "<unavailable>",
-        "probe_max_fps": "<unavailable>",
-        "probe_avg_frame_time_ms": "<unavailable>",
+        "average_fps": "<unavailable>",
+        "minimum_fps": "<unavailable>",
+        "maximum_fps": "<unavailable>",
+        "average_frame_time_ms": "<unavailable>",
         "gpu_used_gib": "<unavailable>",
         "process_used_gib": "<unavailable>",
     }

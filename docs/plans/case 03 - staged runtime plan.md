@@ -975,6 +975,10 @@ authored assets.
 
 ### Stage 8 - Workload-to-Cache State Binding Slice
 
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
+
 Jira: `DC-46`
 
 Release track: `0.4.0` (released on Stage 8 completion).
@@ -1005,6 +1009,10 @@ workload-state model has been introduced.
 
 ### Stage 9 - Server Velocity Trail Foundation Slice
 
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
+
 Jira: `DC-49`
 
 Release track: `0.5.0` (released on Stage 10 completion).
@@ -1032,6 +1040,10 @@ stage reload.
 
 ### Stage 10 - Server Heatmap Foundation Slice
 
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
+
 Jira: `DC-50`
 
 Release track: `0.5.0` (released on Stage 10 completion).
@@ -1057,6 +1069,10 @@ through a reusable implementation without inventing unavailable measurements.
 
 ### Stage 11 - Scale Navigation Foundation Slice
 
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
+
 Jira: `DC-47`
 
 Release track: `0.6.0` (released on Stage 12 completion).
@@ -1078,6 +1094,10 @@ commands and each scale has a stable view suitable for repeated review and
 screen recording.
 
 ### Stage 12 - Multi-Scale Telemetry Model Slice
+
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
 
 Jira: `DC-51`
 
@@ -1106,6 +1126,10 @@ Done when runtime consumers can request documented telemetry for a known
 server, rack, or data-hall context and missing aggregate data remains explicit.
 
 ### Stage 13 - Multi-Scale Velocity Trail Expansion Slice
+
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
 
 Jira: `DC-52`
 
@@ -1137,6 +1161,10 @@ vector fields with stable scale transitions and bounded runtime cost.
 
 ### Stage 14 - Multi-Scale Heatmap Expansion Slice
 
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
+
 Jira: `DC-53`
 
 Release track: `0.7.0` (released on Stage 14 completion).
@@ -1166,6 +1194,10 @@ Done when the Stage 10 heatmap system expands to documented rack and data-hall
 telemetry with stable scale transitions and bounded runtime cost.
 
 ### Stage 15 - Telemetry and Scale-Driven Material States Slice
+
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
 
 Jira: `DC-54`
 
@@ -1200,6 +1232,10 @@ policy, and no combinatorial set of state-specific materials is required.
 
 ### Stage 16 - Sequential Ignition Orchestration Slice
 
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
+
 Jira: `DC-55`
 
 Release track: `0.8.0` (released on Stage 16 completion).
@@ -1225,6 +1261,10 @@ ignition wave, and every affected node remains addressable through the shared
 multi-scale state model.
 
 ### Stage 17 - Interaction and UI Refinement Slice
+
+Checkpoint preflight: before implementation, verify the preceding stage ends
+at a Git checkpoint commit. If it does not, create that checkpoint before
+starting this stage.
 
 Jira: `DC-57`
 
