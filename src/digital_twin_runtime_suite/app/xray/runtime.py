@@ -41,7 +41,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
     def apply_xray_material_in_kit(self, xray: XRayMaterialConfig) -> XRayApplyResult:
         """Apply or release the production control override in the Session Layer.
 
-        ON gives every resolved chassis mesh the stable Part A control material.
+        ON gives every resolved chassis mesh the production Fresnel material.
         OFF removes only opinions owned by X-Ray, so ordinary geometry naturally
         recomposes to authored USD while LEDs resume their current telemetry
         state through the existing presentation updater.
@@ -105,12 +105,49 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             )
             return XRayApplyResult(
                 True,
-                "X-Ray Part A control material applied.",
+                "X-Ray Fresnel material applied.",
                 target_count,
-                used_fallback_color=True,
             )
         finally:
             stage.SetEditTarget(previous_target)
+
+    def sync_xray_fresnel_material_camera_in_kit(self) -> bool:
+        """Update production Fresnel camera input from ReviewCamera when active.
+
+        The existing extension update loop owns scheduling. This method owns
+        no loop and updates only the active production material instance.
+        """
+
+        import omni.usd
+        from pxr import Gf, Usd, UsdGeom, UsdShade
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return False
+        material = stage.GetPrimAtPath(self.XRAY_MATERIAL_PATH)
+        if not material or not material.IsValid():
+            return False
+        shader = UsdShade.Shader.Get(stage, f"{self.XRAY_MATERIAL_PATH}/Shader")
+        if not shader or not shader.GetPrim().IsValid():
+            return False
+        camera_input = shader.GetInput("camera_position")
+        if not camera_input or not camera_input.GetAttr().HasAuthoredValue():
+            return False
+        current_position = self._xray_review_camera_position(stage, Usd, UsdGeom)
+        if current_position is None:
+            return False
+        authored_position = camera_input.Get()
+        if authored_position is None or self._xray_camera_positions_match(
+            current_position, authored_position
+        ):
+            return False
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            camera_input.Set(Gf.Vec3f(*current_position))
+        finally:
+            stage.SetEditTarget(previous_target)
+        return True
 
     def advance_xray_material_performance_sampler_in_kit(self) -> bool:
         """Sample production X-Ray only while its transient material is active."""
@@ -342,7 +379,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         return removed_count, diagnostics
 
     def _apply_xray_session_overrides(self, stage, xray, Gf, Sdf, Usd, UsdShade):
-        """Bind Part A to every resolved chassis mesh as one reversible transition.
+        """Bind production Fresnel to every chassis mesh as one reversible transition.
 
         Static chassis and telemetry LEDs share the temporary binding while
         active.  The latter retain their provider state beneath X-Ray, so the
@@ -354,7 +391,38 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         root = stage.GetPrimAtPath(self.XRAY_CHASSIS_ROOT_PATH)
         if not root or not root.IsValid():
             raise RuntimeError("X-Ray chassis target root is unavailable.")
-        self._define_xray_control_material(stage, xray, Gf, Sdf, UsdShade)
+        from pxr import UsdGeom
+
+        # The operator-owned production X-Ray config is passed directly so
+        # Apply updates the material before its settings are persisted.
+        fresnel = xray
+        values = (
+            fresnel.facing_color,
+            fresnel.edge_color,
+            fresnel.edge_center,
+            fresnel.edge_softness,
+            fresnel.edge_sharpness,
+            fresnel.facing_roughness,
+            fresnel.edge_roughness,
+            fresnel.facing_opacity,
+            fresnel.edge_opacity,
+            fresnel.facing_emission,
+            fresnel.edge_emission,
+            fresnel.emission_scale,
+        )
+        camera_position = self._xray_review_camera_position(stage, Usd, UsdGeom)
+        self._define_xray_fresnel_material(
+            stage, self.XRAY_MATERIAL_PATH, Sdf, UsdShade
+        )
+        self._set_xray_fresnel_material_values(
+            stage,
+            self.XRAY_MATERIAL_PATH,
+            values,
+            Gf,
+            Sdf,
+            UsdShade,
+            camera_position=camera_position or (0.0, 0.0, 0.0),
+        )
         diagnostics = []
         target_count = 0
         try:
@@ -503,7 +571,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
 
     @classmethod
     def _session_binding_is_xray_owned(cls, stage, property_path) -> bool:
-        """Return whether the strongest Session relationship targets Part A."""
+        """Return whether the strongest Session relationship targets X-Ray."""
 
         spec = stage.GetSessionLayer().GetPropertyAtPath(property_path)
         return bool(

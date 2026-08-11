@@ -22,7 +22,6 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
-    XRayFresnelProbeConfig,
     XRayMaterialConfig,
     chassis_presentation_with_operator_state,
     format_runtime_override,
@@ -41,7 +40,6 @@ from digital_twin_runtime_suite.app.flow.runtime import (
     SimulationCacheResult,
 )
 from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin
-from digital_twin_runtime_suite.app.xray.probe import XRayProbeMixin
 from digital_twin_runtime_suite.app.qled import SEGMENTS, qled_state_from_temperature
 from digital_twin_runtime_suite.app.simulation_cache import (
     SimulationCacheContract,
@@ -93,7 +91,7 @@ class FacePanelApplyResult:
     rotate_op: object | None = None
 
 
-class RuntimeController(FlowRuntimeMixin, XRayProbeMixin, XRayRuntimeMixin):
+class RuntimeController(FlowRuntimeMixin, XRayRuntimeMixin):
     """Coordinate config-backed application commands for the DTRS viewer.
 
     The controller remains the public command facade and application-lifecycle
@@ -152,15 +150,6 @@ class RuntimeController(FlowRuntimeMixin, XRayProbeMixin, XRayRuntimeMixin):
         self._xray_last_lifecycle_diagnostics: list[dict[str, object]] = []
         self._front_panel_indicator_last_snapshot = None
         self._front_panel_indicator_last_state = None
-        self._xray_probe_visibility_state: tuple[bool, object | None] | None = None
-        self._xray_probe_server_bbox_snapshot = None
-        self._xray_probe_last_values = None
-        self._xray_probe_live_camera_sync_updates = 0
-        self._xray_probe_performance_started_at: float | None = None
-        self._xray_probe_performance_next_sample_at: float | None = None
-        self._xray_probe_performance_next_log_at: float | None = None
-        self._xray_probe_performance_interval_started_at: float | None = None
-        self._xray_probe_performance_samples: list[ViewportPerformanceSample] = []
         self._xray_material_performance_started_at: float | None = None
         self._xray_material_performance_next_sample_at: float | None = None
         self._xray_material_performance_next_log_at: float | None = None
@@ -341,34 +330,15 @@ class RuntimeController(FlowRuntimeMixin, XRayProbeMixin, XRayRuntimeMixin):
         )
 
     def save_xray_material_override(self, xray: XRayMaterialConfig) -> Path:
-        """Persist the X-Ray UI state without storing transient USD opinions."""
+        """Persist Fresnel parameters, never transient X-Ray activation state."""
+
+        xray = replace(xray, chassis_selected=False)
 
         presentation = replace(
             self.config.chassis_presentation,
             materials=replace(
                 self.config.chassis_presentation.materials,
                 xray=xray,
-            ),
-        )
-        return self.save_runtime_override(
-            self.config.lighting,
-            self.config.camera,
-            self.config.grid,
-            self.config.simulation_cache.smoke_tuning,
-            self.config.simulation_cache.emitter_layout,
-            presentation,
-        )
-
-    def save_xray_fresnel_probe_override(
-        self, fresnel_probe: XRayFresnelProbeConfig
-    ) -> Path:
-        """Persist debug probe controls without retaining its transient USD state."""
-
-        presentation = replace(
-            self.config.chassis_presentation,
-            materials=replace(
-                self.config.chassis_presentation.materials,
-                xray_fresnel_probe=fresnel_probe,
             ),
         )
         return self.save_runtime_override(

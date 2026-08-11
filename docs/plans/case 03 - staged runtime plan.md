@@ -906,26 +906,35 @@ tested FSD runtime limitation; a minimal standalone reproduction and potential
 NVIDIA bug report are deferred to later work. Do not investigate FSD further in
 this phase.
 
-Phase 4.1A — X-Ray subsystem extraction and code documentation — CURRENT
+Phase 4.1A — X-Ray subsystem refactor — VALIDATED
 
-This deliberately precedes Fresnel production integration: the validated
-binding lifecycle, material construction, isolated probe, and ReviewCamera
-synchronisation need clear ownership boundaries before production shading
-becomes more complex. Phase 4.1A is a behaviour-preserving refactor only.
+The validated binding lifecycle, material construction, isolated probe, and
+ReviewCamera synchronisation now have clear ownership boundaries before
+production shading becomes more complex. This was a behaviour-preserving
+refactor only.
 
-Phase 4.1B — Production custom Fresnel integration — NEXT
+Phase 4.1B.1 — Production Fresnel material integration — VALIDATED
 
-Replace the temporary `XRayLifecycleControl` / Part A material with the
-already validated project-owned custom Fresnel material from the Cube/Sphere
-debug proof, then transfer it to the production RM44 chassis.
+The temporary `XRayLifecycleControl` payload now uses the validated
+project-owned custom Fresnel MDL from the Cube/Sphere debug proof. Manual
+validation confirmed live ReviewCamera response and preserved production
+ON/OFF restoration.
+
+Phase 4.1B.2 — Remove obsolete Part A controls — VALIDATED
+
+Phase 4.1B.3 — Move Fresnel controls from Debug to X-Ray — VALIDATED
+
+Phase 4.1B.4 — Remove Debug Fresnel probe + cleanup — CURRENT
 
 Phase 4.2 — Full chassis visual/performance tuning — PLANNED
+
+Phase 4.3 — Final pass through the X-Ray codebase to ensure it is sufficiently annotated and commented — PLANNED
 
 Tune and validate the final production chassis appearance and performance only
 after Phase 4.1 integration.
 
 Phase 2 passed before Phase 3. The binding/ownership prerequisite is now
-validated; Phase 4.1A is the current implementation step.
+validated; Phase 4.1B.3 is the current implementation step.
 
 - The isolated custom-material proof is complete for Base Color, Glossy
   Roughness, Opacity, Emission, Emission Scale, and live ReviewCamera
@@ -933,9 +942,8 @@ validated; Phase 4.1A is the current implementation step.
 - Stage 7.1 architecture remains valid: UI/config persistence, logical target
   selection, Session Layer runtime binding, reversible material override, and
   `Server Enclosure` visibility ownership. The custom shader proof and the
-  production binding lifecycle are validated; subsystem extraction and code
-  documentation are current, while custom-material production integration is
-  explicitly deferred to Phase 4.1B.
+  production binding lifecycle are validated; Fresnel control ownership moves
+  from Debug to X-Ray in Phase 4.1B.3.
 
 Implementation notes:
 
