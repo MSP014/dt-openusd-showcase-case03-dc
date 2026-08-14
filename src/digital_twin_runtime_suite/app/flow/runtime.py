@@ -33,6 +33,9 @@ from digital_twin_runtime_suite.app.flow.progress import (
     TemporalProofResultSource,
     TemporalProofState,
 )
+from digital_twin_runtime_suite.app.flow.quality import (
+    validate_kit_cae_flow_voxel_resolution,
+)
 from digital_twin_runtime_suite.app.flow.temporal import FlowTemporalMixin
 from digital_twin_runtime_suite.app.flow.validation_cache import (
     DatasetValidationSignature,
@@ -617,13 +620,7 @@ class FlowRuntimeMixin(
             await app.next_update_async()
             flow_environment_prim = stage.GetPrimAtPath(flow_environment_path)
             flow_simulate = flow_environment_prim.GetChild("flowSimulate")
-            density_cell_size = flow_simulate.GetAttribute("densityCellSize").Get()
             self._flow_world_bounds = imported_grid["world_bounds"]
-            self._flow_density_cell_size = (
-                float(density_cell_size)
-                if isinstance(density_cell_size, (int, float)) and density_cell_size > 0
-                else None
-            )
             UsdGeom.Xform.Define(stage, tracer_root_path)
             derived_layout = flow_smoke.kit_cae_front_intake_emitter_layout(
                 stage,
@@ -683,6 +680,16 @@ class FlowRuntimeMixin(
                 )
             emitter_operator = cae_viz.OperatorAPI(emitter_prim)
             emitter_operator.CreateEnabledAttr().Set(False)
+            voxelization_api = cae_viz.DatasetVoxelizationAPI(
+                emitter_prim,
+                "source",
+            )
+            configured_max_resolution = voxelization_api.GetMaxResolutionAttr().Get()
+            self._flow_voxel_max_resolution = (
+                int(configured_max_resolution)
+                if isinstance(configured_max_resolution, int)
+                else None
+            )
             velocity_selector = cae_viz.FieldSelectionAPI(emitter_prim, "velocities")
             velocity_selector.CreateTargetRel().SetTargets([field_path])
             emitter_operator.CreateEnabledAttr().Set(True)
@@ -691,6 +698,15 @@ class FlowRuntimeMixin(
                     app,
                     emitter_prim,
                 )
+            )
+            effective_density_cell_size = flow_simulate.GetAttribute(
+                "densityCellSize"
+            ).Get()
+            self._flow_density_cell_size = (
+                float(effective_density_cell_size)
+                if isinstance(effective_density_cell_size, (int, float))
+                and effective_density_cell_size > 0
+                else None
             )
             self._flow_base_velocity_scale = (
                 flow_smoke.read_kit_cae_base_velocity_scale(emitter_prim)
@@ -714,10 +730,7 @@ class FlowRuntimeMixin(
             )
 
             await app.next_update_async()
-            if self._flow_temporal_end_time_code is not None:
-                timeline.play(0.0, self._flow_temporal_end_time_code, True)
-            else:
-                timeline.play()
+            self._restart_kit_cae_temporal_loop(timeline)
             timeline_time_before = float(timeline.get_current_time())
             for _ in range(12):
                 await app.next_update_async()
@@ -744,6 +757,9 @@ class FlowRuntimeMixin(
                 velocity_scale
             )
             timeline_advancing = timeline_time_after > timeline_time_before
+            self._flow_vti_spacing = tuple(
+                float(value) for value in metadata["spacing"]
+            )
             evidence_valid = (
                 operator_readiness["ready"]
                 and not operator_readiness["timed_out"]
@@ -757,6 +773,23 @@ class FlowRuntimeMixin(
             self._flow_temporal_records = []
             self._flow_temporal_failure = None
             if evidence_valid:
+                stage_meters_per_unit = UsdGeom.GetStageMetersPerUnit(stage)
+                density_cell_size_m = (
+                    self._flow_density_cell_size * stage_meters_per_unit
+                    if self._flow_density_cell_size is not None
+                    else None
+                )
+                intake_tracer_radius = self._read_kit_cae_intake_tracer_radius(
+                    stage,
+                    tracer_root_path,
+                    UsdGeom,
+                )
+                self._flow_intake_tracer_radius_to_cell = (
+                    self._kit_cae_tracer_radius_cell_ratio(
+                        intake_tracer_radius,
+                        self._flow_density_cell_size,
+                    )
+                )
                 self._log_kit_cae_airflow_dataset(carb, airflow_dataset)
                 self._log_kit_cae_flow_attached(
                     carb,
@@ -769,6 +802,9 @@ class FlowRuntimeMixin(
                     flow_environment_path=flow_environment_path,
                     dataset_emitter_path=dataset_emitter_path,
                     base_velocity_scale=self._flow_base_velocity_scale,
+                    stage_meters_per_unit=stage_meters_per_unit,
+                    density_cell_size_m=density_cell_size_m,
+                    intake_tracer_radius=intake_tracer_radius,
                 )
                 self._log_kit_cae_temporal_frame(
                     carb,
@@ -856,6 +892,9 @@ class FlowRuntimeMixin(
             self._flow_base_velocity_scale = None
             self._flow_world_bounds = None
             self._flow_density_cell_size = None
+            self._flow_intake_tracer_radius_to_cell = None
+            self._flow_vti_spacing = None
+            self._flow_voxel_max_resolution = None
             self._flow_lifecycle_state = "DETACHED"
             self._flow_temporal_end_time_code = None
             self._flow_temporal_sample_time_codes = ()
@@ -1034,6 +1073,421 @@ class FlowRuntimeMixin(
         return SimulationCacheResult(
             True,
             "Smoke settings applied and saved without a Flow reset.",
+        )
+
+    async def apply_kit_cae_voxel_resolution_in_kit(
+        self,
+        max_resolution: int,
+    ) -> SimulationCacheResult:
+        """Re-voxelize the attached Flow emitter for a runtime-only A/B test."""
+
+        try:
+            validate_kit_cae_flow_voxel_resolution(max_resolution)
+        except ValueError as error:
+            return SimulationCacheResult(False, f"Flow resolution is invalid: {error}")
+        if self._flow_lifecycle_state != "ATTACHED":
+            return SimulationCacheResult(
+                False,
+                "Attach the airflow cache before changing Flow resolution.",
+            )
+        if self._flow_temporal_proof_task and not self._flow_temporal_proof_task.done():
+            return SimulationCacheResult(
+                False,
+                "Wait for the temporal proof to finish before changing Flow "
+                "resolution.",
+            )
+        if not self._flow_airflow_simulate_path:
+            return SimulationCacheResult(
+                False,
+                "Kit-CAE Flow simulation path is unavailable.",
+            )
+
+        import carb
+        import omni.kit.app
+        import omni.timeline
+        import omni.usd
+        from omni.cae.schema import viz as cae_viz
+        from omni.cae.schema import vtk as cae_vtk
+        from pxr import Gf, Usd, UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        if not stage:
+            return SimulationCacheResult(
+                False,
+                "Flow resolution skipped: no open stage.",
+            )
+        emitter_prim = stage.GetPrimAtPath("/DTRS_KitCAE/DataSetEmitter")
+        flow_simulate = stage.GetPrimAtPath(self._flow_airflow_simulate_path)
+        if not emitter_prim or not emitter_prim.IsValid():
+            return SimulationCacheResult(
+                False,
+                "Flow resolution skipped: DataSetEmitter is unavailable.",
+            )
+        if not flow_simulate or not flow_simulate.IsValid():
+            return SimulationCacheResult(
+                False,
+                "Flow resolution skipped: flowSimulate is unavailable.",
+            )
+        field_prim = stage.GetPrimAtPath(
+            "/DTRS_HoudiniVelocity/PointData/"
+            f"{self.config.simulation_cache.velocity_field_name}"
+        )
+        if not field_prim or not field_prim.IsValid():
+            return SimulationCacheResult(
+                False,
+                "Flow resolution skipped: temporal velocity field is unavailable.",
+            )
+
+        app = omni.kit.app.get_app()
+        timeline = omni.timeline.get_timeline_interface()
+        timeline_time = float(timeline.get_current_time())
+        timeline_was_playing = bool(timeline.is_playing())
+        emitter_operator = cae_viz.OperatorAPI(emitter_prim)
+        enabled_attribute = emitter_operator.CreateEnabledAttr()
+        voxelization_api = cae_viz.DatasetVoxelizationAPI(emitter_prim, "source")
+        previous_mode = voxelization_api.GetVoxelSizeModeAttr().Get()
+        previous_max_resolution = voxelization_api.GetMaxResolutionAttr().Get()
+        if previous_mode is None or not isinstance(previous_max_resolution, int):
+            return SimulationCacheResult(
+                False,
+                "Flow resolution skipped: DataSetEmitter voxelization state is "
+                "unavailable.",
+            )
+
+        flow_environment_path = self._flow_airflow_simulate_path.removesuffix(
+            "/flowSimulate"
+        )
+        previous_target = stage.GetEditTarget()
+        timeline_restarted = False
+        timeline_advancing = False
+        source_after_restart = None
+        trace_state: dict[str, object] = {}
+        self._log_kit_cae_voxel_switch_trace(
+            carb,
+            phase="PRE_CHANGE",
+            requested_max_resolution=max_resolution,
+            previous_max_resolution=previous_max_resolution,
+            stage=stage,
+            timeline=timeline,
+            emitter_prim=emitter_prim,
+            emitter_operator=emitter_operator,
+            voxelization_api=voxelization_api,
+            flow_simulate=flow_simulate,
+            field_prim=field_prim,
+            cae_vtk=cae_vtk,
+            Usd=Usd,
+            trace_state=trace_state,
+        )
+        timeline.pause()
+        previous_density_raw = flow_simulate.GetAttribute("densityCellSize").Get()
+        previous_density_cell_size = (
+            float(previous_density_raw)
+            if isinstance(previous_density_raw, (int, float))
+            and previous_density_raw > 0
+            else self._flow_density_cell_size
+        )
+        previous_payload_attribute = emitter_prim.GetAttribute("nanoVdbVelocities")
+        previous_payload = (
+            previous_payload_attribute.Get()
+            if previous_payload_attribute and previous_payload_attribute.IsValid()
+            else None
+        )
+        previous_payload_fingerprint = self._kit_cae_nano_vdb_payload_fingerprint(
+            previous_payload,
+            len(previous_payload) if previous_payload is not None else 0,
+        )
+        tracer_root_path = "/DTRS_KitCAE/AirflowTracerEmitters"
+        previous_tracer_radius = self._read_kit_cae_intake_tracer_radius(
+            stage,
+            tracer_root_path,
+            UsdGeom,
+        )
+        completion_count_before = self._kit_cae_operator_completion_count(
+            str(emitter_prim.GetPath())
+        )
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            enabled_attribute.Set(False)
+            await app.next_update_async()
+            voxelization_api.CreateVoxelSizeModeAttr().Set("maxResolution")
+            voxelization_api.CreateMaxResolutionAttr().Set(max_resolution)
+            self._log_kit_cae_voxel_switch_trace(
+                carb,
+                phase="AFTER_MAX_RESOLUTION_SET",
+                requested_max_resolution=max_resolution,
+                previous_max_resolution=previous_max_resolution,
+                stage=stage,
+                timeline=timeline,
+                emitter_prim=emitter_prim,
+                emitter_operator=emitter_operator,
+                voxelization_api=voxelization_api,
+                flow_simulate=flow_simulate,
+                field_prim=field_prim,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+                trace_state=trace_state,
+            )
+            enabled_attribute.Set(True)
+            rebuild = await self._await_kit_cae_fresh_dataset_emitter_rebuild(
+                app,
+                emitter_prim,
+                flow_simulate,
+                requested_max_resolution=max_resolution,
+                previous_max_resolution=previous_max_resolution,
+                previous_density_cell_size=previous_density_cell_size,
+                previous_payload_fingerprint=previous_payload_fingerprint,
+                completion_count_before=completion_count_before,
+            )
+            if not rebuild["fresh_rebuild"]:
+                self._log_kit_cae_voxel_switch_abort(
+                    carb,
+                    requested_max_resolution=max_resolution,
+                    readback_max_resolution=(
+                        voxelization_api.GetMaxResolutionAttr().Get()
+                    ),
+                    density_cell_size=rebuild["density_cell_size"],
+                    stage_meters_per_unit=float(UsdGeom.GetStageMetersPerUnit(stage)),
+                    reason="DataSetEmitter output did not rebuild",
+                )
+                raise RuntimeError("DataSetEmitter output did not rebuild.")
+            readiness = await flow_validation.wait_for_kit_cae_dataset_emitter_ready(
+                app,
+                emitter_prim,
+            )
+            if not readiness["ready"]:
+                raise RuntimeError(
+                    "DataSetEmitter did not become ready after re-voxelization."
+                )
+            self._log_kit_cae_voxel_switch_trace(
+                carb,
+                phase="AFTER_DATASET_EMITTER_READY",
+                requested_max_resolution=max_resolution,
+                previous_max_resolution=previous_max_resolution,
+                stage=stage,
+                timeline=timeline,
+                emitter_prim=emitter_prim,
+                emitter_operator=emitter_operator,
+                voxelization_api=voxelization_api,
+                flow_simulate=flow_simulate,
+                field_prim=field_prim,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+                trace_state=trace_state,
+            )
+            self._flow_density_cell_size = rebuild["density_cell_size"]
+            self._flow_voxel_max_resolution = max_resolution
+            new_tracer_radius = self._kit_cae_scaled_tracer_radius(
+                self._flow_density_cell_size,
+                self._flow_intake_tracer_radius_to_cell,
+            )
+            if new_tracer_radius is None:
+                raise RuntimeError(
+                    "Attached intake tracer radius baseline is unavailable."
+                )
+            self._author_kit_cae_intake_tracer_radius(
+                stage,
+                tracer_root_path,
+                new_tracer_radius,
+                Gf,
+                UsdGeom,
+            )
+            await app.next_update_async()
+            intake_tracer_radius = self._read_kit_cae_intake_tracer_radius(
+                stage,
+                tracer_root_path,
+                UsdGeom,
+            )
+            if intake_tracer_radius is None:
+                raise RuntimeError("Intake tracer radius did not author successfully.")
+            self._log_kit_cae_voxel_rebuild(
+                carb,
+                requested_max_resolution=max_resolution,
+                previous_density_cell_size=previous_density_cell_size,
+                new_density_cell_size=self._flow_density_cell_size,
+                fresh_rebuild=True,
+                stage_meters_per_unit=float(UsdGeom.GetStageMetersPerUnit(stage)),
+                previous_intake_tracer_radius=previous_tracer_radius,
+                intake_tracer_radius=intake_tracer_radius,
+            )
+            await flow_smoke.pulse_kit_cae_flow_clear(app, flow_environment_path)
+            self._log_kit_cae_voxel_switch_trace(
+                carb,
+                phase="AFTER_FLOW_CLEAR",
+                requested_max_resolution=max_resolution,
+                previous_max_resolution=previous_max_resolution,
+                stage=stage,
+                timeline=timeline,
+                emitter_prim=emitter_prim,
+                emitter_operator=emitter_operator,
+                voxelization_api=voxelization_api,
+                flow_simulate=flow_simulate,
+                field_prim=field_prim,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+                trace_state=trace_state,
+            )
+            self._restart_kit_cae_temporal_loop(timeline)
+            timeline_restarted = True
+            self._log_kit_cae_voxel_switch_trace(
+                carb,
+                phase="AFTER_LOOP_RESTART",
+                requested_max_resolution=max_resolution,
+                previous_max_resolution=previous_max_resolution,
+                stage=stage,
+                timeline=timeline,
+                emitter_prim=emitter_prim,
+                emitter_operator=emitter_operator,
+                voxelization_api=voxelization_api,
+                flow_simulate=flow_simulate,
+                field_prim=field_prim,
+                cae_vtk=cae_vtk,
+                Usd=Usd,
+                trace_state=trace_state,
+            )
+            initial_source = trace_state.get("source")
+            timeline_time_before = float(timeline.get_current_time())
+            for update_count in range(1, 31):
+                await app.next_update_async()
+                if update_count in (4, 12, 30):
+                    self._log_kit_cae_voxel_switch_trace(
+                        carb,
+                        phase=f"POST_UPDATE_{update_count:02d}",
+                        requested_max_resolution=max_resolution,
+                        previous_max_resolution=previous_max_resolution,
+                        stage=stage,
+                        timeline=timeline,
+                        emitter_prim=emitter_prim,
+                        emitter_operator=emitter_operator,
+                        voxelization_api=voxelization_api,
+                        flow_simulate=flow_simulate,
+                        field_prim=field_prim,
+                        cae_vtk=cae_vtk,
+                        Usd=Usd,
+                        trace_state=trace_state,
+                    )
+            timeline_time_after = float(timeline.get_current_time())
+            source_after_restart = trace_state.get("source")
+            timeline_advancing = timeline_time_after > timeline_time_before
+            if not timeline_advancing:
+                raise RuntimeError("Timeline did not advance after restarting Flow.")
+            if self._flow_temporal_end_time_code is None:
+                raise RuntimeError(
+                    "Temporal loop end is unavailable after restarting Flow."
+                )
+            if initial_source is None or source_after_restart == initial_source:
+                raise RuntimeError(
+                    "Temporal source did not leave the initial VTI after restarting "
+                    "Flow."
+                )
+        except Exception as error:  # noqa: BLE001
+            try:
+                enabled_attribute.Set(False)
+                voxelization_api.CreateVoxelSizeModeAttr().Set(previous_mode)
+                voxelization_api.CreateMaxResolutionAttr().Set(previous_max_resolution)
+                enabled_attribute.Set(True)
+                await app.next_update_async()
+                restored_readiness = (
+                    await flow_validation.wait_for_kit_cae_dataset_emitter_ready(
+                        app,
+                        emitter_prim,
+                    )
+                )
+                if not restored_readiness["ready"]:
+                    raise RuntimeError(
+                        "DataSetEmitter did not recover after restoring its "
+                        "voxelization."
+                    )
+                restored_density_cell_size = flow_simulate.GetAttribute(
+                    "densityCellSize"
+                ).Get()
+                self._flow_density_cell_size = (
+                    float(restored_density_cell_size)
+                    if isinstance(restored_density_cell_size, (int, float))
+                    and restored_density_cell_size > 0
+                    else previous_density_cell_size
+                )
+                self._flow_voxel_max_resolution = previous_max_resolution
+                if previous_tracer_radius is not None:
+                    self._author_kit_cae_intake_tracer_radius(
+                        stage,
+                        tracer_root_path,
+                        previous_tracer_radius,
+                        Gf,
+                        UsdGeom,
+                    )
+                    await app.next_update_async()
+                await flow_smoke.pulse_kit_cae_flow_clear(
+                    app,
+                    flow_environment_path,
+                )
+                if timeline_restarted:
+                    self._restart_kit_cae_temporal_loop(timeline)
+            except Exception as recovery_error:  # noqa: BLE001
+                carb.log_error(
+                    "DTRS FLOW / VOXEL RESOLUTION recovery failed: " f"{recovery_error}"
+                )
+            finally:
+                enabled_attribute.Set(True)
+            return SimulationCacheResult(
+                False,
+                f"Flow resolution failed; previous voxelization was restored: {error}",
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+            if not timeline_restarted:
+                timeline.set_current_time(timeline_time)
+                if timeline_was_playing:
+                    timeline.play()
+
+        stage_meters_per_unit = float(UsdGeom.GetStageMetersPerUnit(stage))
+        carb.log_warn(
+            self._format_flow_log_block(
+                "VOXEL RESOLUTION",
+                (
+                    (
+                        "",
+                        (
+                            ("Kit-CAE maxResolution:", max_resolution),
+                            (
+                                "VTI voxel size:",
+                                self._format_flow_vti_voxel_size_mm(
+                                    stage_meters_per_unit
+                                ),
+                            ),
+                            (
+                                "Flow density cell size:",
+                                (
+                                    self._kit_cae_physical_length_text(
+                                        self._flow_density_cell_size,
+                                        stage_meters_per_unit,
+                                    )
+                                ),
+                            ),
+                            ("Flow reset:", True),
+                            ("VTI reimport:", False),
+                            ("Timeline restarted:", timeline_restarted),
+                            ("Loop start:", 0),
+                            (
+                                "Loop end:",
+                                f"{self._flow_temporal_end_time_code:g}",
+                            ),
+                            ("Timeline advancing:", timeline_advancing),
+                            (
+                                "Source after restart:",
+                                (
+                                    source_after_restart.name
+                                    if source_after_restart is not None
+                                    else "unavailable"
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        )
+        return SimulationCacheResult(
+            True,
+            f"Flow voxel resolution set to {max_resolution} without VTI reimport.",
         )
 
     async def apply_kit_cae_emitter_layout_in_kit(
@@ -1580,6 +2034,10 @@ class FlowRuntimeMixin(
                     self._flow_kit_cae_active_operator_paths.add(prim_path)
                 else:
                     self._flow_kit_cae_active_operator_paths.discard(prim_path)
+                    self._flow_kit_cae_operator_completion_counts[prim_path] = (
+                        self._flow_kit_cae_operator_completion_counts.get(prim_path, 0)
+                        + 1
+                    )
 
         self._flow_kit_cae_operator_subscriptions = (
             dispatcher.observe_event(
@@ -1605,6 +2063,7 @@ class FlowRuntimeMixin(
                 reset()
         with self._flow_kit_cae_operator_lock:
             self._flow_kit_cae_active_operator_paths.clear()
+            self._flow_kit_cae_operator_completion_counts.clear()
 
     async def _await_kit_cae_operator_quiescence(self, app, carb) -> bool:
         """Wait for tracked Kit-CAE work without freezing the Kit update loop."""
@@ -1629,6 +2088,163 @@ class FlowRuntimeMixin(
                 return False
             await app.next_update_async()
 
+    def _kit_cae_operator_completion_count(self, prim_path: str) -> int:
+        """Return the observed lifecycle-completion count for one CAE operator."""
+
+        with self._flow_kit_cae_operator_lock:
+            return self._flow_kit_cae_operator_completion_counts.get(prim_path, 0)
+
+    async def _await_kit_cae_fresh_dataset_emitter_rebuild(
+        self,
+        app,
+        emitter_prim,
+        flow_simulate,
+        *,
+        requested_max_resolution: int,
+        previous_max_resolution: int,
+        previous_density_cell_size: float | None,
+        previous_payload_fingerprint: str,
+        completion_count_before: int,
+    ) -> dict[str, object]:
+        """Wait for a new DataSetEmitter execution and resolution-consistent output."""
+
+        emitter_path = str(emitter_prim.GetPath())
+        deadline = time.monotonic() + 10.0
+        while True:
+            completion_count = self._kit_cae_operator_completion_count(emitter_path)
+            density_raw = flow_simulate.GetAttribute("densityCellSize").Get()
+            density_cell_size = (
+                float(density_raw)
+                if isinstance(density_raw, (int, float)) and density_raw > 0
+                else None
+            )
+            payload_attribute = emitter_prim.GetAttribute("nanoVdbVelocities")
+            payload = (
+                payload_attribute.Get()
+                if payload_attribute and payload_attribute.IsValid()
+                else None
+            )
+            payload_count = len(payload) if payload is not None else 0
+            payload_fingerprint = self._kit_cae_nano_vdb_payload_fingerprint(
+                payload,
+                payload_count,
+            )
+            operator_completed = completion_count > completion_count_before
+            payload_changed = payload_fingerprint != previous_payload_fingerprint
+            fresh_rebuild = self._kit_cae_voxel_rebuild_is_fresh(
+                requested_max_resolution=requested_max_resolution,
+                previous_max_resolution=previous_max_resolution,
+                previous_density_cell_size=previous_density_cell_size,
+                density_cell_size=density_cell_size,
+                operator_completed=operator_completed,
+                payload_changed=payload_changed,
+            )
+            if fresh_rebuild:
+                return {
+                    "completed": True,
+                    "density_cell_size": density_cell_size,
+                    "payload_count": payload_count,
+                    "payload_fingerprint": payload_fingerprint,
+                    "fresh_rebuild": True,
+                }
+            if time.monotonic() >= deadline:
+                return {
+                    "completed": operator_completed,
+                    "density_cell_size": density_cell_size,
+                    "payload_count": payload_count,
+                    "payload_fingerprint": payload_fingerprint,
+                    "fresh_rebuild": False,
+                }
+            await app.next_update_async()
+
+    def _log_kit_cae_voxel_rebuild(
+        self,
+        carb,
+        *,
+        requested_max_resolution: int,
+        previous_density_cell_size: float | None,
+        new_density_cell_size: float | None,
+        fresh_rebuild: bool,
+        stage_meters_per_unit: float,
+        previous_intake_tracer_radius: float | None,
+        intake_tracer_radius: float | None,
+    ) -> None:
+        """Record the fresh-output barrier that protects the Flow restart."""
+
+        carb.log_warn(
+            self._format_flow_log_block(
+                "VOXEL REBUILD",
+                (
+                    (
+                        "",
+                        (
+                            ("Requested resolution:", requested_max_resolution),
+                            ("Operator execution:", "COMPLETE"),
+                            (
+                                "Previous density cell:",
+                                self._kit_cae_physical_length_text(
+                                    previous_density_cell_size,
+                                    stage_meters_per_unit,
+                                ),
+                            ),
+                            (
+                                "New density cell:",
+                                self._kit_cae_physical_length_text(
+                                    new_density_cell_size,
+                                    stage_meters_per_unit,
+                                ),
+                            ),
+                            ("Fresh rebuild:", fresh_rebuild),
+                        ),
+                    ),
+                    (
+                        "Tracer emitters",
+                        self._kit_cae_voxel_rebuild_tracer_log_fields(
+                            previous_intake_tracer_radius,
+                            intake_tracer_radius,
+                            new_density_cell_size,
+                            stage_meters_per_unit,
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def _log_kit_cae_voxel_switch_abort(
+        self,
+        carb,
+        *,
+        requested_max_resolution: int,
+        readback_max_resolution,
+        density_cell_size: float | None,
+        stage_meters_per_unit: float,
+        reason: str,
+    ) -> None:
+        """Record a failed fresh-output barrier before restoring the prior session."""
+
+        density_text = (
+            f"{density_cell_size * stage_meters_per_unit * 1000.0:.3f} mm"
+            if density_cell_size is not None
+            else "unavailable"
+        )
+        carb.log_error(
+            self._format_flow_log_block(
+                "VOXEL SWITCH ABORT",
+                (
+                    (
+                        "",
+                        (
+                            ("Phase:", "WAITING_FOR_FRESH_DATASET_EMITTER"),
+                            ("Requested:", requested_max_resolution),
+                            ("Readback:", readback_max_resolution),
+                            ("Density cell:", density_text),
+                            ("Reason:", reason),
+                        ),
+                    ),
+                ),
+            )
+        )
+
     def _clear_flow_runtime_state(self) -> None:
         """Forget DTRS Flow handles only after teardown or shutdown cancellation."""
 
@@ -1639,6 +2255,9 @@ class FlowRuntimeMixin(
         self._flow_base_velocity_scale = None
         self._flow_world_bounds = None
         self._flow_density_cell_size = None
+        self._flow_intake_tracer_radius_to_cell = None
+        self._flow_vti_spacing = None
+        self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
         self._flow_attach_cancel_event = None
         self._flow_temporal_records = []
@@ -1757,6 +2376,441 @@ class FlowRuntimeMixin(
         lines.extend(("", rule))
         return "\n".join(lines)
 
+    def _format_flow_vti_voxel_size_mm(self, stage_meters_per_unit: float) -> str:
+        """Format the attached VTI spacing in physical units for A/B evidence."""
+
+        if not self._flow_vti_spacing:
+            return "unavailable"
+        spacing_mm = tuple(
+            value * stage_meters_per_unit * 1000.0 for value in self._flow_vti_spacing
+        )
+        if max(spacing_mm) - min(spacing_mm) < 1e-9:
+            return f"{spacing_mm[0]:.3f} mm"
+        return " x ".join(f"{value:.3f}" for value in spacing_mm) + " mm"
+
+    @staticmethod
+    def _kit_cae_nano_vdb_payload_fingerprint(payload, payload_count: int) -> str:
+        """Summarize NanoVDB output without hashing or traversing the full payload."""
+
+        if payload is None:
+            return "unavailable"
+        sample_count = min(4, payload_count)
+        head = tuple(int(payload[index]) for index in range(sample_count))
+        tail_start = max(payload_count - sample_count, 0)
+        tail = tuple(int(payload[index]) for index in range(tail_start, payload_count))
+        return f"len={payload_count}; head={head}; tail={tail}"
+
+    @staticmethod
+    def _read_kit_cae_intake_tracer_radius(
+        stage,
+        tracer_root_path: str,
+        UsdGeom,
+    ) -> float | None:
+        """Read the uniform scale authored on every active intake tracer mesh."""
+
+        tracer_root = stage.GetPrimAtPath(tracer_root_path)
+        if not tracer_root or not tracer_root.IsValid():
+            return None
+        radii: list[float] = []
+        tracer_meshes = sorted(
+            (prim for prim in tracer_root.GetChildren() if prim.IsA(UsdGeom.Mesh)),
+            key=lambda prim: str(prim.GetPath()),
+        )
+        for tracer_mesh in tracer_meshes:
+            scale_op = next(
+                (
+                    op
+                    for op in UsdGeom.Xformable(tracer_mesh).GetOrderedXformOps()
+                    if op.GetOpType() == UsdGeom.XformOp.TypeScale
+                ),
+                None,
+            )
+            scale = scale_op.Get() if scale_op is not None else None
+            if scale is None:
+                return None
+            try:
+                scale_components = tuple(float(scale[index]) for index in range(3))
+            except (IndexError, TypeError, ValueError):
+                return None
+            if (
+                any(component <= 0.0 for component in scale_components)
+                or max(scale_components) - min(scale_components) > 1e-6
+            ):
+                return None
+            radii.append(scale_components[0])
+        if not radii or max(radii) - min(radii) > 1e-6:
+            return None
+        return radii[0]
+
+    @staticmethod
+    def _author_kit_cae_intake_tracer_radius(
+        stage,
+        tracer_root_path: str,
+        radius: float,
+        Gf,
+        UsdGeom,
+    ) -> int:
+        """Set only the uniform authored scale on every existing intake tracer."""
+
+        if radius <= 0.0:
+            raise ValueError("Kit-CAE intake tracer radius must be positive.")
+        tracer_root = stage.GetPrimAtPath(tracer_root_path)
+        if not tracer_root or not tracer_root.IsValid():
+            raise RuntimeError("Kit-CAE intake tracer root is unavailable.")
+        tracer_meshes = sorted(
+            (prim for prim in tracer_root.GetChildren() if prim.IsA(UsdGeom.Mesh)),
+            key=lambda prim: str(prim.GetPath()),
+        )
+        if not tracer_meshes:
+            raise RuntimeError("Kit-CAE intake tracer meshes are unavailable.")
+        for tracer_mesh in tracer_meshes:
+            scale_op = next(
+                (
+                    op
+                    for op in UsdGeom.Xformable(tracer_mesh).GetOrderedXformOps()
+                    if op.GetOpType() == UsdGeom.XformOp.TypeScale
+                ),
+                None,
+            )
+            if scale_op is None:
+                raise RuntimeError(
+                    "Kit-CAE intake tracer is missing its scale transform."
+                )
+            scale_op.Set(Gf.Vec3f(radius, radius, radius))
+        return len(tracer_meshes)
+
+    @staticmethod
+    def _kit_cae_physical_length_text(
+        world_units: float | None,
+        stage_meters_per_unit: float,
+    ) -> str:
+        """Format a world-space length as its physical millimetre value."""
+
+        return (
+            f"{world_units * stage_meters_per_unit * 1000.0:.3f} mm"
+            if world_units is not None
+            else "unavailable"
+        )
+
+    @staticmethod
+    def _kit_cae_tracer_radius_cell_ratio(
+        intake_tracer_radius: float | None,
+        density_cell_size: float | None,
+    ) -> float | None:
+        """Return the authored emitter-radius-to-effective-Flow-cell ratio."""
+
+        if (
+            intake_tracer_radius is None
+            or density_cell_size is None
+            or intake_tracer_radius <= 0.0
+            or density_cell_size <= 0.0
+        ):
+            return None
+        return intake_tracer_radius / density_cell_size
+
+    @staticmethod
+    def _kit_cae_scaled_tracer_radius(
+        density_cell_size: float | None,
+        baseline_radius_to_cell: float | None,
+    ) -> float | None:
+        """Scale the tracer footprint from the successful Attach baseline."""
+
+        if (
+            density_cell_size is None
+            or baseline_radius_to_cell is None
+            or density_cell_size <= 0.0
+            or baseline_radius_to_cell <= 0.0
+        ):
+            return None
+        return density_cell_size * baseline_radius_to_cell
+
+    @classmethod
+    def _kit_cae_tracer_emitter_log_fields(
+        cls,
+        intake_tracer_radius: float | None,
+        density_cell_size: float | None,
+        stage_meters_per_unit: float,
+    ) -> tuple[tuple[str, object], ...]:
+        """Build actual authored tracer-radius evidence for Flow diagnostics."""
+
+        radius_per_cell = cls._kit_cae_tracer_radius_cell_ratio(
+            intake_tracer_radius,
+            density_cell_size,
+        )
+        return (
+            (
+                "Radius:",
+                cls._kit_cae_physical_length_text(
+                    intake_tracer_radius,
+                    stage_meters_per_unit,
+                ),
+            ),
+            (
+                "Flow density cell:",
+                cls._kit_cae_physical_length_text(
+                    density_cell_size,
+                    stage_meters_per_unit,
+                ),
+            ),
+            (
+                "Radius / cell size:",
+                (
+                    f"{radius_per_cell:.3f}"
+                    if radius_per_cell is not None
+                    else "unavailable"
+                ),
+            ),
+        )
+
+    @classmethod
+    def _kit_cae_voxel_rebuild_tracer_log_fields(
+        cls,
+        previous_intake_tracer_radius: float | None,
+        intake_tracer_radius: float | None,
+        density_cell_size: float | None,
+        stage_meters_per_unit: float,
+    ) -> tuple[tuple[str, object], ...]:
+        """Build live-switch evidence from radius read back after re-authoring."""
+
+        radius_changed = cls._kit_cae_tracer_radius_changed(
+            previous_intake_tracer_radius,
+            intake_tracer_radius,
+        )
+        radius_per_cell = cls._kit_cae_tracer_radius_cell_ratio(
+            intake_tracer_radius,
+            density_cell_size,
+        )
+        fields: tuple[tuple[str, object], ...] = (
+            (
+                "Previous radius:",
+                cls._kit_cae_physical_length_text(
+                    previous_intake_tracer_radius,
+                    stage_meters_per_unit,
+                ),
+            ),
+            (
+                "New radius:",
+                cls._kit_cae_physical_length_text(
+                    intake_tracer_radius,
+                    stage_meters_per_unit,
+                ),
+            ),
+            (
+                "Flow density cell:",
+                cls._kit_cae_physical_length_text(
+                    density_cell_size,
+                    stage_meters_per_unit,
+                ),
+            ),
+            (
+                "Radius / cell size:",
+                (
+                    f"{radius_per_cell:.3f}"
+                    if radius_per_cell is not None
+                    else "unavailable"
+                ),
+            ),
+            ("Radius changed:", radius_changed),
+        )
+        if radius_changed is False:
+            return fields + (("Radius status:", "UNCHANGED AFTER VOXEL SWITCH"),)
+        return fields
+
+    @staticmethod
+    def _kit_cae_tracer_radius_changed(
+        previous_radius: float | None,
+        new_radius: float | None,
+    ) -> bool | None:
+        """Compare authored tracer radii while preserving unavailable diagnostics."""
+
+        if previous_radius is None or new_radius is None:
+            return None
+        return abs(new_radius - previous_radius) > 1e-6
+
+    @staticmethod
+    def _kit_cae_voxel_rebuild_is_fresh(
+        *,
+        requested_max_resolution: int,
+        previous_max_resolution: int,
+        previous_density_cell_size: float | None,
+        density_cell_size: float | None,
+        operator_completed: bool,
+        payload_changed: bool,
+    ) -> bool:
+        """Require a completed operator and output consistent with the new grid."""
+
+        if not operator_completed or density_cell_size is None:
+            return False
+        if requested_max_resolution == previous_max_resolution:
+            return True
+        if previous_density_cell_size is None:
+            return payload_changed
+        density_changed_in_expected_direction = (
+            density_cell_size < previous_density_cell_size
+            if requested_max_resolution > previous_max_resolution
+            else density_cell_size > previous_density_cell_size
+        )
+        return density_changed_in_expected_direction and payload_changed
+
+    def _log_kit_cae_voxel_switch_trace(
+        self,
+        carb,
+        *,
+        phase: str,
+        requested_max_resolution: int,
+        previous_max_resolution: int,
+        stage,
+        timeline,
+        emitter_prim,
+        emitter_operator,
+        voxelization_api,
+        flow_simulate,
+        field_prim,
+        cae_vtk,
+        Usd,
+        trace_state: dict[str, object],
+    ) -> None:
+        """Log bounded evidence for one phase of a live voxel-resolution switch."""
+
+        from pxr import UsdGeom
+
+        timeline_time = float(timeline.get_current_time())
+        previous_timeline_time = trace_state.get("timeline_time")
+        timeline_advancing = (
+            timeline_time > previous_timeline_time
+            if isinstance(previous_timeline_time, (int, float))
+            else "n/a"
+        )
+        source = self._kit_cae_selected_velocity_asset(
+            field_prim,
+            timeline_time * stage.GetTimeCodesPerSecond(),
+            cae_vtk,
+            Usd,
+        )
+        previous_source = trace_state.get("source")
+        source_changed = (
+            source != previous_source if previous_source is not None else "n/a"
+        )
+        payload_attribute = emitter_prim.GetAttribute("nanoVdbVelocities")
+        payload = (
+            payload_attribute.Get()
+            if payload_attribute and payload_attribute.IsValid()
+            else None
+        )
+        payload_count = len(payload) if payload is not None else 0
+        fingerprint = self._kit_cae_nano_vdb_payload_fingerprint(
+            payload,
+            payload_count,
+        )
+        previous_fingerprint = trace_state.get("payload_fingerprint")
+        payload_changed = (
+            fingerprint != previous_fingerprint
+            if previous_fingerprint is not None
+            else "n/a"
+        )
+        couple_rate_attribute = emitter_prim.GetAttribute("coupleRateVelocity")
+        couple_rate = (
+            couple_rate_attribute.Get()
+            if couple_rate_attribute and couple_rate_attribute.IsValid()
+            else None
+        )
+        operator_ready = payload_count > 0 and float(couple_rate or 0.0) > 0.0
+        density_cell_size = flow_simulate.GetAttribute("densityCellSize").Get()
+        stage_meters_per_unit = float(UsdGeom.GetStageMetersPerUnit(stage))
+        density_cell_size_text = (
+            f"{float(density_cell_size) * stage_meters_per_unit * 1000.0:.3f} mm"
+            if isinstance(density_cell_size, (int, float)) and density_cell_size > 0
+            else "unavailable"
+        )
+        source_name = source.name if source is not None else "unavailable"
+        source_frame = (
+            flow_temporal.kit_cae_vti_source_frame(source)
+            if source is not None
+            else "unavailable"
+        )
+        readback_max_resolution = voxelization_api.GetMaxResolutionAttr().Get()
+        trace_state["timeline_time"] = timeline_time
+        trace_state["source"] = source
+        trace_state["payload_fingerprint"] = fingerprint
+        carb.log_warn(
+            self._format_flow_log_block(
+                "VOXEL SWITCH TRACE",
+                (
+                    (
+                        "",
+                        (
+                            ("Phase:", phase),
+                            (
+                                "Resolution:",
+                                (
+                                    f"{previous_max_resolution} -> "
+                                    f"{requested_max_resolution}"
+                                ),
+                            ),
+                        ),
+                    ),
+                    (
+                        "Voxelization",
+                        (
+                            ("mode:", voxelization_api.GetVoxelSizeModeAttr().Get()),
+                            ("requested:", requested_max_resolution),
+                            ("readback:", readback_max_resolution),
+                            ("densityCellSize:", density_cell_size_text),
+                        ),
+                    ),
+                    (
+                        "Timeline",
+                        (
+                            ("current:", f"{timeline_time:.3f} s"),
+                            ("playing:", timeline.is_playing()),
+                            (
+                                "loop end:",
+                                (
+                                    f"{self._flow_temporal_end_time_code:.3f} s"
+                                    if self._flow_temporal_end_time_code is not None
+                                    else "unavailable"
+                                ),
+                            ),
+                            ("advancing:", timeline_advancing),
+                        ),
+                    ),
+                    (
+                        "Temporal source",
+                        (
+                            ("resolved VTI:", source_name),
+                            ("source frame:", source_frame),
+                            ("source changed:", source_changed),
+                        ),
+                    ),
+                    (
+                        "DataSetEmitter",
+                        (
+                            ("enabled:", emitter_operator.CreateEnabledAttr().Get()),
+                            ("operator ready:", operator_ready),
+                        ),
+                    ),
+                    (
+                        "NanoVDB",
+                        (
+                            ("uint count:", payload_count),
+                            ("fingerprint:", fingerprint),
+                            ("payload changed:", payload_changed),
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    def _restart_kit_cae_temporal_loop(self, timeline) -> None:
+        """Restart the attached temporal VTI sequence at its bounded loop range."""
+
+        timeline.pause()
+        timeline.set_current_time(0.0)
+        if self._flow_temporal_end_time_code is not None:
+            timeline.play(0.0, self._flow_temporal_end_time_code, True)
+        else:
+            timeline.play()
+
     def _log_kit_cae_flow_attached(
         self,
         carb,
@@ -1770,10 +2824,14 @@ class FlowRuntimeMixin(
         flow_environment_path: str,
         dataset_emitter_path: str,
         base_velocity_scale: float,
+        stage_meters_per_unit: float,
+        density_cell_size_m: float | None,
+        intake_tracer_radius: float | None,
     ) -> None:
         """Emit one normal-path setup summary for the Flow temporal proof."""
 
         dimensions = " x ".join(str(value) for value in metadata["dimensions"])
+        vti_spacing = " x ".join(f"{float(value):.6g}" for value in metadata["spacing"])
         tracer_config = self.config.simulation_cache.intake_tracers
         smoke_tuning = self.config.simulation_cache.smoke_tuning
         effective_velocity_scale = (
@@ -1805,6 +2863,39 @@ class FlowRuntimeMixin(
                             ("operator_ready:", operator_ready),
                             ("Environment:", flow_environment_path),
                             ("Dataset emitter:", dataset_emitter_path),
+                            (
+                                "Stage metersPerUnit:",
+                                f"{stage_meters_per_unit:.6g}",
+                            ),
+                            (
+                                "VTI voxel size:",
+                                f"{vti_spacing} world units",
+                            ),
+                            (
+                                "Kit-CAE voxel maxResolution: ",
+                                (
+                                    self._flow_voxel_max_resolution
+                                    if self._flow_voxel_max_resolution is not None
+                                    else "unavailable"
+                                ),
+                            ),
+                            (
+                                "Flow density cell size:",
+                                (
+                                    f"{self._flow_density_cell_size:.6g} world units"
+                                    if self._flow_density_cell_size is not None
+                                    else "unavailable"
+                                ),
+                            ),
+                            (
+                                "Density cell physical:",
+                                (
+                                    f"{density_cell_size_m:.6g} m "
+                                    f"({density_cell_size_m * 1000.0:.3f} mm)"
+                                    if density_cell_size_m is not None
+                                    else "unavailable"
+                                ),
+                            ),
                         ),
                     ),
                     (
@@ -1823,6 +2914,14 @@ class FlowRuntimeMixin(
                             ),
                             ("Buoyancy:", "OFF"),
                             ("Combustion:", "OFF"),
+                        ),
+                    ),
+                    (
+                        "Tracer emitters",
+                        self._kit_cae_tracer_emitter_log_fields(
+                            intake_tracer_radius,
+                            self._flow_density_cell_size,
+                            stage_meters_per_unit,
                         ),
                     ),
                     (

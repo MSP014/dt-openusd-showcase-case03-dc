@@ -164,10 +164,14 @@ class RuntimeController(FlowRuntimeMixin, XRayRuntimeMixin):
             tuple[tuple[float, float, float], tuple[float, float, float]] | None
         ) = None
         self._flow_density_cell_size: float | None = None
+        self._flow_intake_tracer_radius_to_cell: float | None = None
+        self._flow_vti_spacing: tuple[float, float, float] | None = None
+        self._flow_voxel_max_resolution: int | None = None
         self._flow_lifecycle_state = "DETACHED"
         self._flow_attach_cancel_event: Event | None = None
         self._flow_kit_cae_operator_lock = Lock()
         self._flow_kit_cae_active_operator_paths: set[str] = set()
+        self._flow_kit_cae_operator_completion_counts: dict[str, int] = {}
         self._flow_kit_cae_operator_subscriptions: tuple[object, ...] = ()
         self._flow_temporal_asset_hashes: dict[Path, str] = {}
         self._flow_temporal_records: list[dict[str, object]] = []
@@ -205,6 +209,9 @@ class RuntimeController(FlowRuntimeMixin, XRayRuntimeMixin):
         self._flow_base_velocity_scale = None
         self._flow_world_bounds = None
         self._flow_density_cell_size = None
+        self._flow_intake_tracer_radius_to_cell = None
+        self._flow_vti_spacing = None
+        self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
         self._flow_attach_cancel_event = None
         self._flow_temporal_asset_hashes = {}

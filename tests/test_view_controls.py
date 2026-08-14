@@ -6,6 +6,11 @@ from digital_twin_runtime_suite.app.config import (
     EmitterLayoutConfig,
     SmokeTuningConfig,
 )
+from digital_twin_runtime_suite.app.flow.quality import (
+    KIT_CAE_FLOW_VOXEL_RESOLUTION_OPTIONS,
+    kit_cae_flow_voxel_resolution_from_index,
+    validate_kit_cae_flow_voxel_resolution,
+)
 from digital_twin_runtime_suite.app.view_controls import (
     bool_model_value,
     build_emitter_layout_from_models,
@@ -202,6 +207,21 @@ def test_smoke_tuning_models_reject_missing_or_invalid_dropdowns():
 def test_smoke_tuning_dropdown_index_rejects_unsupported_resolved_values():
     with pytest.raises(ValueError, match="density"):
         smoke_tuning_option_index("density", 9.0)
+
+
+def test_flow_voxel_resolution_selection_is_a_pending_runtime_only_choice():
+    assert KIT_CAE_FLOW_VOXEL_RESOLUTION_OPTIONS == (128, 192, 256)
+    assert kit_cae_flow_voxel_resolution_from_index(IntGetterModel(0)) == 128
+    assert kit_cae_flow_voxel_resolution_from_index(IntGetterModel(1)) == 192
+    assert kit_cae_flow_voxel_resolution_from_index(IntGetterModel(2)) == 256
+
+
+def test_flow_voxel_resolution_rejects_invalid_selection_and_runtime_values():
+    with pytest.raises(ValueError, match="out of range"):
+        kit_cae_flow_voxel_resolution_from_index(IntGetterModel(3))
+    for invalid_value in (127, 257, 192.0, True):
+        with pytest.raises(ValueError, match="must be one of"):
+            validate_kit_cae_flow_voxel_resolution(invalid_value)
 
 
 def test_smoke_color_hex_and_hsv_forms_build_the_same_pending_rgb_value():

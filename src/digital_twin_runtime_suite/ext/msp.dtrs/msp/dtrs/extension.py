@@ -68,6 +68,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._view_task = None
         self._auxiliary_windows_task = None
         self._smoke_tuning_combos = {}
+        self._flow_voxel_resolution_combo = None
         self._show_flow_debug_overlays_model = None
         self._flow_camera_bookmarks = {}
         self._lighting_task = None
@@ -865,9 +866,26 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             "raymarch_quality",
             smoke_tuning.raymarch_quality,
         )
+        from digital_twin_runtime_suite.app.flow.quality import (
+            KIT_CAE_FLOW_VOXEL_RESOLUTION_OPTIONS,
+        )
+
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Flow voxel resolution", width=SERVER_VIEW_LABEL_WIDTH)
+            self._flow_voxel_resolution_combo = ui.ComboBox(
+                0,
+                *(str(value) for value in KIT_CAE_FLOW_VOXEL_RESOLUTION_OPTIONS),
+                width=ui.Fraction(1),
+            )
         ui.Button(
             "Apply Smoke Settings",
             clicked_fn=self._schedule_apply_smoke_tuning,
+            height=26,
+            width=ui.Percent(100),
+        )
+        ui.Button(
+            "Apply & Restart Flow",
+            clicked_fn=self._schedule_apply_flow_voxel_resolution,
             height=26,
             width=ui.Percent(100),
         )
@@ -1744,6 +1762,12 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._airflow_task = asyncio.ensure_future(self._apply_smoke_tuning())
 
+    def _schedule_apply_flow_voxel_resolution(self) -> None:
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_airflow_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(self._apply_flow_voxel_resolution())
+
     def _schedule_apply_emitter_layout(self) -> None:
         if self._airflow_task and not self._airflow_task.done():
             self._set_airflow_status("Airflow operation is already in progress.")
@@ -2220,6 +2244,25 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_airflow_status(f"Smoke Tuning selection is invalid: {error}")
             return
         result = self._controller.apply_kit_cae_smoke_tuning_in_kit(tuning)
+        self._set_airflow_status(result.message)
+
+    async def _apply_flow_voxel_resolution(self) -> None:
+        from digital_twin_runtime_suite.app.flow.quality import (
+            kit_cae_flow_voxel_resolution_from_index,
+        )
+
+        model = self._combo_index_model(self._flow_voxel_resolution_combo)
+        if model is None:
+            self._set_airflow_status("Flow resolution control is unavailable.")
+            return
+        try:
+            max_resolution = kit_cae_flow_voxel_resolution_from_index(model)
+        except ValueError as error:
+            self._set_airflow_status(f"Flow resolution selection is invalid: {error}")
+            return
+        result = await self._controller.apply_kit_cae_voxel_resolution_in_kit(
+            max_resolution
+        )
         self._set_airflow_status(result.message)
 
     async def _apply_emitter_layout(self) -> None:
