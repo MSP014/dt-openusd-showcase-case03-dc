@@ -46,6 +46,13 @@ from digital_twin_runtime_suite.app.flow.runtime import (
     FlowRuntimeMixin,
     SimulationCacheResult,
 )
+from digital_twin_runtime_suite.app.flow.quality_runtime import (
+    FlowQualityRuntimeMixin,
+)
+from digital_twin_runtime_suite.app.flow.workload_transition import (
+    AttachedWorkloadTransitionMixin,
+)
+from digital_twin_runtime_suite.app.smoke.runtime import SmokeRuntimeMixin
 from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin
 from digital_twin_runtime_suite.app.workload_binding import (
     AttachValidationLease,
@@ -108,7 +115,13 @@ class FacePanelApplyResult:
     rotate_op: object | None = None
 
 
-class RuntimeController(FlowRuntimeMixin, XRayRuntimeMixin):
+class RuntimeController(
+    FlowRuntimeMixin,
+    FlowQualityRuntimeMixin,
+    AttachedWorkloadTransitionMixin,
+    SmokeRuntimeMixin,
+    XRayRuntimeMixin,
+):
     """Coordinate config-backed application commands for the DTRS viewer.
 
     The controller remains the public command facade and application-lifecycle

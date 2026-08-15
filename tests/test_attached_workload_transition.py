@@ -15,11 +15,13 @@ from digital_twin_runtime_suite.app.flow import runtime as flow_runtime
 from digital_twin_runtime_suite.app.flow import smoke as flow_smoke
 from digital_twin_runtime_suite.app.flow import temporal
 from digital_twin_runtime_suite.app.flow import validation as flow_validation
+from digital_twin_runtime_suite.app.flow import workload_transition
 from digital_twin_runtime_suite.app.flow.progress import (
     TemporalProofProgress,
     TemporalProofState,
 )
 from digital_twin_runtime_suite.app.flow.runtime import SimulationCacheResult
+from digital_twin_runtime_suite.app.smoke import runtime as smoke_runtime
 from digital_twin_runtime_suite.app.workload_binding.background_validation import (
     BackgroundValidationError,
 )
@@ -344,7 +346,7 @@ def test_attached_validation_failure_never_retargets_or_mutates_safe_runtime(
     controller.detach_simulation_cache_in_kit = lambda: lifecycle_calls.append("detach")
     controller.reset_simulation_cache_in_kit = lambda: lifecycle_calls.append("reset")
     monkeypatch.setattr(
-        flow_runtime.flow_smoke,
+        smoke_runtime.smoke_flow,
         "apply_kit_cae_direct_attach_velocity_scale",
         lambda *_args, **_kwargs: lifecycle_calls.append("velocityScale"),
     )
@@ -456,7 +458,11 @@ def test_missing_transition_target_reports_dataset_discovery_failure(monkeypatch
         retarget_calls.append(object())
         return SimulationCacheResult(True, "unexpected")
 
-    monkeypatch.setattr(flow_runtime, "discover_airflow_dataset", missing_dataset)
+    monkeypatch.setattr(
+        workload_transition,
+        "discover_airflow_dataset",
+        missing_dataset,
+    )
     controller._retarget_attached_workload_in_kit = retarget
 
     result = asyncio.run(

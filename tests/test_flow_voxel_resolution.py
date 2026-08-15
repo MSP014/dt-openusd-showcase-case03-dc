@@ -5,6 +5,9 @@ import pytest
 from digital_twin_runtime_suite.app.flow.quality import (
     validate_kit_cae_flow_voxel_resolution,
 )
+from digital_twin_runtime_suite.app.flow.quality_runtime import (
+    FlowQualityRuntimeMixin,
+)
 from digital_twin_runtime_suite.app.flow.runtime import FlowRuntimeMixin
 
 
@@ -13,7 +16,7 @@ class _PendingTask:
         return False
 
 
-class _RuntimeProbe(FlowRuntimeMixin):
+class _RuntimeProbe(FlowRuntimeMixin, FlowQualityRuntimeMixin):
     def __init__(
         self,
         *,
