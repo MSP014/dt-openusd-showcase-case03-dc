@@ -51,6 +51,14 @@ def _ensure_source_root(source_root: Path) -> None:
         sys.path.insert(0, src_root_text)
 
 
+def _with_dtrs_local_timestamp(message: str) -> str:
+    """Load the shared formatter only after the extension source root exists."""
+
+    from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
+
+    return with_dtrs_local_timestamp(message)
+
+
 class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     """Runtime controls for the current Digital Twin Runtime Suite slice."""
 
@@ -64,7 +72,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._load_task = None
         self._reload_task = None
         self._airflow_task = None
+        self._airflow_transition_task = None
         self._airflow_detach_requested = False
+        self._airflow_cache_selector_label = None
+        self._airflow_background_validation_task = None
         self._view_task = None
         self._auxiliary_windows_task = None
         self._smoke_tuning_combos = {}
@@ -142,6 +153,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
         )
         self._build_controller()
+        self._start_background_airflow_validation()
         self._build_window()
         asyncio.ensure_future(self._dock_left())
         self._auxiliary_windows_task = asyncio.ensure_future(
@@ -154,11 +166,15 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._schedule_load()
 
     def on_shutdown(self) -> None:
+        if self._controller:
+            self._controller.stop_background_airflow_validation()
         for task_name in (
             "_load_task",
             "_reload_task",
             "_lighting_task",
             "_airflow_task",
+            "_airflow_transition_task",
+            "_airflow_background_validation_task",
             "_view_task",
             "_auxiliary_windows_task",
         ):
@@ -189,6 +205,41 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._window.visible = False
             self._window = None
 
+    def _start_background_airflow_validation(self) -> None:
+        """Start one detached plain-data VTI validator for this DTRS session."""
+
+        if not self._controller:
+            return
+        try:
+            self._controller.start_background_airflow_validation()
+        except Exception as error:  # Startup diagnostics must not block DTRS.
+            carb.log_error(
+                _with_dtrs_local_timestamp(
+                    f"DTRS AIRFLOW BACKGROUND VALIDATION | START FAILED | {error}"
+                )
+            )
+            return
+        self._airflow_background_validation_task = asyncio.ensure_future(
+            self._run_background_airflow_validation()
+        )
+
+    async def _run_background_airflow_validation(self) -> None:
+        """Forward concise coordinator diagnostics without touching Flow state."""
+
+        def log(message: str) -> None:
+            carb.log_warn(_with_dtrs_local_timestamp(message))
+
+        try:
+            await self._controller.run_background_airflow_validation(log)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # Preserve startup even if registry assets change.
+            carb.log_error(
+                _with_dtrs_local_timestamp(
+                    f"DTRS AIRFLOW BACKGROUND VALIDATION | ABORTED | {error}"
+                )
+            )
+
     def _build_controller(self) -> None:
         source_root_setting = self._settings.get_as_string(
             f"{EXTENSION_SETTINGS}/sourceRoot"
@@ -214,6 +265,11 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
         # isort: off
         from digital_twin_runtime_suite.app.commands import RuntimeController
+        from digital_twin_runtime_suite.app.airflow_dataset import (
+            AirflowDatasetError,
+            discover_airflow_dataset_registry,
+            format_airflow_dataset_registry,
+        )
         from digital_twin_runtime_suite.app.motion import MultiRotationMotionController
         from digital_twin_runtime_suite.app.telemetry import SnapshotLatch
         from digital_twin_runtime_suite.app.telemetry import SyntheticTelemetryProvider
@@ -222,6 +278,20 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         # isort: on
 
         self._controller = RuntimeController(config_path)
+        try:
+            registry = discover_airflow_dataset_registry(
+                self._controller.config.asset_root,
+                self._controller.config.simulation_cache.airflow_dataset.root,
+            )
+        except AirflowDatasetError as error:
+            carb.log_error(
+                _with_dtrs_local_timestamp(
+                    f"DTRS AIRFLOW DATASET REGISTRY | Discovery failed: {error}"
+                )
+            )
+        else:
+            registry_log = format_airflow_dataset_registry(registry)
+            carb.log_warn(_with_dtrs_local_timestamp(registry_log))
         self._set_application_title_version(self._controller.config)
         telemetry_config_path = (
             config_path.parent / "telemetry_provider.toml"
@@ -229,12 +299,14 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._telemetry_config_path = telemetry_config_path
         telemetry_config = TelemetryConfig.load(telemetry_config_path)
         self._telemetry_provider = SyntheticTelemetryProvider(telemetry_config)
+        self._controller.set_workload_source(lambda: self._telemetry_provider.mode)
         self._telemetry_latch = SnapshotLatch()
         self._motion_controller = MultiRotationMotionController(
             self._controller.config.fan_motion_bindings
         )
         self._workload_modes = tuple(telemetry_config.modes)
         self._refresh_intervals = telemetry_config.allowed_refresh_intervals_s
+        self._log_workload_cache_mapping(telemetry_config.default_mode)
 
     @staticmethod
     def _set_application_title_version(config) -> None:
@@ -753,16 +825,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _build_airflow_cache_controls(self) -> None:
         cache = self._controller.config.simulation_cache
-        wrapper_name = (
-            f"{cache.airflow_dataset.scope} / {cache.airflow_dataset.state}"
-            if cache.runtime_mode == "kit_cae"
-            else (
-                Path(cache.wrapper_path).name
-                if cache.wrapper_path
-                else "Not configured"
-            )
-        )
-        ui.Label(
+        wrapper_name = self._airflow_cache_selector_text()
+        self._airflow_cache_selector_label = ui.Label(
             _compact_text(wrapper_name),
             height=18,
             elided_text=True,
@@ -1412,8 +1476,46 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         index = self._model_int(model)
         if 0 <= index < len(self._workload_modes):
-            self._telemetry_provider.set_mode(self._workload_modes[index])
+            workload_mode = self._workload_modes[index]
+            self._telemetry_provider.set_mode(workload_mode)
+            self._log_workload_cache_mapping(workload_mode)
+            self._refresh_airflow_cache_selector_label()
+            self._schedule_attached_workload_transition(workload_mode)
             self._next_telemetry_ui_update = 0.0
+
+    def _airflow_cache_selector_text(self) -> str:
+        """Return the next or current Flow selector without changing runtime state."""
+
+        if not self._controller:
+            return "Not configured"
+        cache = self._controller.config.simulation_cache
+        if cache.runtime_mode != "kit_cae":
+            return (
+                Path(cache.wrapper_path).name
+                if cache.wrapper_path
+                else "Not configured"
+            )
+        try:
+            return self._controller.airflow_cache_selector_identity()
+        except (RuntimeError, ValueError):
+            return "Not configured"
+
+    def _refresh_airflow_cache_selector_label(self) -> None:
+        if not self._airflow_cache_selector_label:
+            return
+        selector_text = self._airflow_cache_selector_text()
+        self._airflow_cache_selector_label.text = _compact_text(selector_text)
+        self._airflow_cache_selector_label.tooltip = selector_text
+
+    def _log_workload_cache_mapping(self, workload_mode: str) -> None:
+        """Report mapping resolution without changing the Flow lifecycle."""
+
+        if not self._controller:
+            return
+        mapping_log = self._controller.resolve_workload_airflow_binding(
+            workload_mode
+        ).format_mapping_log()
+        carb.log_warn(mapping_log)
 
     def _on_refresh_interval_changed(self, model) -> None:
         if not self._telemetry_provider:
@@ -1739,7 +1841,36 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._airflow_task = asyncio.ensure_future(self._attach_airflow())
 
+    def _schedule_attached_workload_transition(self, workload_mode: str) -> None:
+        """Forward a semantic workload change without owning Flow arbitration."""
+
+        if not self._controller:
+            return
+        task = self._airflow_transition_task
+        if task and not task.done():
+            # The controller owns generation-based supersession.  Do not drop a
+            # newer workload request merely because an older transition awaits.
+            self._airflow_transition_task = asyncio.ensure_future(
+                self._run_attached_workload_transition(workload_mode)
+            )
+            return
+        self._airflow_transition_task = asyncio.ensure_future(
+            self._run_attached_workload_transition(workload_mode)
+        )
+
+    async def _run_attached_workload_transition(self, workload_mode: str) -> None:
+        result = await self._controller.request_attached_workload_transition_in_kit(
+            workload_mode,
+            status_callback=self._set_airflow_status,
+        )
+        self._refresh_airflow_cache_selector_label()
+        if not result.success:
+            self._set_airflow_status(result.message)
+
     def _schedule_detach_airflow(self) -> None:
+        transition_task = self._airflow_transition_task
+        if transition_task and not transition_task.done():
+            transition_task.cancel()
         if self._airflow_task and not self._airflow_task.done():
             if self._airflow_detach_requested:
                 self._set_airflow_status("Cancelling airflow preparation…")
@@ -2182,9 +2313,14 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         return result
 
     async def _attach_airflow(self) -> None:
+        def update_status(message: str) -> None:
+            self._refresh_airflow_cache_selector_label()
+            self._set_airflow_status(message)
+
         result = await self._controller.attach_simulation_cache_in_kit(
-            status_callback=self._set_airflow_status,
+            status_callback=update_status,
         )
+        self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
 
     async def _cancel_attach_then_detach(self, attach_task) -> None:
@@ -2213,6 +2349,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             carb.log_error(f"DTRS airflow detach task failed: {error}")
             self._set_airflow_status(f"Airflow cache detach failed: {error}")
             return
+        self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
 
     async def _apply_smoke_tuning(self) -> None:

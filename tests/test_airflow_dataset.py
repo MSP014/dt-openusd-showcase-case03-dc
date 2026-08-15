@@ -6,6 +6,8 @@ from digital_twin_runtime_suite.app.airflow_dataset import (
     AirflowDatasetError,
     AirflowDatasetSelector,
     discover_airflow_dataset,
+    discover_airflow_dataset_registry,
+    format_airflow_dataset_registry,
     validate_airflow_dataset_grid,
 )
 
@@ -73,6 +75,56 @@ def test_discovers_manifest_identity_independent_of_numbered_directories(tmp_pat
     ]
 
 
+def test_discovers_registry_by_manifest_identity_in_deterministic_order(tmp_path):
+    root = tmp_path / "airflow_datasets"
+    _write_dataset(root, directory=("99_misc", "critical"), state="load_critical")
+    _write_dataset(root, directory=("02_server", "normal"), state="load_normal")
+    _write_dataset(root, directory=("01_server", "idle"), state="load_idle")
+    _write_dataset(root, directory=("07_misc", "surge"), state="load_surge")
+
+    registry = discover_airflow_dataset_registry(tmp_path, "airflow_datasets")
+
+    assert [
+        (dataset.manifest.scope, dataset.manifest.state) for dataset in registry
+    ] == [
+        ("server", "load_idle"),
+        ("server", "load_normal"),
+        ("server", "load_surge"),
+        ("server", "load_critical"),
+    ]
+    assert format_airflow_dataset_registry(registry) == "\n".join(
+        (
+            "========================================",
+            "DTRS AIRFLOW DATASET REGISTRY",
+            "Discovered: 4",
+            "server/load_idle",
+            "server/load_normal",
+            "server/load_surge",
+            "server/load_critical",
+            "========================================",
+        )
+    )
+
+
+def test_registry_rejects_duplicate_manifest_identity(tmp_path):
+    root = tmp_path / "airflow_datasets"
+    _write_dataset(root, directory=("01_server", "normal"))
+    _write_dataset(root, directory=("99_duplicate", "copy"))
+
+    with pytest.raises(AirflowDatasetError, match="identity is ambiguous"):
+        discover_airflow_dataset_registry(tmp_path, "airflow_datasets")
+
+
+def test_registry_rejects_malformed_manifest(tmp_path):
+    root = tmp_path / "airflow_datasets"
+    malformed_dir = root / "01_server" / "broken"
+    malformed_dir.mkdir(parents=True)
+    (malformed_dir / "manifest.toml").write_text("scope = [", encoding="utf-8")
+
+    with pytest.raises(AirflowDatasetError, match="Malformed airflow dataset manifest"):
+        discover_airflow_dataset_registry(tmp_path, "airflow_datasets")
+
+
 def test_validates_manifest_timing_and_grid_contract(tmp_path):
     root = tmp_path / "airflow_datasets"
     _write_dataset(root)
@@ -130,6 +182,20 @@ def test_rejects_manifest_sample_rate_that_disagrees_with_source_timing(tmp_path
     _write_dataset(root, sample_rate_hz=2.0)
 
     with pytest.raises(AirflowDatasetError, match="sample rate disagrees"):
+        discover_airflow_dataset(tmp_path, _selector())
+
+
+def test_rejects_manifest_duration_that_disagrees_with_source_timing(tmp_path):
+    root = tmp_path / "airflow_datasets"
+    dataset_dir = _write_dataset(root)
+    (dataset_dir / "manifest.toml").write_text(
+        (dataset_dir / "manifest.toml")
+        .read_text(encoding="utf-8")
+        .replace("sample_count = 3\n", "sample_count = 3\nduration = 15.0\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AirflowDatasetError, match="duration disagrees"):
         discover_airflow_dataset(tmp_path, _selector())
 
 

@@ -6,6 +6,8 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from .progress import TemporalProofState
+
 
 @dataclass(frozen=True)
 class ViewportPerformanceSample:
@@ -301,20 +303,27 @@ class FlowPerformanceMixin:
         except asyncio.CancelledError:
             return
 
-    def _temporal_validation_log_fields(self) -> tuple[tuple[str, str], ...]:
-        """Expose proof progress to diagnostics without owning its lifecycle."""
+    def _last_temporal_proof_log_fields(self) -> tuple[tuple[str, str], ...]:
+        """Expose completed proof evidence without presenting it as live state."""
 
         progress = self.temporal_proof_progress()
+        if progress.state in {
+            TemporalProofState.IDLE,
+            TemporalProofState.PASSED,
+            TemporalProofState.CANCELLED,
+        }:
+            return ()
         percentage = progress.percentage
         fields = [
-            ("State:", progress.state.value),
+            ("Dataset:", self._flow_last_temporal_proof_selector or "unavailable"),
+            ("Result:", progress.state.value),
             ("Result source:", progress.result_source.value),
             (
                 "Samples validated:",
                 f"{progress.validated_sample_count} / {progress.total_sample_count}"
                 + (f" ({percentage}%)" if percentage is not None else ""),
             ),
-            ("Current source:", progress.current_asset_name or "unavailable"),
+            ("Terminal proof source:", progress.current_asset_name or "unavailable"),
             ("Validation elapsed:", f"{progress.elapsed_seconds:.1f} s"),
         ]
         if progress.loop_closure_state:
@@ -335,84 +344,85 @@ class FlowPerformanceMixin:
         latest_sample = samples[-1]
         statistics = self._flow_performance_statistics(samples)
         elapsed = latest_sample.captured_at - self._flow_performance_attached_at
+        transition_state = self.airflow_transition_state()
+        sections = [
+            ("", (("Elapsed since Attach:", f"{elapsed:.1f} s"),)),
+            (
+                "FPS",
+                (
+                    (
+                        "Average:",
+                        self._format_flow_performance_value(statistics["fps_average"]),
+                    ),
+                    (
+                        "Minimum:",
+                        self._format_flow_performance_value(statistics["fps_minimum"]),
+                    ),
+                    (
+                        "Maximum:",
+                        self._format_flow_performance_value(statistics["fps_maximum"]),
+                    ),
+                ),
+            ),
+            (
+                "Frame time",
+                (
+                    (
+                        "Average:",
+                        self._format_flow_performance_value(
+                            statistics["frame_time_average"], suffix=" ms"
+                        ),
+                    ),
+                ),
+            ),
+            (
+                "Memory",
+                (
+                    (
+                        "GPU memory used:",
+                        self._format_flow_performance_value(
+                            latest_sample.gpu_memory_used_gib, suffix=" GiB"
+                        ),
+                    ),
+                    (
+                        "Process memory:",
+                        self._format_flow_performance_value(
+                            latest_sample.process_memory_used_gib, suffix=" GiB"
+                        ),
+                    ),
+                ),
+            ),
+            (
+                "Flow",
+                (
+                    (
+                        "Semantic workload:",
+                        transition_state["semantic_workload"] or "unavailable",
+                    ),
+                    (
+                        "Active airflow selector:",
+                        transition_state["active_airflow_selector"] or "unavailable",
+                    ),
+                    (
+                        "Pending airflow selector:",
+                        transition_state["pending_airflow_selector"] or "None",
+                    ),
+                    (
+                        "Live temporal source:",
+                        latest_sample.temporal_source or "unavailable",
+                    ),
+                    ("Camera bookmark:", self._flow_performance_camera_bookmark),
+                    ("Flow attached:", bool(self._flow_airflow_simulate_path)),
+                ),
+            ),
+        ]
+        last_temporal_proof = self._last_temporal_proof_log_fields()
+        if last_temporal_proof:
+            sections.append(("Last temporal proof", last_temporal_proof))
         carb.log_warn(
             self._format_flow_log_block(
                 "PERFORMANCE",
-                (
-                    (
-                        "",
-                        (("Elapsed since Attach:", f"{elapsed:.1f} s"),),
-                    ),
-                    (
-                        "FPS",
-                        (
-                            (
-                                "Average:",
-                                self._format_flow_performance_value(
-                                    statistics["fps_average"]
-                                ),
-                            ),
-                            (
-                                "Minimum:",
-                                self._format_flow_performance_value(
-                                    statistics["fps_minimum"]
-                                ),
-                            ),
-                            (
-                                "Maximum:",
-                                self._format_flow_performance_value(
-                                    statistics["fps_maximum"]
-                                ),
-                            ),
-                        ),
-                    ),
-                    (
-                        "Frame time",
-                        (
-                            (
-                                "Average:",
-                                self._format_flow_performance_value(
-                                    statistics["frame_time_average"],
-                                    suffix=" ms",
-                                ),
-                            ),
-                        ),
-                    ),
-                    (
-                        "Memory",
-                        (
-                            (
-                                "GPU memory used:",
-                                self._format_flow_performance_value(
-                                    latest_sample.gpu_memory_used_gib,
-                                    suffix=" GiB",
-                                ),
-                            ),
-                            (
-                                "Process memory:",
-                                self._format_flow_performance_value(
-                                    latest_sample.process_memory_used_gib,
-                                    suffix=" GiB",
-                                ),
-                            ),
-                        ),
-                    ),
-                    (
-                        "Flow",
-                        (
-                            (
-                                "Temporal source:",
-                                latest_sample.temporal_source or "unavailable",
-                            ),
-                            (
-                                "Camera bookmark:",
-                                self._flow_performance_camera_bookmark,
-                            ),
-                            ("Flow attached:", bool(self._flow_airflow_simulate_path)),
-                        ),
-                    ),
-                    ("Temporal validation", self._temporal_validation_log_fields()),
-                ),
+                tuple(sections),
             )
         )
 

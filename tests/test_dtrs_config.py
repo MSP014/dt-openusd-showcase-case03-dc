@@ -100,8 +100,19 @@ def test_runtime_display_version_derives_major_minor(
     assert config.simulation_cache.airflow_dataset.root == "airflow_datasets"
     assert config.simulation_cache.airflow_dataset.scope == "server"
     assert config.simulation_cache.airflow_dataset.state == "load_normal"
+    assert {
+        workload_mode: f"{dataset.scope}/{dataset.state}"
+        for workload_mode, dataset in (
+            config.simulation_cache.workload_dataset_mapping.items()
+        )
+    } == {
+        "Idle": "server/load_idle",
+        "Nominal": "server/load_normal",
+        "Surge": "server/load_surge",
+        "Critical": "server/load_critical",
+    }
     dataset = config.resolve_airflow_dataset()
-    assert dataset.velocity_vti_path.name == "server_airflow_velocity_1001.vti"
+    assert dataset.velocity_vti_path.name == "server_airflow_velocity_normal_1001.vti"
     assert dataset.manifest.sample_count == len(dataset.velocity_vti_sequence_paths)
     assert dataset.manifest.source_fps == 50.0
     assert dataset.manifest.sample_step_frames == 10
@@ -110,8 +121,8 @@ def test_runtime_display_version_derives_major_minor(
     assert dataset.loop_duration_seconds == 16.0
     assert dataset.manifest.grid == (184, 72, 232)
     sequence_names = tuple(path.name for path in dataset.velocity_vti_sequence_paths)
-    assert sequence_names[0] == "server_airflow_velocity_1001.vti"
-    assert sequence_names[-1] == "server_airflow_velocity_1791.vti"
+    assert sequence_names[0] == "server_airflow_velocity_normal_1001.vti"
+    assert sequence_names[-1] == "server_airflow_velocity_normal_1791.vti"
     assert [
         int(name.removesuffix(".vti").rsplit("_", maxsplit=1)[-1])
         for name in sequence_names
@@ -137,6 +148,45 @@ def test_kit_cae_route_requires_airflow_dataset_identity(tmp_path):
         raise AssertionError(
             "Expected missing airflow dataset identity to be rejected."
         )
+
+
+def test_kit_cae_route_requires_all_workload_dataset_mappings(tmp_path):
+    source_config = Path("configs/digital_twin_runtime_suite.toml")
+    invalid_config = source_config.read_text(encoding="utf-8").replace(
+        'Surge = { scope = "server", state = "load_surge" }\n',
+        "",
+        1,
+    )
+    config_path = tmp_path / "digital_twin_runtime_suite.toml"
+    config_path.write_text(invalid_config, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="missing workload mappings: Surge"):
+        RuntimeConfig.load(config_path, apply_local_overrides=False)
+
+
+@pytest.mark.parametrize(
+    ("workload_mode", "dataset_identity"),
+    (
+        ("Idle", "server/load_idle"),
+        ("Nominal", "server/load_normal"),
+        ("Surge", "server/load_surge"),
+        ("Critical", "server/load_critical"),
+    ),
+)
+def test_simulation_cache_resolves_each_semantic_workload_to_its_dataset(
+    workload_mode,
+    dataset_identity,
+):
+    config = RuntimeConfig.load(
+        Path("configs/digital_twin_runtime_suite.toml"),
+        apply_local_overrides=False,
+    )
+
+    selector = config.simulation_cache.airflow_dataset_selector_for_workload(
+        workload_mode
+    )
+
+    assert f"{selector.scope}/{selector.state}" == dataset_identity
 
 
 def test_v02_runtime_config_resolves_server_fan_motion_bindings():

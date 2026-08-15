@@ -733,7 +733,7 @@ def test_temporal_vti_validation_wrapper_forwards_worker_progress(
     monkeypatch,
     tmp_path,
 ):
-    from digital_twin_runtime_suite.app.flow import temporal
+    from digital_twin_runtime_suite.app.airflow_validation import preflight
 
     paths = (tmp_path / "server_airflow_velocity_1001.vti",)
     from queue import SimpleQueue
@@ -752,7 +752,7 @@ def test_temporal_vti_validation_wrapper_forwards_worker_progress(
         progress_callback(1, 1, velocity_paths[0].name)
         return {"dimensions": (1, 1, 1)}, True
 
-    monkeypatch.setattr(temporal, "validate_kit_cae_temporal_vti_contract", validate)
+    monkeypatch.setattr(preflight, "validate_kit_cae_temporal_vti_contract", validate)
 
     metadata, grid_match = RuntimeController._validate_kit_cae_temporal_vti_contract(
         paths,
@@ -806,7 +806,7 @@ def test_session_validation_signature_tracks_manifest_and_vti_metadata(tmp_path)
         AirflowDatasetSelector,
         discover_airflow_dataset,
     )
-    from digital_twin_runtime_suite.app.flow.validation_cache import (
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
         build_dataset_validation_signature,
     )
 
@@ -835,8 +835,57 @@ def test_session_validation_signature_tracks_manifest_and_vti_metadata(tmp_path)
     assert build_dataset_validation_signature(rediscovered, "vel") != initial
 
 
+def test_session_validation_signature_tracks_sequence_addition_and_removal(tmp_path):
+    from dataclasses import replace
+
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
+        build_dataset_validation_signature,
+    )
+
+    dataset = _write_airflow_validation_dataset(tmp_path)
+    initial = build_dataset_validation_signature(dataset, "vel")
+    added_sample = dataset.directory / "server_airflow_velocity_1021.vti"
+    added_sample.write_bytes(b"third")
+    with_added = replace(
+        dataset,
+        velocity_vti_sequence_paths=(
+            *dataset.velocity_vti_sequence_paths,
+            added_sample,
+        ),
+    )
+    added_signature = build_dataset_validation_signature(with_added, "vel")
+    without_first = replace(
+        with_added,
+        velocity_vti_sequence_paths=with_added.velocity_vti_sequence_paths[1:],
+    )
+
+    assert added_signature != initial
+    assert build_dataset_validation_signature(without_first, "vel") != added_signature
+
+
+def test_session_validation_signature_changes_only_for_validation_field_config(
+    tmp_path,
+):
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
+        SessionValidationCache,
+        build_dataset_validation_signature,
+    )
+
+    dataset = _write_airflow_validation_dataset(tmp_path)
+    base = build_dataset_validation_signature(dataset, "vel")
+    cache = SessionValidationCache()
+    cache.store_preflight(base, {"dimensions": (2, 2, 2)}, grid_match=True)
+
+    changed_field = build_dataset_validation_signature(dataset, "velocity")
+    assert changed_field != base
+    assert cache.lookup(changed_field).result == "INVALIDATED"
+    # Smoke/UI tuning never enters the builder; unchanged field selection is a HIT.
+    assert build_dataset_validation_signature(dataset, "vel") == base
+    assert cache.lookup(base).result == "HIT"
+
+
 def test_session_validation_cache_reuses_only_successful_receipts(tmp_path):
-    from digital_twin_runtime_suite.app.flow.validation_cache import (
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
         SessionValidationCache,
         build_dataset_validation_signature,
     )
@@ -909,7 +958,7 @@ def test_reload_config_rejects_active_airflow_without_clearing_receipts(
 ) -> None:
     """Reload must not invalidate a live Flow session or its accepted receipts."""
 
-    from digital_twin_runtime_suite.app.flow.validation_cache import (
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
         build_dataset_validation_signature,
     )
 
@@ -933,13 +982,13 @@ def test_reload_config_rejects_active_airflow_without_clearing_receipts(
     assert controller._flow_validation_cache.lookup(signature).preflight is not None
 
 
-def test_reload_config_starts_a_new_detached_validation_session(
+def test_reload_config_resets_transient_state_but_reuses_matching_receipts(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """Detached reload stops callbacks, reloads config, and drops session receipts."""
+    """Reload resets runtime work without discarding matching VTI preflight."""
 
-    from digital_twin_runtime_suite.app.flow.validation_cache import (
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
         build_dataset_validation_signature,
     )
 
@@ -953,23 +1002,90 @@ def test_reload_config_starts_a_new_detached_validation_session(
         grid_match=True,
     )
     callback_stops = []
+    background_stops = []
     loaded_paths = []
     expected_config = controller.config
 
     def stop_callbacks() -> None:
         callback_stops.append(True)
 
+    def stop_background() -> None:
+        background_stops.append(True)
+
     def load_config(path: Path) -> RuntimeConfig:
         loaded_paths.append(path)
         return expected_config
 
     monkeypatch.setattr(controller, "stop_flow_runtime_callbacks", stop_callbacks)
+    monkeypatch.setattr(
+        controller, "stop_background_airflow_validation", stop_background
+    )
     monkeypatch.setattr(RuntimeConfig, "load", staticmethod(load_config))
+    controller._flow_session_workload_binding = (
+        controller.resolve_workload_airflow_binding("Nominal")
+    )
+    controller._flow_pending_workload_binding = (
+        controller.resolve_workload_airflow_binding("Critical")
+    )
+    controller._flow_last_airflow_failure = {"reason": "old"}
+    controller._flow_transition_sequence = 42
+    controller._flow_active_transition_id = "T0042"
+    controller._airflow_validation_coordinator = object()
 
     reloaded = controller.reload_config()
 
     assert callback_stops == [True]
+    assert background_stops == [True]
     assert loaded_paths == [controller._config_path]
     assert reloaded is expected_config
     assert controller._flow_lifecycle_state == "DETACHED"
-    assert controller._flow_validation_cache.lookup(signature).result == "MISS"
+    assert controller._flow_validation_cache.lookup(signature).result == "HIT"
+    assert controller._flow_session_workload_binding is None
+    assert controller._flow_pending_workload_binding is None
+    assert controller._flow_last_airflow_failure is None
+    assert controller._flow_transition_sequence == 0
+    assert controller._flow_active_transition_id is None
+    assert controller._airflow_validation_coordinator is None
+
+
+def test_runtime_only_config_reload_preserves_matching_dataset_receipt(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Smoke/UI tuning changes do not enter dataset preflight identity."""
+
+    from dataclasses import replace
+
+    from digital_twin_runtime_suite.app.airflow_validation.cache import (
+        build_dataset_validation_signature,
+    )
+
+    controller = RuntimeController("configs/digital_twin_runtime_suite.toml")
+    signature = build_dataset_validation_signature(
+        _write_airflow_validation_dataset(tmp_path), "vel"
+    )
+    controller._flow_validation_cache.store_preflight(
+        signature,
+        {"dimensions": (2, 2, 2)},
+        grid_match=True,
+    )
+    runtime_only_config = replace(
+        controller.config,
+        simulation_cache=replace(
+            controller.config.simulation_cache,
+            smoke_tuning=replace(
+                controller.config.simulation_cache.smoke_tuning,
+                density=0.73,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        RuntimeConfig,
+        "load",
+        staticmethod(lambda _path: runtime_only_config),
+    )
+
+    controller.reload_config()
+
+    assert controller.config is runtime_only_config
+    assert controller._flow_validation_cache.lookup(signature).result == "HIT"

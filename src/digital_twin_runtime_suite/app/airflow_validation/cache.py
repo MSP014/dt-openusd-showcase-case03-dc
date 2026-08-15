@@ -1,4 +1,4 @@
-"""Session-local receipts for expensive Kit-CAE VTI validation."""
+"""Session-local receipts for manifest-backed airflow dataset validation."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 from digital_twin_runtime_suite.app.airflow_dataset import AirflowDataset
 
-VALIDATION_CONTRACT_VERSION = "kit-cae-vti-validation-v1"
+VALIDATION_CONTRACT_VERSION = "kit-cae-vti-validation-v2"
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class PreflightValidationReceipt:
 
 @dataclass(frozen=True)
 class TemporalProofReceipt:
-    """Successful full-proof result, never a live Kit or USD handle."""
+    """Successful live temporal-proof evidence without Kit or USD handles."""
 
     signature: DatasetValidationSignature
     validated_sample_count: int
@@ -55,7 +55,13 @@ class ValidationCacheLookup:
 
 
 class SessionValidationCache:
-    """Keep successful VTI validation receipts only for one DTRS process."""
+    """Keep successful airflow validation receipts only for one DTRS process.
+
+    A receipt is reusable only when the caller supplies the exact same
+    :class:`DatasetValidationSignature`.  Reloading runtime/UI configuration
+    therefore leaves this evidence intact; changed validation inputs naturally
+    select a different digest instead of relying on a manual invalidation list.
+    """
 
     def __init__(self) -> None:
         self._preflight_by_digest: dict[str, PreflightValidationReceipt] = {}
@@ -128,7 +134,11 @@ class SessionValidationCache:
         return receipt
 
     def clear(self) -> None:
-        """Drop all receipts when configuration or the DTRS session ends."""
+        """Drop all receipts only at an explicit session/lifecycle boundary.
+
+        ``RuntimeController.reload_config()`` intentionally does *not* call
+        this: an unchanged dataset remains preflight-valid across config reload.
+        """
 
         self._preflight_by_digest.clear()
         self._proof_by_digest.clear()
@@ -139,7 +149,13 @@ def build_dataset_validation_signature(
     dataset: AirflowDataset,
     velocity_field_name: str,
 ) -> DatasetValidationSignature:
-    """Fingerprint manifest content plus ordered VTI metadata without VTK reads."""
+    """Fingerprint the validation contract without rereading VTI payloads.
+
+    The digest includes the full manifest bytes, selector, chosen velocity
+    field, validation-contract version, and each ordered sample's resolved
+    path/size/mtime.  That makes normal Houdini re-exports invalidate receipts
+    cheaply while avoiding byte-hashing multi-gigabyte VTI sequences at startup.
+    """
 
     manifest_path = dataset.manifest_path.resolve()
     manifest_bytes = manifest_path.read_bytes()

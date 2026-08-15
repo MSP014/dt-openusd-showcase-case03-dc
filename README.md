@@ -15,9 +15,11 @@ synthetic telemetry, and staged runtime capabilities.
 A **Reproducible Tech Pack** demonstrating a portfolio-grade **L1 Digital Twin** visualisation prototype of an AI Inference Farm.
 The current repository exercises authored geometry and Houdini velocity-field
 export in a runnable Omniverse application with asset review, look-review
-controls, config-driven synthetic telemetry, and a bounded Kit-CAE/Flow temporal
-proof. Further telemetry-to-airflow state binding and scale navigation remain
-staged runtime work.
+controls, config-driven synthetic telemetry, Engineering X-Ray review, and
+manifest-driven Houdini VTI airflow playback through Kit-CAE and NVIDIA Flow.
+The shared workload state now selects the corresponding validated airflow cache
+without creating a second operational workload model. Velocity trails,
+heatmaps, lighting, and HUD navigation remain staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -27,7 +29,11 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 >
 > → [📚 Knowledge Base Hub (Index)](./docs/knowledge_base/README.md) · [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
-Unlike traditional linear animation, this ecosystem is structured as a **State Machine**. Runtime telemetry already drives interactive visual responses, while telemetry-to-airflow cache selection, streamlines, heatmaps, lighting, and HUD cues remain staged extensions rather than fixed-shot animation.
+Unlike traditional linear animation, this ecosystem is structured as a **State
+Machine**. One semantic workload state already drives telemetry, hardware
+behaviour, and manifest-backed airflow-cache selection; streamlines, heatmaps,
+lighting, and HUD cues remain staged extensions rather than fixed-shot
+animation.
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
@@ -37,7 +43,8 @@ Unlike traditional linear animation, this ecosystem is structured as a **State M
 
 *Omniverse full-server runtime review with live synthetic node telemetry,
 persistent enclosure and airflow controls, and manifest-driven Houdini VTI
-velocity playback through Kit-CAE and NVIDIA Flow.*
+velocity playback through Kit-CAE and NVIDIA Flow, including Stage 8
+workload-to-cache binding.*
 
 | Airflow controls | Attached airflow review |
 | :---: | :---: |
@@ -48,6 +55,12 @@ velocity playback through Kit-CAE and NVIDIA Flow.*
 | :---: | :---: |
 | ![Digital Twin Runtime Suite 0.4.0 - Runtime configuration](docs/img/dtrs_0.4.0/dtrs_0.4.0_03.png) | ![Digital Twin Runtime Suite 0.4.0 - Telemetry overview](docs/img/dtrs_0.4.0/dtrs_0.4.0_04.png) |
 | *Config tab with runtime asset, lighting, grid, camera, and telemetry-provider controls* | *Full-server telemetry hierarchy with a live synthetic Nominal workload state* |
+
+These captured Nominal frames predate the Stage 8 multi-workload acceptance
+pass. The current runtime explicitly maps `Idle`, `Nominal`, `Surge`, and
+`Critical` to their respective authored `server/load_*` datasets, validates
+them through manifests and cached VTI preflight, and switches attached Flow at
+a phase-preserving temporal boundary.
 
 → [Watch the Digital Twin Runtime Suite preview](https://youtu.be/BeOx61VVE4I)
 
@@ -71,15 +84,19 @@ The current simulation pass turns the hero server from a static hardware model i
 
 These Houdini-solved airflow caches are physically inspired, presentation-grade qualitative proxies, not validated CFD results or a certified CFD validation study. They provide the Demo Mode input for the runtime contract: a controlled, reproducible source for previewing how the node responds across telemetry-driven states under local hardware and demonstration constraints. The goal is to make intake paths, component occlusion, recirculation zones, heat-source proxies, and operational state changes legible.
 
-DTRS discovers the external VTI dataset from its manifest and maps its samples
-to Kit-CAE and NVIDIA Flow at the source-defined cadence. The current
-`server / load_normal` fixture contains 80 samples at 5 Hz; its structured
-`PointData/vel` field updates native runtime smoke/advection in one continuous
-Flow simulation while preserving the full server presentation.
+DTRS discovers external VTI datasets from their manifests, using manifest
+`scope` and `state` rather than folder names as runtime identity. The four
+current authored members are `server/load_idle`, `server/load_normal`,
+`server/load_surge`, and `server/load_critical`. Their source-defined cadence
+and loop duration are derived from each manifest.
 
-The Flow consumer is intentionally separated from source selection. This PoC
-proves VTI temporal substitution inside the runtime; it does not yet implement
-telemetry-to-cache state binding or an external live feed.
+Telemetry remains the semantic source of truth. Its `Idle`, `Nominal`, `Surge`,
+and `Critical` states resolve through an explicit configuration mapping to the
+corresponding authored dataset. Background preflight reuses session receipts;
+when Flow is attached, a validated target retargets the existing temporal
+source at a phase-preserving sample boundary without rebuilding smoke or Flow.
+An unavailable cache leaves telemetry and hardware behaviour truthful while
+the last confirmed safe airflow dataset remains active.
 
 → [Watch the Houdini airflow simulation preview](https://youtu.be/lDswlLGkTQ8)
 
@@ -158,7 +175,7 @@ The streamline visualisation pass exposes the velocity-field behaviour more dire
 | **The Glass Tube (Rack)** | **Sealed Containment:** Racks feature hermetic glass doors and bottom-fed plenums, forcing cold air *through* the nodes. |
 | **The Silent Heat (Node)** | **Thermal Behaviour Visualisation:** Represents estimated waste heat from the **1600W PSU (~84W)** alongside the **3x GB203** array. |
 | **Metrics** | Real-time tracking of **PUE** (Facility) and **CEF** (Cooling Efficiency Factor) at the rack level. |
-| **Hybrid Visualisation** | The runtime includes a non-persistent Custom MDL Fresnel probe for Engineering X-Ray material review; a Flow view remains planned. |
+| **Hybrid Visualisation** | The runtime includes reversible Custom MDL Fresnel Engineering X-Ray review and an attached NVIDIA Flow smoke visualisation driven by Houdini-authored temporal VTI datasets. |
 
 ---
 
@@ -182,7 +199,10 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 
 * **Application**: **Digital Twin Runtime Suite**.
 * **Extension**: `msp.dtrs`.
-* **Logic**: A State Machine that consumes the Python Data Provider and drives current node presentation controls. Telemetry-to-cache state binding, vector streamlines, and thermal heatmaps remain later staged visual layers.
+* **Logic**: A State Machine that consumes the Python Data Provider and drives
+  node presentation controls, hardware behaviour, and manifest-backed airflow
+  cache selection. Vector streamlines and thermal heatmaps remain later staged
+  visual layers.
 * **UI**: OmniUI sidebar with `Telemetry`, `View`, and `Config` tabs, plus runtime status and performance overlays. Hierarchical Hall/Rack/Node navigation and a viewport HUD remain future work.
 
 ---
@@ -234,8 +254,10 @@ Two external packages are used:
 
 2. **Airflow Runtime Dataset — Hugging Face**
    - manifest-driven temporal VTI velocity fields
-   - current dataset: `server / load_normal`
-   - 80 samples at 5 Hz
+   - current registry: `server/load_idle`, `server/load_normal`,
+     `server/load_surge`, `server/load_critical`
+   - per-dataset cadence, sample structure, and duration declared in
+     `manifest.toml`
 
 1. Download and extract the Production Asset Pack directly into
    `assets/_external/`, preserving its `usd/`, `tex/`, and `hdri/` directories.
@@ -342,6 +364,7 @@ smoke, transport, and emitter-layout controls.
 
 ## 📜 Changelog
 
+* **Week of 10 August, 2026:** Completed Stage 8 workload-to-cache binding for Digital Twin Runtime Suite v0.4.0: one semantic workload state now drives telemetry, fan behaviour, and explicit manifest-backed Houdini temporal airflow selection, with cached validation, truthful failure state, phase-preserving in-place Flow switching, and cancellable latest-request-wins transitions.
 * **Week of 10 August, 2026:** Completed Stage 7 of Digital Twin Runtime Suite v0.4.0, delivering a project-owned Custom MDL Fresnel X-Ray mode with config-driven multi-target selection, reversible Session Layer ownership, live ReviewCamera response, telemetry-aware LED restoration, accepted combined RTX Flow performance, and final runtime-plan archival.
 * **Week of 3 August, 2026:** Hardened the responsive VTI Attach lifecycle and runtime configuration boundary, preserved Houdini PDG VTI export tooling, corrected public runtime links, and began the material-recovery and renderer-limitation investigation that established the Stage 7 X-Ray implementation path.
 * **Week of 27 July, 2026:** Completed the Stage 6 cached-airflow runtime review, including Kit-CAE/Flow capability proof, temporal VTI playback, persistent smoke tuning, extracted Flow runtime ownership, and the Digital Twin Runtime Suite naming transition.

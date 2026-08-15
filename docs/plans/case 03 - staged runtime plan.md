@@ -1,7 +1,7 @@
 # Case 03 - Staged Runtime Plan
 
-**Status**: Active roadmap; Stages 1–7 complete
-**Last Updated**: 2026-08-11
+**Status**: Active roadmap; Stages 1–8 complete; Stage 9 active
+**Last Updated**: 2026-08-15
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
@@ -11,14 +11,16 @@ around the Case 03 OpenUSD scene.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and the first seven completed Digital Twin Runtime Suite
+external asset layout, and the first eight completed Digital Twin Runtime Suite
 slices through Engineering X-Ray visual mode.
 
 Current decisions already made:
 
 - The public application name is **Digital Twin Runtime Suite**.
 - The first build was **Digital Twin Runtime Suite v0.1**.
-- The current runtime build is **Digital Twin Runtime Suite v0.4.0**.
+- The current runtime build is **Digital Twin Runtime Suite v0.4.0**, released
+  with Stage 7. Stage 8 has no separate release bump; the next feature
+  milestone remains `0.5.0` after Stage 10.
 - DTRS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
   default through the `blackwell_rig_gb203` runtime asset entry.
 - The shared left sidebar now contains `Telemetry`, `View`, and `Config` tabs
@@ -78,6 +80,9 @@ Current decisions already made:
   approximately 20–25+ FPS.
 - The completed Stage 7 runtime contract and validation evidence are preserved
   in the [Stage 7 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-7---engineering-x-ray-visual-mode-slice).
+- Stage 8 binds the shared semantic workload state to manifest-backed Houdini
+  temporal airflow datasets through cached validation and phase-preserving Flow
+  switching. Its completed evidence is preserved in the [Stage 8 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-8---workload-to-cache-state-binding-slice).
 - Heavy USD, texture, HDRI, temporal VTI, and future runtime assets stay
   outside the source package and are hydrated through `assets/_external/`.
 - The application source root is `src/digital_twin_runtime_suite/`.
@@ -107,8 +112,10 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 - Completed implementation task: `DC-45` - Stage 6 Cached Simulation Playback Slice.
 - Completed implementation task: `DC-48` - Stage 7 Engineering X-Ray Visual
   Mode Slice.
-- Next planned implementation task: `DC-46` - Stage 8 Workload-to-Cache State
+- Completed implementation task: `DC-46` - Stage 8 Workload-to-Cache State
   Binding Slice.
+- Next planned implementation task: `DC-49` - Stage 9 Server Velocity Trail
+  Foundation Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
   work time, move the task through Review to Done, run Jira sync, and mark the
@@ -116,16 +123,10 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-The next runtime slice is Stage 8, Workload-to-Cache State Binding. Before
-implementation, verify that the completed Stage 7 closure is protected by a Git
-checkpoint commit; create one if it is not. Then refine the Stage 8 cache/layer
-mapping contract and connect the existing global workload modes only to real
-hydrated Houdini caches or USD layers.
-
-Keep the accepted Stage 6 airflow and Stage 7 X-Ray contracts intact. Stage 8
-must not introduce a parallel workload-state model, fabricate unsupported
-caches, or alter the validated X-Ray material lifecycle. Do not move `DC-46`
-to In Progress until active Stage 8 work begins.
+Stage 9, Server Velocity Trail Foundation, is the next active implementation
+slice. Stage 8, Workload-to-Cache Binding, is complete and archived with its
+evidence in the completed runtime-stage plans. Stage 9 must preserve the
+accepted Stage 6 Flow, Stage 7 X-Ray, and Stage 8 workload-to-cache contracts.
 
 ---
 
@@ -140,8 +141,9 @@ already released milestone.
 The canonical version is the sole source of truth for runtime configuration,
 code and package metadata, release history, Git tags, and internal version
 comparisons. The current Stage 7 release is `0.4.0`; subsequent hotfixes use
-`0.4.1`, `0.4.2`, and so on. The next feature release, containing Velocity
-Trails and Thermal Map, is `0.5.0`.
+`0.4.1`, `0.4.2`, and so on. Stage 8 has no separate release bump. The next
+feature release, containing Velocity Trails and Thermal Map, is `0.5.0` after
+Stage 10.
 
 Human-facing application UI derives a display version from the canonical value
 by showing only `x.y`: `0.4.0`, `0.4.1`, and `0.4.2` display as `0.4`, while
@@ -323,8 +325,8 @@ from making future capabilities sound like v0.1 requirements.
 | Fan motion driven by telemetry | Stage 4 | Implemented |
 | Full server / Blackwell Rig stage | Stage 5 | Implemented |
 | Cached simulation visual layer | Stage 6 | Implemented |
-| Engineering X-Ray visual mode | Stage 7 | Future |
-| Workload-to-cache state binding | Stage 8 | Future |
+| Engineering X-Ray visual mode | Stage 7 | Implemented |
+| Workload-to-cache state binding | Stage 8 | Implemented |
 | Server velocity trail foundation | Stage 9 | Future |
 | Server heatmap foundation | Stage 10 | Future |
 | Server/rack/data hall navigation | Stage 11 | Future |
@@ -645,53 +647,20 @@ Detailed plans for completed runtime stages are preserved in
 
 | Stage | Jira | Status | Detailed plan |
 | :--- | :--- | :--- | :--- |
-| Stage 1 - Asset Preview | `DC-40` | Implemented | [Stage 1 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-1---digital-twin-runtime-suite-v01-asset-preview-slice) |
-| Stage 2 - Look Review | `DC-41` | Implemented | [Stage 2 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-2---look-review-slice) |
-| Stage 3 - Synthetic Telemetry | `DC-42` | Implemented | [Stage 3 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-3---synthetic-telemetry-slice) |
-| Stage 4 - Telemetry Driven Motion | `DC-43` | Implemented | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
-| Stage 5 - Server Review | `DC-44` | Implemented | [Stage 5 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-5---server-review-slice) |
-| Stage 6 - Cached Simulation Playback | `DC-45` | Implemented | [Stage 6 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice) |
-| Stage 7 - Engineering X-Ray | `DC-48` | Validated | [Stage 7 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-7---engineering-x-ray-visual-mode-slice) |
+| Stage 1 - Asset Preview | `DC-40` | ✅ Complete | [Stage 1 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-1---digital-twin-runtime-suite-v01-asset-preview-slice) |
+| Stage 2 - Look Review | `DC-41` | ✅ Complete | [Stage 2 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-2---look-review-slice) |
+| Stage 3 - Synthetic Telemetry | `DC-42` | ✅ Complete | [Stage 3 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-3---synthetic-telemetry-slice) |
+| Stage 4 - Telemetry Driven Motion | `DC-43` | ✅ Complete | [Stage 4 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-4---telemetry-driven-motion-slice) |
+| Stage 5 - Server Review | `DC-44` | ✅ Complete | [Stage 5 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-5---server-review-slice) |
+| Stage 6 - Cached Simulation Playback | `DC-45` | ✅ Complete | [Stage 6 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice) |
+| Stage 7 - Engineering X-Ray | `DC-48` | ✅ Complete | [Stage 7 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-7---engineering-x-ray-visual-mode-slice) |
+| Stage 8 - Workload-to-Cache State Binding | `DC-46` | ✅ Complete | [Stage 8 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-8---workload-to-cache-state-binding-slice) |
 
 When a runtime stage is completed, move its detailed plan from this document to
 the completed-stage archive, update this table with a direct link, and keep only
 the active and future stage details here. Cross-stage contracts that still
 govern future work remain in this plan.
 
-
-### Stage 8 - Workload-to-Cache State Binding Slice
-
-Checkpoint preflight: before implementation, verify the preceding stage ends
-at a Git checkpoint commit. If it does not, create that checkpoint before
-starting this stage.
-
-Jira: `DC-46`
-
-Release track: `0.4.0` (released on Stage 8 completion).
-
-Connect the existing global `Idle`, `Nominal`, `Surge`, and `Critical` workload
-modes to real Houdini-authored simulation caches or matching USD layers made
-available through Stage 6. Do not introduce a second set of equivalent `25%`,
-`50%`, `75%`, and `96%` controls.
-
-Required scope:
-
-- define which authored cache or layer, if any, corresponds to each supported
-  workload mode;
-- use the existing workload-state control as the only operator-facing state
-  selector;
-- select and play only cache states that genuinely exist in the hydrated asset
-  package;
-- report missing or unsupported state mappings instead of presenting a control
-  that changes only its label.
-
-The cache/layer contract, transition behaviour, playback semantics, and missing
-state fallback must be refined when the Stage 8 plan is reviewed and finalised
-immediately before implementation.
-
-Done when every supported workload mode selects a documented authored cache or
-layer, unsupported mappings are reported honestly, and no parallel
-workload-state model has been introduced.
 
 ### Stage 9 - Server Velocity Trail Foundation Slice
 
