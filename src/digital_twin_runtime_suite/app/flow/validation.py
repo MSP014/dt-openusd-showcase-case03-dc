@@ -2,55 +2,74 @@
 
 from __future__ import annotations
 
-import re
+import math
 import time
-from pathlib import Path
+
+from digital_twin_runtime_suite.app.airflow_validation.preflight import (
+    calculate_kit_cae_direct_attach_base_velocity_scale,
+)
 
 
-def read_kit_cae_vti_metadata(
-    velocity_path: Path,
-    field_name: str,
-) -> dict[str, object]:
-    """Read the VTI header through Kit-CAE's VTK runtime before Flow binds it."""
+def resolve_kit_cae_direct_attach_runtime_contract(
+    metadata: dict[str, object],
+    velocity_scale_multiplier: float,
+) -> dict[str, float]:
+    """Resolve the transport values that a direct Attach would configure."""
 
-    from vtkmodules.vtkIOXML import vtkXMLImageDataReader
-
-    header = velocity_path.read_bytes()[:16384].decode("utf-8", errors="ignore")
-    header_match = re.search(r'<ImageData[^>]*\bOrigin="([^"]+)"', header)
-    if header_match is None:
-        raise RuntimeError("VTI ImageData header is missing its Origin attribute.")
-    header_origin = tuple(float(value) for value in header_match.group(1).split())
-    if len(header_origin) != 3:
-        raise RuntimeError("VTI ImageData header Origin must have three components.")
-
-    reader = vtkXMLImageDataReader()
-    reader.SetFileName(str(velocity_path))
-    reader.Update()
-    image = reader.GetOutput()
-    array = image.GetPointData().GetArray(field_name) if image else None
-    if array is None:
-        raise RuntimeError(f"VTI PointData array '{field_name}' was not found.")
-    components = int(array.GetNumberOfComponents())
-    data_type = str(array.GetDataTypeAsString()).lower()
-    if components != 3:
-        raise RuntimeError(
-            f"VTI PointData/{field_name} must have 3 components, got {components}."
+    try:
+        base_velocity_scale = float(
+            metadata["kit_cae_direct_attach_base_velocity_scale"]
         )
-    if data_type not in {"float", "float32"}:
+        multiplier = float(velocity_scale_multiplier)
+    except (KeyError, TypeError, ValueError) as error:
         raise RuntimeError(
-            f"VTI PointData/{field_name} must be float32, got {data_type}."
-        )
-    reader_origin = tuple(float(value) for value in image.GetOrigin())
+            "Validated VTI metadata lacks the Kit-CAE direct-Attach "
+            "velocityScale contract."
+        ) from error
+    if not (
+        math.isfinite(base_velocity_scale)
+        and base_velocity_scale > 0.0
+        and math.isfinite(multiplier)
+        and multiplier > 0.0
+    ):
+        raise RuntimeError("Kit-CAE direct-Attach velocityScale contract is invalid.")
     return {
-        "components": components,
-        "data_type": data_type,
-        "dimensions": tuple(int(value) for value in image.GetDimensions()),
-        "point_count": int(image.GetNumberOfPoints()),
-        "origin": reader_origin,
-        "vti_header_origin": header_origin,
-        "vtk_reader_origin": reader_origin,
-        "spacing": tuple(float(value) for value in image.GetSpacing()),
+        "base_velocity_scale": base_velocity_scale,
+        "effective_velocity_scale": base_velocity_scale * multiplier,
     }
+
+
+async def resolve_live_kit_cae_direct_attach_runtime_contract(
+    dataset_emitter,
+    Usd,
+    velocity_scale_multiplier: float,
+    time_code,
+) -> dict[str, float]:
+    """Use the live Kit-CAE source representation shared by Attach and switching."""
+
+    from omni.cae.viz import utils as cae_viz_utils
+
+    source_dataset = await cae_viz_utils.get_input_dataset(
+        dataset_emitter,
+        "source",
+        timeCode=time_code,
+        device="cuda:0",
+    )
+    bounds_min, bounds_max = source_dataset.get_bounds()
+    velocity_max = source_dataset.get_field("velocities").get_range()[1]
+    bounds = tuple(
+        component
+        for minimum, maximum in zip(bounds_min, bounds_max)
+        for component in (float(minimum), float(maximum))
+    )
+    base_velocity_scale = calculate_kit_cae_direct_attach_base_velocity_scale(
+        bounds,
+        float(velocity_max),
+    )
+    return resolve_kit_cae_direct_attach_runtime_contract(
+        {"kit_cae_direct_attach_base_velocity_scale": base_velocity_scale},
+        velocity_scale_multiplier,
+    )
 
 
 async def wait_for_kit_cae_dataset_emitter_ready(

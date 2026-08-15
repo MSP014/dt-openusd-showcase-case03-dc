@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from digital_twin_runtime_suite.app.airflow_dataset import (
     AirflowDatasetSelector,
     discover_airflow_dataset,
 )
+from digital_twin_runtime_suite.app.telemetry.model import WORKLOAD_MODES
 
 LOGGER = logging.getLogger(__name__)
 
@@ -313,11 +314,26 @@ class SimulationCacheConfig:
         scope="server",
         state="load_normal",
     )
+    workload_dataset_mapping: dict[str, AirflowDatasetSelector] = field(
+        default_factory=dict
+    )
     velocity_field_name: str = "vel"
     temporal_debug_logging: bool = False
     smoke_tuning: SmokeTuningConfig = SmokeTuningConfig()
     emitter_layout: EmitterLayoutConfig = EmitterLayoutConfig()
     intake_tracers: IntakeTracerConfig = IntakeTracerConfig()
+
+    def airflow_dataset_selector_for_workload(
+        self, workload_mode: str
+    ) -> AirflowDatasetSelector:
+        """Resolve a semantic workload through Simulation Cache configuration."""
+
+        try:
+            return self.workload_dataset_mapping[workload_mode]
+        except KeyError as error:
+            raise ValueError(
+                f"No airflow dataset mapping configured for workload: {workload_mode}"
+            ) from error
 
 
 @dataclass(frozen=True)
@@ -892,27 +908,27 @@ def _parse_xray_material_config(data: Any) -> XRayMaterialConfig:
         "edge_emission": float(data.get("edge_emission", defaults.edge_emission)),
         "emission_scale": float(data.get("emission_scale", defaults.emission_scale)),
     }
-    for field, value in values.items():
+    for setting_name, value in values.items():
         if not math.isfinite(value):
-            raise ValueError(f"materials.xray.{field} must be finite.")
+            raise ValueError(f"materials.xray.{setting_name} must be finite.")
     if not 0.0 <= values["edge_center"] <= 1.0:
         raise ValueError("materials.xray.edge_center must be between 0 and 1.")
     if not 0.001 <= values["edge_softness"] <= 1.0:
         raise ValueError("materials.xray.edge_softness must be between 0.001 and 1.")
     if not 0.1 <= values["edge_sharpness"] <= 8.0:
         raise ValueError("materials.xray.edge_sharpness must be between 0.1 and 8.")
-    for field in (
+    for setting_name in (
         "facing_roughness",
         "edge_roughness",
         "facing_opacity",
         "edge_opacity",
     ):
-        if not 0.0 <= values[field] <= 1.0:
-            raise ValueError(f"materials.xray.{field} must be between 0 and 1.")
-    for field in ("facing_emission", "edge_emission", "emission_scale"):
-        if values[field] < 0.0:
+        if not 0.0 <= values[setting_name] <= 1.0:
+            raise ValueError(f"materials.xray.{setting_name} must be between 0 and 1.")
+    for setting_name in ("facing_emission", "edge_emission", "emission_scale"):
+        if values[setting_name] < 0.0:
             raise ValueError(
-                f"materials.xray.{field} must be greater than or equal to 0."
+                f"materials.xray.{setting_name} must be greater than or equal to 0."
             )
     return XRayMaterialConfig(
         facing_color=parse_color("facing_color", defaults.facing_color),
@@ -972,11 +988,11 @@ def _parse_front_panel_indicators_config(data: Any) -> FrontPanelIndicatorsConfi
         for field in ("power_path", "hdd_path", "lan_01_path", "lan_02_path")
     }
     if enabled:
-        for field, path in paths.items():
+        for indicator_name, path in paths.items():
             if not path or not path.startswith("/"):
                 raise ValueError(
                     "chassis_presentation.front_panel_indicators paths must be "
-                    f"absolute USD paths: {field}"
+                    f"absolute USD paths: {indicator_name}"
                 )
 
     return FrontPanelIndicatorsConfig(
@@ -1392,6 +1408,10 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         scope=str(raw_airflow_dataset.get("scope", "")).strip(),
         state=str(raw_airflow_dataset.get("state", "")).strip(),
     )
+    workload_dataset_mapping = _parse_workload_dataset_mapping(
+        data.get("workload_dataset_mapping", {}),
+        airflow_dataset.root,
+    )
     velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
     temporal_debug_logging = bool(data.get("temporal_debug_logging", False))
     smoke_tuning = _parse_smoke_tuning_config(data.get("smoke_tuning"))
@@ -1425,6 +1445,17 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
             "simulation_cache.airflow_dataset root, scope, and state are required "
             "for the Kit-CAE route."
         )
+    if enabled and runtime_mode == "kit_cae":
+        missing_workload_mappings = [
+            workload_mode
+            for workload_mode in WORKLOAD_MODES
+            if workload_mode not in workload_dataset_mapping
+        ]
+        if missing_workload_mappings:
+            raise ValueError(
+                "simulation_cache.workload_dataset_mapping is missing workload "
+                f"mappings: {', '.join(missing_workload_mappings)}."
+            )
 
     root_prim_path = str(data.get("root_prim_path", "/sim")).strip()
     volume_prim_path = str(
@@ -1485,12 +1516,49 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         rendering_samples=rendering_samples,
         filter_mode=filter_mode,
         airflow_dataset=airflow_dataset,
+        workload_dataset_mapping=workload_dataset_mapping,
         velocity_field_name=velocity_field_name,
         temporal_debug_logging=temporal_debug_logging,
         smoke_tuning=smoke_tuning,
         emitter_layout=emitter_layout,
         intake_tracers=intake_tracers,
     )
+
+
+def _parse_workload_dataset_mapping(
+    data: Any,
+    dataset_root: str,
+) -> dict[str, AirflowDatasetSelector]:
+    if not isinstance(data, dict):
+        raise ValueError("simulation_cache.workload_dataset_mapping must be a table.")
+
+    unknown_workloads = sorted(set(data).difference(WORKLOAD_MODES))
+    if unknown_workloads:
+        raise ValueError(
+            "simulation_cache.workload_dataset_mapping contains unknown workloads: "
+            f"{', '.join(unknown_workloads)}."
+        )
+
+    mapping: dict[str, AirflowDatasetSelector] = {}
+    for workload_mode, raw_selector in data.items():
+        if not isinstance(raw_selector, dict):
+            raise ValueError(
+                "simulation_cache.workload_dataset_mapping."
+                f"{workload_mode} must be a table."
+            )
+        scope = str(raw_selector.get("scope", "")).strip()
+        state = str(raw_selector.get("state", "")).strip()
+        if not all((dataset_root, scope, state)):
+            raise ValueError(
+                "simulation_cache.workload_dataset_mapping."
+                f"{workload_mode} requires root, scope, and state."
+            )
+        mapping[workload_mode] = AirflowDatasetSelector(
+            root=dataset_root,
+            scope=scope,
+            state=state,
+        )
+    return mapping
 
 
 def _parse_matrix(data: Any) -> tuple[float, ...] | None:

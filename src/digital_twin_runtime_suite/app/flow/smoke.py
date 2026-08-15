@@ -547,6 +547,38 @@ def read_kit_cae_base_velocity_scale(dataset_emitter) -> float:
     return scale
 
 
+def apply_kit_cae_direct_attach_velocity_scale(
+    dataset_emitter,
+    *,
+    base_velocity_scale: float,
+    velocity_scale_multiplier: float,
+) -> float:
+    """Author the same locked transport scale used by the direct-Attach path."""
+
+    if not math.isfinite(base_velocity_scale) or base_velocity_scale <= 0.0:
+        raise RuntimeError("Kit-CAE base velocityScale must be finite and positive.")
+    if not math.isfinite(velocity_scale_multiplier) or velocity_scale_multiplier <= 0.0:
+        raise RuntimeError(
+            "Kit-CAE velocityScale multiplier must be finite and positive."
+        )
+    attribute = (
+        dataset_emitter.GetAttribute("velocityScale") if dataset_emitter else None
+    )
+    if not attribute or not attribute.IsValid():
+        raise RuntimeError("Kit-CAE DataSetEmitter is missing velocityScale.")
+    effective_velocity_scale = base_velocity_scale * velocity_scale_multiplier
+    attribute.SetCustomDataByKey("omni:kit:locked", True)
+    attribute.Set(effective_velocity_scale)
+    actual = attribute.Get()
+    if actual is None or abs(float(actual) - effective_velocity_scale) >= 1e-6:
+        raise RuntimeError(
+            "Kit-CAE did not retain the direct-Attach-equivalent velocityScale."
+        )
+    if not attribute.GetCustomDataByKey("omni:kit:locked"):
+        raise RuntimeError("Kit-CAE velocityScale did not retain its lock.")
+    return effective_velocity_scale
+
+
 def author_kit_cae_smoke_tuning(
     stage,
     flow_environment_path: str,
@@ -628,11 +660,7 @@ def author_kit_cae_smoke_tuning(
         ("stepSizeScale", tuning.raymarch_quality),
     )
     if effective_velocity_scale is not None:
-        attributes["velocityScale"].SetCustomDataByKey("omni:kit:locked", True)
-        assignments += (
-            ("velocityScale", effective_velocity_scale),
-            ("timeScale", tuning.time_scale),
-        )
+        assignments += (("timeScale", tuning.time_scale),)
     for attribute_name, value in assignments:
         attributes[attribute_name].Set(value)
     attributes["attenuationMultiplier"].Set(
@@ -664,9 +692,11 @@ def author_kit_cae_smoke_tuning(
     ):
         raise RuntimeError("Kit-CAE did not retain Cloud volumeBaseColor.")
     if effective_velocity_scale is not None:
-        velocity_scale = attributes["velocityScale"]
-        if not velocity_scale.GetCustomDataByKey("omni:kit:locked"):
-            raise RuntimeError("Kit-CAE velocityScale did not retain its lock.")
+        effective_velocity_scale = apply_kit_cae_direct_attach_velocity_scale(
+            dataset_emitter,
+            base_velocity_scale=base_velocity_scale,
+            velocity_scale_multiplier=tuning.velocity_scale_multiplier,
+        )
     return effective_velocity_scale
 
 

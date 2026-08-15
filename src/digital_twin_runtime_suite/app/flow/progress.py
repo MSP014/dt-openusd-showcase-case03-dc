@@ -37,6 +37,7 @@ class TemporalProofProgress:
     elapsed_seconds: float = 0.0
     loop_closure_state: str | None = None
     failure_reason: str | None = None
+    cancellation_reason: str | None = None
     generation_id: int = 0
     last_progress_at: float | None = None
 

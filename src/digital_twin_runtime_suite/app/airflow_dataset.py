@@ -8,6 +8,13 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+_KNOWN_AIRFLOW_STATE_ORDER = {
+    "load_idle": 0,
+    "load_normal": 1,
+    "load_surge": 2,
+    "load_critical": 3,
+}
+
 
 class AirflowDatasetError(ValueError):
     """Raised when an external airflow dataset violates its portable contract."""
@@ -33,6 +40,7 @@ class AirflowDatasetManifest:
     sample_rate_hz: float
     sample_count: int
     grid: tuple[int, int, int]
+    duration_seconds: float | None = None
 
     @property
     def sample_interval_seconds(self) -> float:
@@ -40,7 +48,11 @@ class AirflowDatasetManifest:
 
     @property
     def loop_duration_seconds(self) -> float:
-        return self.sample_count * self.sample_interval_seconds
+        return (
+            self.duration_seconds
+            if self.duration_seconds is not None
+            else self.sample_count * self.sample_interval_seconds
+        )
 
 
 @dataclass(frozen=True)
@@ -67,6 +79,57 @@ class AirflowDataset:
         return self.manifest.loop_duration_seconds
 
 
+def discover_airflow_dataset_registry(
+    asset_root: Path,
+    dataset_root: str,
+) -> tuple[AirflowDataset, ...]:
+    """Discover every valid airflow dataset by manifest identity.
+
+    Directory names organise the hydrated asset package only. The stable runtime
+    identity is the ``(scope, state)`` pair declared in each manifest.
+    """
+
+    root = _resolve_dataset_root(asset_root, dataset_root)
+    datasets: dict[tuple[str, str], AirflowDataset] = {}
+    for manifest_path in sorted(
+        root.rglob("manifest.toml"), key=lambda path: str(path)
+    ):
+        manifest = parse_airflow_dataset_manifest(manifest_path)
+        identity = (manifest.scope, manifest.state)
+        existing = datasets.get(identity)
+        if existing:
+            paths = ", ".join(
+                str(path)
+                for path in sorted(
+                    (existing.manifest_path.parent, manifest_path.parent)
+                )
+            )
+            raise AirflowDatasetError(
+                "Airflow dataset identity is ambiguous: "
+                f"scope={manifest.scope}, state={manifest.state}; matches={paths}"
+            )
+        datasets[identity] = _build_airflow_dataset(root, manifest_path, manifest)
+    return tuple(
+        datasets[identity]
+        for identity in sorted(datasets, key=_registry_identity_sort_key)
+    )
+
+
+def format_airflow_dataset_registry(datasets: tuple[AirflowDataset, ...]) -> str:
+    """Return the concise startup diagnostic for manifest-backed datasets."""
+
+    lines = [
+        "========================================",
+        "DTRS AIRFLOW DATASET REGISTRY",
+        f"Discovered: {len(datasets)}",
+    ]
+    lines.extend(
+        f"{dataset.manifest.scope}/{dataset.manifest.state}" for dataset in datasets
+    )
+    lines.append("========================================")
+    return "\n".join(lines)
+
+
 def discover_airflow_dataset(
     asset_root: Path,
     selector: AirflowDatasetSelector,
@@ -74,9 +137,7 @@ def discover_airflow_dataset(
     """Resolve one dataset by manifest identity without relying on path prefixes."""
 
     _validate_selector(selector)
-    root = (asset_root / selector.root).resolve()
-    if not root.is_dir():
-        raise AirflowDatasetError(f"Airflow dataset root does not exist: {root}")
+    root = _resolve_dataset_root(asset_root, selector.root)
 
     matches: list[tuple[Path, AirflowDatasetManifest]] = []
     for manifest_path in root.rglob("manifest.toml"):
@@ -98,16 +159,7 @@ def discover_airflow_dataset(
         )
 
     manifest_path, manifest = matches[0]
-    samples = _discover_velocity_samples(manifest_path.parent)
-    _validate_velocity_samples(manifest_path, manifest, samples)
-    return AirflowDataset(
-        root=root,
-        directory=manifest_path.parent,
-        manifest_path=manifest_path,
-        manifest=manifest,
-        velocity_vti_sequence_paths=tuple(path for _, path in samples),
-        source_frames=tuple(frame for frame, _ in samples),
-    )
+    return _build_airflow_dataset(root, manifest_path, manifest)
 
 
 def parse_airflow_dataset_manifest(manifest_path: Path) -> AirflowDatasetManifest:
@@ -133,6 +185,11 @@ def parse_airflow_dataset_manifest(manifest_path: Path) -> AirflowDatasetManifes
         sample_rate_hz = _positive_float(data, "sample_rate_hz", manifest_path)
         sample_count = _positive_int(data, "sample_count", manifest_path)
         grid = _grid(data.get("grid"), manifest_path)
+        duration_seconds = (
+            _positive_float(data, "duration", manifest_path)
+            if "duration" in data
+            else None
+        )
     except (TypeError, ValueError) as error:
         raise AirflowDatasetError(
             f"Malformed airflow dataset manifest: {manifest_path}: {error}"
@@ -145,6 +202,18 @@ def parse_airflow_dataset_manifest(manifest_path: Path) -> AirflowDatasetManifes
             f"manifest={sample_rate_hz:g} Hz, derived={derived_rate_hz:g} Hz, "
             f"manifest={manifest_path}"
         )
+    derived_duration_seconds = sample_count * sample_step_frames / source_fps
+    if duration_seconds is not None and not math.isclose(
+        duration_seconds,
+        derived_duration_seconds,
+        rel_tol=1e-6,
+        abs_tol=1e-6,
+    ):
+        raise AirflowDatasetError(
+            "Airflow dataset duration disagrees with source timing: "
+            f"manifest={duration_seconds:g} s, derived={derived_duration_seconds:g} s, "
+            f"manifest={manifest_path}"
+        )
     return AirflowDatasetManifest(
         scope=scope,
         state=state,
@@ -153,6 +222,7 @@ def parse_airflow_dataset_manifest(manifest_path: Path) -> AirflowDatasetManifes
         sample_rate_hz=sample_rate_hz,
         sample_count=sample_count,
         grid=grid,
+        duration_seconds=duration_seconds,
     )
 
 
@@ -168,6 +238,39 @@ def validate_airflow_dataset_grid(
             f"manifest={dataset.manifest.grid}, actual={tuple(actual_grid)}, "
             f"manifest={dataset.manifest_path}"
         )
+
+
+def _resolve_dataset_root(asset_root: Path, dataset_root: str) -> Path:
+    root = (asset_root / dataset_root).resolve()
+    if not root.is_dir():
+        raise AirflowDatasetError(f"Airflow dataset root does not exist: {root}")
+    return root
+
+
+def _registry_identity_sort_key(identity: tuple[str, str]) -> tuple[str, int, str]:
+    scope, state = identity
+    return (
+        scope,
+        _KNOWN_AIRFLOW_STATE_ORDER.get(state, len(_KNOWN_AIRFLOW_STATE_ORDER)),
+        state,
+    )
+
+
+def _build_airflow_dataset(
+    root: Path,
+    manifest_path: Path,
+    manifest: AirflowDatasetManifest,
+) -> AirflowDataset:
+    samples = _discover_velocity_samples(manifest_path.parent)
+    _validate_velocity_samples(manifest_path, manifest, samples)
+    return AirflowDataset(
+        root=root,
+        directory=manifest_path.parent,
+        manifest_path=manifest_path,
+        manifest=manifest,
+        velocity_vti_sequence_paths=tuple(path for _, path in samples),
+        source_frames=tuple(frame for frame, _ in samples),
+    )
 
 
 def _discover_velocity_samples(directory: Path) -> tuple[tuple[int, Path], ...]:

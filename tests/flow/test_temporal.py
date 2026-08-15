@@ -2,9 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from digital_twin_runtime_suite.app.flow import temporal
-from digital_twin_runtime_suite.app.flow.temporal import (
+from digital_twin_runtime_suite.app.airflow_validation import preflight
+from digital_twin_runtime_suite.app.airflow_validation.preflight import (
     TemporalVtiValidationCancelled,
+)
+from digital_twin_runtime_suite.app.flow.temporal import (
     kit_cae_temporal_loop_proof_summary,
     kit_cae_vti_source_frame,
 )
@@ -59,10 +61,10 @@ def test_temporal_vti_validation_stops_between_completed_samples(
             "vti_header_origin": (0.0, 0.0, 0.0),
         }
 
-    monkeypatch.setattr(temporal, "read_kit_cae_vti_metadata", read_metadata)
+    monkeypatch.setattr(preflight, "read_kit_cae_vti_metadata", read_metadata)
 
     with pytest.raises(TemporalVtiValidationCancelled):
-        temporal.validate_kit_cae_temporal_vti_contract(
+        preflight.validate_kit_cae_temporal_vti_contract(
             velocity_paths,
             "vel",
             cancel_requested=lambda: len(read_assets) >= 1,

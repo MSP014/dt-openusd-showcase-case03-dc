@@ -2,7 +2,7 @@
 
 
 **Status**: Reference
-**Last Updated**: 2026-07-19
+**Last Updated**: 2026-08-15
 
 This document preserves the detailed plans used to deliver completed runtime
 stages. The active roadmap and future scope remain in
@@ -662,7 +662,7 @@ Jira: `DC-45`
 
 Status: implemented and accepted on 2026-07-27.
 
-Release track: `0.4.0` (released on Stage 8 completion).
+Release track: `0.4.0` (released with Stage 7; Stage 8 has no separate bump).
 
 Stage 6 delivers an honest runtime airflow visualisation from an externally
 produced Houdini velocity field. DTRS does not claim to generate the source
@@ -782,7 +782,7 @@ Status: COMPLETE / VALIDATED.
 > rejected Surface Falloff investigation remains recorded below as historical
 > implementation evidence.
 
-Release track: `0.4.0` (released on Stage 8 completion).
+Release: `0.4.0`.
 
 Introduce a manually controlled, reversible runtime visual override that lets
 the operator inspect internal server components and simulation layers through
@@ -1093,6 +1093,269 @@ Layer binding opinions, does not change `Server Enclosure` visibility choices,
 persists its operator settings locally without auto-applying after startup or
 stage reload, reveals the documented internal review targets, and does not dirty
 authored assets.
+
+### Stage 8 - Workload-to-Cache State Binding Slice
+
+Jira: `DC-46`
+
+Status: COMPLETE / ACCEPTED EVIDENCE.
+
+Stage 8 binds the existing `Idle`, `Nominal`, `Surge`, and `Critical` semantic
+workload state to the corresponding Houdini-authored temporal airflow family.
+It introduces no second workload model and retains the Stage 6 Flow lifecycle.
+
+#### Public claim evidence
+
+> The same workload state drives telemetry, hardware behaviour, and selection
+> of the corresponding Houdini-authored temporal airflow dataset, with
+> manifest-driven validation and phase-preserving runtime switching.
+
+| Claim clause | Concrete evidence |
+|---|---|
+| Semantic workload drives telemetry | The Telemetry Workload control calls `SyntheticTelemetryProvider.set_mode`; the controller consumes that provider mode through the workload-binding boundary. |
+| Semantic workload drives hardware behaviour | The telemetry snapshot supplies CPU/GPU/front/rear fan RPM metrics to the existing motion bindings; telemetry and motion tests cover the fan metric route. |
+| Semantic workload selects authored airflow | `SimulationCacheConfig` holds the explicit mapping to `server/load_idle`, `server/load_normal`, `server/load_surge`, and `server/load_critical`; Attach and transitions resolve through `workload_binding`, then manifest discovery. |
+| Manifest-driven validation and reuse | Dataset identity is manifest `scope/state`, not a directory name. `airflow_validation` validates the discovered sequence and `SessionValidationCache` reuses matching receipts using manifest, selector, field, and VTI filesystem identity. |
+| Phase-preserving runtime switching | The attached transition resolves normalized discrete phase, retargets the live temporal source at a sample boundary, verifies native consumption and the direct-Attach runtime contract, then commits without Detach, Attach, reset, or rebuild. Focused regressions cover phase mapping, runtime-contract gating, playback intent, failure semantics, and latest-request-wins races. |
+
+#### Completion record
+
+- Steps 1-16 are complete: registry and explicit mapping; workload-binding
+  ownership; workload-resolved Attach; sequential/pre-emptible validation;
+  in-place retarget proof; attached transitions; truthful failure semantics;
+  family compatibility; supersession; signature/reload semantics; focused
+  coverage; prepared Kit matrix; and accepted existing latency evidence.
+- Existing Kit logs measured cached `REQUEST -> COMMIT` at approximately
+  `0.98-1.63 s`, next-boundary wait at approximately `50-63 ms`, and cached
+  Attach at approximately `4.0 s`; no latency-driven architecture change is
+  required for the showcase.
+- The full manual visual matrix prepared for Step 15 is deferred to Stage 9,
+  where visual inspection is already required. This does not invalidate the
+  bounded public claim above: its telemetry/hardware route, manifest selection,
+  validation, and phase-preserving switching all have code, focused-regression,
+  and existing runtime-log evidence. The deferred matrix remains an integration
+  visual check, not a known Stage 8 defect.
+- Final focused and full automated regression suite: `286 passed`; no known
+  blocking Stage 8 defect.
+
+Stage 9 - Server Velocity Trail Foundation Slice is the next active stage.
+
+#### Historical implementation plan ✅
+
+Jira: `DC-46`
+
+Release: no separate bump. DTRS remains `0.4.0`; the next feature milestone is
+`0.5.0` after Stage 10.
+
+Status: COMPLETE / archived on 2026-08-15. The detailed Stage 8 completion
+record is in [Completed Runtime Stage Plans](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-8---workload-to-cache-state-binding-slice).
+
+#### Stage 8 implementation plan
+
+1. ✅ **Complete (2026-08-14).** Preserve this accepted contract as the
+   implementation baseline. The `0.4.0` documentation drift is resolved, the
+   Stage 7 checkpoint record is retained, and `0.5.0` remains the Stage-10
+   feature milestone.
+2. ✅ **Complete (2026-08-14).** Airflow selection now uses a manifest-driven dataset registry
+   below `assets/_external/airflow_datasets/`. Runtime identity is manifest
+   `scope/state`, never a directory name. The expected server family is
+   `load_idle`, `load_normal`, `load_surge`, and `load_critical`; numbered
+   folders remain filesystem organisation only.
+3. ✅ **Complete (2026-08-14).** Added and log the explicit config-backed mapping: `Idle -> server/load_idle`,
+   `Nominal -> server/load_normal`, `Surge -> server/load_surge`, and
+   `Critical -> server/load_critical`. Do not derive names with string rules
+   such as `"load_" + mode.lower()`.
+4. ✅ **Complete (2026-08-14).** Simulation Cache owns workload-to-airflow binding;
+   Telemetry remains the owner of the semantic workload state; airflow is its
+   consumer. The existing Workload selector remains the sole operator-facing
+   selector.
+4.5. ✅ **Complete (2026-08-14).** Extracted workload-to-airflow runtime
+   coordination into `app/workload_binding/`; `RuntimeController` remains the
+   public lifecycle facade, while no Flow lifecycle behaviour changes.
+5. ✅ **Complete (2026-08-14).** Retired the single `server/load_normal` selector as the Attach runtime source of truth. It may remain as a Stage 6-compatible default where that
+   reduces regression risk, but the active selector must derive from the
+   current workload mapping. Nominal therefore preserves the existing happy
+   path naturally.
+6. ✅ **Complete (2026-08-14).** Added one sequential background validation
+   coordinator. At launch Flow stays detached while telemetry, fans, and other
+   systems work normally. It validates the current workload dataset first, then
+   the remaining unvalidated family members; never runs four heavyweight VTI
+   checks concurrently; reuses matching `SessionValidationCache` receipts;
+   isolates failures through three bounded retry passes; and cancels
+   cooperatively on extension shutdown.
+7. ✅ **Complete (2026-08-14).** Give visible simulation priority during manual
+   Attach through the single workload-binding validation coordinator. A matching
+   active job is promoted and reused; a different background job is cancelled,
+   safely requeued with its attempt preserved, then resumed after the Attach
+   attempt. Attach-priority failures retry immediately within the existing
+   three-attempt bound; cancelled jobs cannot store stale receipts or emit a
+   false PASS.
+8. ✅ **Complete (2026-08-15).** The isolated Kit-CAE hot-switch spike proved
+   that an existing temporal `FieldArray.fileNames` source can be retargeted in
+   place, then refreshed through `omni.cae.viz.Controller.sync_active_controller`,
+   while preserving the Flow simulation, smoke state, timeline, and runtime
+   objects. The temporary spike UI, one-shot state, diagnostics, and
+   Normal-to-Critical special case were removed. The neutral
+   `flow.temporal.retarget_kit_cae_temporal_source_in_place()` primitive retains
+   session-layer authoring, readback, and active-controller refresh for Step 9.
+9. ✅ **Complete (2026-08-15).** Implemented attached workload transitions as pending,
+   sample-boundary, phase-preserving retargets. Validate the target, wait for
+   the next VTI sample boundary, retarget the velocity source at the
+   corresponding sample index, and clear the pending state. Do not detach,
+   rebuild Flow, erase smoke, or restart at frame 1001 unless the spike proves
+   that the local runtime requires the smallest such fallback.
+10. ✅ **Complete (2026-08-15).** Truthful
+    failure semantics: a failed or absent cache never rolls telemetry back;
+    telemetry, fans, LEDs, and other workload consumers remain in the requested
+    state; airflow remains on the previous safe dataset or detached; pending is
+    cleared; and the UI status plus structured `FAILED` log report the exact
+    failure. Kit acceptance remains the next runtime check.
+11. ✅ **Complete (2026-08-15).** Validate the four datasets as one compatible
+    simulation family from their manifests and existing preflight receipts, with
+    no additional VTI scan. The check covers velocity field identity and
+    PointData association, component/type structure, dimensions/grid, origin,
+    spacing, bounds, equal loop duration, and valid temporal sample structure.
+    Different rate, source-frame step, and sample count are allowed; normalized
+    discrete phase mapping is required and interpolation remains forbidden.
+12. ✅ **Complete (2026-08-15).** Pending transitions are cancellable through
+    generation-based supersession: the latest workload request wins, old
+    transitions cannot commit after supersession, and no Detach/Reset/rebuild
+    is introduced. Focused async barrier races and the rapid
+    `Surge -> Critical -> Idle` sequence are regression-covered; Kit acceptance
+    remains the final runtime confirmation.
+13. ✅ **Complete (2026-08-15).** `SessionValidationCache` signatures cover
+    the validation contract version, resolved dataset identity, full manifest,
+    ordered VTI path/size/mtime metadata, and selected velocity field. Config
+    Reload resets transient runtime/transition/coordinator state without
+    clearing matching receipts; changed validation inputs acquire a new
+    signature automatically, while runtime-only settings preserve reuse.
+    VTI change detection is deliberately filesystem-identity based
+    (ordered path/size/mtime), not a runtime byte hash: the authored Houdini
+    export contract treats a re-export as a metadata-changing operation. A
+    future strict byte-level guarantee belongs in an export-authored manifest
+    dataset digest, not in startup-time hashing of multi-GiB VTI assets.
+14. ✅ **Complete (2026-08-15).** Focused Stage 8 coverage reuses the Stage 6/7
+    suites and proves four semantic states, mapping/discovery, invalid data,
+    detached changes, validation arbitration, receipt/cache reload semantics,
+    normalized phase mapping, truthful failure, and latest-request-wins races.
+    Added playback-intent boundaries prove that paused transitions wait without
+    altering playback and cannot resume after supersession; playing transitions
+    do not introduce an artificial pause.
+15. ✅ **Implementation/testing prerequisites DONE (2026-08-15).** Conduct Kit
+    acceptance as a runtime transition matrix. For each workload, prove workload
+    -> telemetry -> fans -> manifest -> VTI sequence -> Flow; then cover ordered
+    transitions, Play/Pause, detached changes, missing cache, rapid changes,
+    validation plus Attach, config reload, and combined Flow plus X-Ray. Check
+    explicitly for stale emitters, callbacks, and temporal jobs. Manual Kit
+    acceptance remains outstanding.
+
+
+##### Step 15 — Kit runtime transition acceptance checklist (prepared 2026-08-15)
+
+Run in one DTRS process. Record only actual defects.
+
+| Section | Operator action | Required evidence |
+|---|---|---|
+| Per-workload chain | For each `Idle`, `Nominal`, `Surge`, `Critical`, select workload detached, Attach, Play, then Detach. | Telemetry and fan/RPM UI agree; mapping and Attach-selector logs name the matching `server/load_*`; active selector and live VTI family agree. |
+| Ordered transitions | `Idle -> Nominal -> Surge -> Critical`, then reverse. | One `REQUEST -> READY -> RETARGET -> CONSUMED -> COMMIT`; pending cleared, target family live, runtime contract match, zero resets. |
+| Playback | Transition Playing; Pause and request target; Resume; change workload detached. | Playing remains Playing; no paused retarget before Resume; Detached never auto-Attaches. |
+| Validation/cache/reload | Observe startup, cached Attach, natural MISS if encountered, then Config Reload. | Sequential validation, cached `Preflight: REUSED`, normal MISS validation, reload retains matching receipts. |
+| Rapid requests | Attached + Playing: `Surge -> Critical -> Idle`. | Earlier transitions `SUPERSEDED`; only Idle commits; no late stale commit. |
+| Flow + X-Ray | Attach, enable/toggle X-Ray, transition workload. | Flow remains attached, target family commits, X-Ray lifecycle is clean, no reset/rebuild evidence. |
+
+After each section inspect `/DTRS_KitCAE`: exactly one current
+`DataSetEmitter` and `FlowSimulation` while attached, neither after Detach.
+Duplicate lifecycle/proof output, a non-empty terminal pending selector, or
+validation work surviving shutdown/reload are defects.
+
+16. ✅ **Complete (2026-08-15).** Existing Kit logs provide sufficient latency
+    evidence; no new benchmark was run. Cached workload `REQUEST -> COMMIT`
+    measured approximately `0.98–1.63 s` (typically `1.1–1.3 s`); cached
+    `READY -> RETARGET` waited roughly `50–63 ms` for the next boundary on the
+    recorded 5 Hz datasets. Cached Attach with a background-validation receipt
+    took approximately `4.0 s` from `PRE_ATTACH` to `FLOW_ATTACHED`: preflight
+    was `REUSED`/HIT/`0 ms`, while initial VTI import was about `250 ms`,
+    temporal USD authoring about `656 ms`, and initial Flow readiness about
+    `2.98 s`. Background preflight ran outside the interactive path at roughly
+    `38–42 s` per dataset. No dedicated timing was collected for unvalidated
+    interactive switching or Attach without a receipt; those paths remain
+    functionally covered by Stage 8 tests. The observed cached runtime latency
+    is responsive enough for the DTRS showcase, so no latency-driven
+    architecture change or optimisation is required.
+17. ✅ **Complete (2026-08-15).** The public claim is supported by the recorded
+    implementation, focused regressions, and existing Kit runtime evidence:
+    "The same workload state drives telemetry, hardware behaviour, and
+    selection of the corresponding Houdini-authored temporal airflow dataset,
+    with manifest-driven validation and phase-preserving runtime switching."
+    Stage 8 closure is recorded in the completed-stage archive; `DC-46` is
+    Done; Stage 9 is the next active slice. The Step 15 visual matrix remains
+    deferred to Stage 9 as additional integration evidence, not a Stage 8
+    blocking defect.
+
+##### Stage 08 — Workload-to-Cache Binding Contract
+
+**Jira:** `DC-46`
+
+**Purpose:** Bind the existing semantic workload state to real Houdini-authored
+temporal VTI airflow datasets without creating a second workload model or
+breaking the Stage 6 Flow lifecycle.
+
+1. **Single workload source.** `Idle`, `Nominal`, `Surge`, and `Critical`
+   remain Telemetry-owned semantic state. The Telemetry UI changes that state;
+   it is not a second Flow owner. Stage 8 adds no Airflow Mode, percentage
+   selector, or persisted Flow-only workload state.
+2. **Manifest identity.** Datasets below `assets/_external/airflow_datasets`
+   are found by manifest `(scope, state)`, never directory name. The explicit
+   mapping is `Idle -> server/load_idle`, `Nominal -> server/load_normal`,
+   `Surge -> server/load_surge`, and `Critical -> server/load_critical`; it is
+   never derived by string construction.
+3. **Telemetry/Flow independence.** A workload request changes telemetry,
+   fans, LEDs, and other workload consumers even when the corresponding Flow
+   dataset is absent or invalid. Flow is an asynchronous visual consumer.
+4. **Truthful failure.** Failure retains the last safe attached airflow where
+   possible, or Detached state otherwise; it never rolls telemetry back. UI and
+   logs expose requested workload, active airflow, exact reason, and cleared
+   pending state.
+5. **Startup/background validation.** Flow starts Detached. One sequential
+   worker preflights current workload first, then the remaining datasets; it
+   never constructs active Flow and does not run heavyweight VTI checks in
+   parallel.
+6. **Attach priority.** Manual Attach promotes or reuses validation for the
+   matching target, otherwise safely pre-empts/requeues background work without
+   consuming an attempt, then resumes it after Attach.
+7. **Session receipts.** Successful plain-data preflight receipts are reusable
+   within a process. Their signature covers validation contract, selector,
+   full manifest, selected field, and ordered VTI filesystem identity.
+8. **Config Reload.** Reload resets transient runtime/transition/coordinator
+   state but preserves a receipt when its signature still matches; changed
+   validation inputs naturally make old receipts inapplicable.
+9. **Family compatibility.** Hot switching requires compatible velocity-field
+   structure, grid/dimensions, origin, spacing, bounds/coordinate contract,
+   equal loop duration, and valid temporal metadata. Different sample rates
+   and counts are allowed; interpolation is forbidden.
+10. **Phase-preserving switching.** Attached workload change validates target,
+    waits for a sample boundary, maps normalized discrete phase to target, and
+    retargets in place. Existing smoke, Flow runtime, and playback intent are
+    preserved where supported; no Detach/Attach/rebuild/reset fallback is
+    introduced without a proven runtime limitation.
+11. **Live proof.** Background preflight is not live Flow proof. Commit occurs
+    only after target source consumption, payload/operator update, direct-Attach
+    runtime-contract match including velocityScale, zero resets, and timeline
+    continuity.
+12. **Cancellable transitions.** Latest workload request wins. A superseded
+    generation cannot commit after validation, boundary, retarget, consumption,
+    or any terminal state mutation.
+13. **Non-goals.** No parallel workload model, four concurrent simulations,
+    velocity blending/interpolation, predictive CFD, Stage 7 lifecycle change,
+    heavyweight VTI assets in Git, or speculative optimisation.
+
+**Done criteria:** the four explicit manifest-backed mappings, independent
+telemetry, cached validation, safe Attach priority, truthful failure, compatible
+phase-preserving transition, supersession, Config Reload semantics, and Stage
+6/7 regression safety are all implemented and covered by runtime evidence and
+focused tests.
+
+
 
 ## Cancelled Runtime Features
 

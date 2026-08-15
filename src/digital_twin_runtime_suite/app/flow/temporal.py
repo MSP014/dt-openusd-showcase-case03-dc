@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from digital_twin_runtime_suite.app.airflow_dataset import AirflowDataset
+from digital_twin_runtime_suite.app.airflow_validation import (
+    preflight as airflow_preflight,
+)
 from digital_twin_runtime_suite.app.flow import smoke as flow_smoke
 from digital_twin_runtime_suite.app.flow import validation as flow_validation
-from digital_twin_runtime_suite.app.flow.validation import read_kit_cae_vti_metadata
 
 
 def kit_cae_vectors_match(expected, actual, tolerance: float = 1e-6) -> bool:
@@ -25,44 +28,6 @@ def kit_cae_vectors_match(expected, actual, tolerance: float = 1e-6) -> bool:
         )
     except (TypeError, ValueError):
         return False
-
-
-class TemporalVtiValidationCancelled(RuntimeError):
-    """Signal cooperative cancellation of the worker-only VTI preflight."""
-
-
-def validate_kit_cae_temporal_vti_contract(
-    velocity_paths: tuple[Path, ...],
-    field_name: str,
-    progress_callback=None,
-    cancel_requested=None,
-) -> tuple[dict[str, object], bool]:
-    """Require each Stage 6 temporal fixture to share the imported grid contract.
-
-    The callback deliberately receives plain path/count values only. This helper
-    runs in a worker during Attach and must never reach USD, Kit, or OmniUI.
-    """
-
-    metadata_by_path = []
-    for completed_count, path in enumerate(velocity_paths, start=1):
-        # This worker owns only plain VTI metadata. Check between samples so a
-        # Detach never waits for the full dataset and never touches Kit objects.
-        if cancel_requested and cancel_requested():
-            raise TemporalVtiValidationCancelled("VTI preflight cancelled")
-        metadata_by_path.append((path, read_kit_cae_vti_metadata(path, field_name)))
-        if progress_callback:
-            progress_callback(completed_count, len(velocity_paths), path.name)
-        if cancel_requested and cancel_requested():
-            raise TemporalVtiValidationCancelled("VTI preflight cancelled")
-    primary_path, primary_metadata = metadata_by_path[0]
-    for path, metadata in metadata_by_path[1:]:
-        for key in ("dimensions", "spacing", "vti_header_origin"):
-            if metadata[key] != primary_metadata[key]:
-                raise RuntimeError(
-                    "Temporal VTI grid contract mismatch: "
-                    f"{path.name} {key} differs from {primary_path.name}."
-                )
-    return primary_metadata, True
 
 
 def kit_cae_vti_source_frame(asset: Path) -> str:
@@ -179,9 +144,8 @@ def author_kit_cae_temporal_velocity_samples(
         float(index) * time_code_step for index in range(len(velocity_paths))
     )
     for time_code, velocity_path in zip(time_codes, velocity_paths):
-        file_names_attr.Set(
-            [Sdf.AssetPath(velocity_path.as_posix())],
-            Usd.TimeCode(time_code),
+        author_kit_cae_temporal_velocity_sample(
+            field_prim, velocity_path, time_code, cae_vtk, Sdf, Usd
         )
     return time_codes
 
@@ -220,15 +184,153 @@ async def author_kit_cae_temporal_velocity_samples_in_batches(
         zip(time_codes, velocity_paths),
         start=1,
     ):
-        file_names_attr.Set(
-            [Sdf.AssetPath(velocity_path.as_posix())],
-            Usd.TimeCode(time_code),
+        author_kit_cae_temporal_velocity_sample(
+            field_prim, velocity_path, time_code, cae_vtk, Sdf, Usd
         )
         if index < len(time_codes) and index % batch_size == 0:
             if progress_callback:
                 progress_callback(index, len(time_codes))
             await next_update()
     return time_codes
+
+
+def author_kit_cae_temporal_velocity_sample(
+    field_prim,
+    velocity_path: Path,
+    time_code: float,
+    cae_vtk,
+    Sdf,
+    Usd,
+) -> bool:
+    """Author one ``fileNames`` time sample through the Stage 6 mechanism."""
+
+    file_names_attr = cae_vtk.FieldArray(field_prim).GetFileNamesAttr()
+    if not file_names_attr or not file_names_attr.IsValid():
+        raise RuntimeError("Kit-CAE velocity field is missing fileNames.")
+    return bool(
+        file_names_attr.Set(
+            [Sdf.AssetPath(velocity_path.as_posix())],
+            Usd.TimeCode(time_code),
+        )
+    )
+
+
+def author_kit_cae_temporal_velocity_samples_except_index(
+    field_prim,
+    velocity_paths: tuple[Path, ...],
+    time_codes: tuple[float, ...],
+    preserved_index: int,
+    cae_vtk,
+    Sdf,
+    Usd,
+) -> None:
+    """Retarget a sequence without changing the source currently being consumed."""
+
+    if len(velocity_paths) != len(time_codes):
+        raise RuntimeError(
+            "Temporal source paths and time codes must have equal length."
+        )
+    if not 0 <= preserved_index < len(velocity_paths):
+        raise RuntimeError("Temporal preserved sample index is outside the sequence.")
+    for index, (velocity_path, time_code) in enumerate(zip(velocity_paths, time_codes)):
+        if index != preserved_index:
+            author_kit_cae_temporal_velocity_sample(
+                field_prim, velocity_path, time_code, cae_vtk, Sdf, Usd
+            )
+
+
+def next_temporal_sample_index(current_index: int, sample_count: int) -> int:
+    """Return the next cyclic sample index for a phase-preserving retarget."""
+
+    if not 0 <= current_index < sample_count:
+        raise ValueError("Current temporal sample index is outside the sequence.")
+    return (current_index + 1) % sample_count
+
+
+def kit_cae_payload_digest(payload, payload_count: int) -> str:
+    """Return bounded, full-payload evidence for one live CAE output."""
+
+    if payload is None:
+        return "unavailable"
+    try:
+        raw = memoryview(payload).tobytes()
+    except (TypeError, ValueError):
+        raw = b"".join(
+            int(value).to_bytes(4, "little", signed=False) for value in payload
+        )
+    return f"len={payload_count}; sha256={hashlib.sha256(raw).hexdigest()[:16]}"
+
+
+@dataclass(frozen=True)
+class InPlaceTemporalRetargetResult:
+    """Evidence returned by one in-place temporal source retarget."""
+
+    target_time_code: float
+    requested_source: Path
+    resolved_source: Path | None
+    authoring_succeeded: bool
+    refresh_requested: bool
+
+
+async def retarget_kit_cae_temporal_source_in_place(
+    stage,
+    field_prim,
+    velocity_path: Path,
+    time_code: float,
+    cae_vtk,
+    Sdf,
+    Usd,
+    sync_active_controller=None,
+    *,
+    refresh: bool = True,
+) -> InPlaceTemporalRetargetResult:
+    """Retarget one FieldArray time sample and optionally refresh CAE.
+
+    The session layer is used because the authored source sequence is an
+    immutable asset contract; this adds the smallest runtime override rather
+    than changing the Houdini-authored layer.  This helper intentionally
+    changes only the existing temporal source opinion. It neither receives nor
+    touches Flow, emitter, Attach, Detach, or Reset state.  ``refresh=False``
+    is the production transition path: Kit-CAE then consumes the authored
+    source through its natural temporal update, avoiding VTK re-entrancy.
+    """
+
+    previous_edit_target = stage.GetEditTarget()
+    stage.SetEditTarget(stage.GetSessionLayer())
+    try:
+        authoring_succeeded = author_kit_cae_temporal_velocity_sample(
+            field_prim, velocity_path, time_code, cae_vtk, Sdf, Usd
+        )
+    finally:
+        stage.SetEditTarget(previous_edit_target)
+
+    resolved_source = kit_cae_selected_velocity_asset(
+        field_prim, time_code, cae_vtk, Usd
+    )
+    if not authoring_succeeded or resolved_source != velocity_path:
+        raise RuntimeError(
+            "Kit-CAE temporal source retarget did not resolve to the requested VTI."
+        )
+    if not refresh:
+        return InPlaceTemporalRetargetResult(
+            target_time_code=time_code,
+            requested_source=velocity_path,
+            resolved_source=resolved_source,
+            authoring_succeeded=authoring_succeeded,
+            refresh_requested=False,
+        )
+    if sync_active_controller is None:
+        from omni.cae.viz.controller import Controller
+
+        sync_active_controller = Controller.sync_active_controller
+    refresh_requested = bool(await sync_active_controller())
+    return InPlaceTemporalRetargetResult(
+        target_time_code=time_code,
+        requested_source=velocity_path,
+        resolved_source=resolved_source,
+        authoring_succeeded=authoring_succeeded,
+        refresh_requested=refresh_requested,
+    )
 
 
 def kit_cae_file_names_value_at_time(field_prim, time_code, cae_vtk, Usd):
@@ -1127,7 +1229,9 @@ class FlowTemporalMixin:
             )
         )
 
-    _read_kit_cae_vti_metadata = staticmethod(flow_validation.read_kit_cae_vti_metadata)
+    _read_kit_cae_vti_metadata = staticmethod(
+        airflow_preflight.read_kit_cae_vti_metadata
+    )
     _wait_for_kit_cae_dataset_emitter_ready = staticmethod(
         flow_validation.wait_for_kit_cae_dataset_emitter_ready
     )

@@ -3,7 +3,8 @@
 This directory anchors the Digital Twin Runtime Suite source tree for the Case
 03 tech pack.
 
-The application layer consumes the USD/VDB asset package and owns the
+The application layer consumes the USD, VDB, and manifest-backed VTI asset
+package and owns the
 interactive runtime experience: viewport presentation, status UI, synthetic
 telemetry, operational state switching, and scene-level review tools.
 
@@ -17,13 +18,18 @@ development helpers, and the Digital Twin Runtime Suite runtime.
 ## Runtime Preview
 
 Digital Twin Runtime Suite 0.4.0 combines interactive Omniverse full-server
-review, the Stage 3 synthetic telemetry provider, workload-state controls,
-Stage 5 config-backed server fan motion, and Stage 6 cached airflow playback.
+review, synthetic telemetry and workload-state controls, config-backed server
+fan motion, cached airflow playback, Engineering X-Ray review, and Stage 8
+workload-to-cache binding.
 
 | Nominal workload | Critical workload |
 | :---: | :---: |
 | ![Digital Twin Runtime Suite 0.4.0 - Nominal workload](../../docs/img/dtrs_0.1.0/dtrs_0.1.0_01.png) | ![Digital Twin Runtime Suite 0.4.0 - Critical workload](../../docs/img/dtrs_0.1.0/dtrs_0.1.0_02.png) |
-| *Nominal runtime telemetry and Noctua asset review* | *Critical workload thermal and cooling response* |
+| *Earlier Nominal telemetry and Noctua review capture* | *Earlier Critical telemetry and cooling-response capture* |
+
+The images above are telemetry UI captures. Current Stage 8 runtime behaviour
+also resolves each semantic workload to its authored temporal airflow dataset
+and switches attached Flow in place after validation.
 
 ## Boundary
 
@@ -47,10 +53,10 @@ Stage 5 config-backed server fan motion, and Stage 6 cached airflow playback.
 
 Digital Twin Runtime Suite is the runtime validation layer for the Case 03
 content package. Do not treat the local template folder as authored Case 03
-content, and do not mix USD/VDB assets, documentation, or project source into
-that folder as part of the DTRS runtime package.
+content, and do not mix USD, VDB, VTI assets, documentation, or project source
+into that folder as part of the DTRS runtime package.
 
-Heavy USD, VDB, texture, and HDRI payloads remain under `assets/_external/`.
+Heavy USD, VDB, VTI, texture, and HDRI payloads remain under `assets/_external/`.
 Application modules may reference those files through relative config paths, but
 they must not copy those assets into this source tree.
 
@@ -61,18 +67,34 @@ they must not copy those assets into this source tree.
 | `ext/msp.dtrs/msp/dtrs/extension.py` | OmniUI sidebar, user interaction, and asynchronous command scheduling. |
 | `app/commands.py` | Stable `RuntimeController` facade used by the extension. |
 | `app/config.py` | Project configuration plus local operator override merge and persistence. |
-| `app/airflow_dataset.py` | Manifest-driven external airflow dataset discovery, VTI sequence validation, and derived timing. |
-| `app/flow/runtime.py` | Flow Attach/Detach lifecycle, playback commands, session state, smoke/layout apply orchestration, and re-attach safety. |
+| `app/airflow_dataset.py` | Manifest-driven external airflow dataset discovery and manifest identity. |
+| `app/airflow_validation/` | Worker-safe VTI preflight, session validation signatures/receipts, normalized-phase mapping, and cross-dataset family compatibility. |
+| `app/workload_binding/` | Explicit workload-to-dataset resolution plus single-flight background/foreground validation arbitration. |
+| `app/flow/runtime.py` | Flow Attach/Detach lifecycle, playback commands, smoke/layout apply orchestration, and in-place attached workload transitions. |
 | `app/flow/smoke.py` | Smoke-only tracer emitters, Cloud rendering, smoke tuning, transport controls, and procedural emitter layout math. |
 | `app/flow/temporal.py` | VTI time-code authoring, temporal source switching, loop proof, and temporal evidence. |
 | `app/flow/performance.py` | Viewport FPS and memory sampling with periodic Flow performance reports. |
 | `app/flow/diagnostics.py` | Kit-CAE spatial/field validation, optional overlays, origin diagnostics, and detailed Flow probes. |
-| `app/flow/validation.py` | VTI metadata parsing and focused Kit-CAE readiness helpers. |
+| `app/flow/validation.py` | Direct-Attach-equivalent runtime contracts and focused Kit-CAE readiness helpers. |
+| `app/xray/` | Reversible Engineering X-Ray material lifecycle and performance ownership. |
+| `app/diagnostics.py` | Shared readable local timestamps for DTRS-owned runtime diagnostics. |
 
 The external airflow data contract lives below `assets/_external/airflow_datasets/`.
-Each dataset directory carries a `manifest.toml`; DTRS selects it by manifest
-`scope` and `state`, discovers its colocated VTI files numerically, and derives
-the runtime cadence from the source FPS and frame step.
+Each dataset directory carries a `manifest.toml`; DTRS uses manifest `scope`
+and `state` as runtime identity rather than the folder name, discovers its
+colocated VTI files numerically, and derives cadence, sample structure, and
+loop duration from manifest metadata. The configuration explicitly maps
+`Idle`, `Nominal`, `Surge`, and `Critical` to the four authored
+`server/load_*` datasets.
+
+Telemetry owns the semantic workload state. The Simulation Cache consumes that
+state through `workload_binding/`: startup preflights datasets sequentially and
+reuses matching session receipts, while manual Attach receives foreground
+priority. With Flow attached, a validated compatible target becomes pending,
+then retargets the existing temporal source at the next sample boundary using
+normalized phase mapping. Commit requires native target consumption and a
+matching direct-Attach runtime contract; a failed target leaves telemetry on
+the requested workload while retaining the last confirmed safe airflow state.
 
 The Stage 2 look-review baseline uses
 `assets/_external/hdri/kloofendal_48d_partly_cloudy_puresky_4k.exr` by default
@@ -139,3 +161,9 @@ or blower wheel should sit under its own stable parent `Xform`, with that
 parent origin on the physical rotation axis. The runtime still validates the
 axis from topology, so exported pivots are used as the fast path rather than as
 blind trust.
+
+Stage 7 adds reversible Custom MDL Fresnel Engineering X-Ray review without
+stealing telemetry LED ownership. Stage 8 adds the workload-to-cache runtime
+binding described above, including phase-preserving attached switching with no
+Flow reset or rebuild. The next active slice, Stage 9, is Server Velocity
+Trails; it must preserve these accepted Flow, X-Ray, and workload contracts.

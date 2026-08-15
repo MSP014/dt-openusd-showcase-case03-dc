@@ -335,6 +335,13 @@ temporal_debug_logging = false
 root = "airflow_datasets"
 scope = "server"
 state = "load_normal"
+
+[simulation_cache.workload_dataset_mapping]
+Idle = { scope = "server", state = "load_idle" }
+Nominal = { scope = "server", state = "load_normal" }
+Surge = { scope = "server", state = "load_surge" }
+Critical = { scope = "server", state = "load_critical" }
+
 [simulation_cache.smoke_tuning]
 density = 0.5
 brightness = 1.0
