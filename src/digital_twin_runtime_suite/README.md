@@ -70,8 +70,11 @@ they must not copy those assets into this source tree.
 | `app/airflow_dataset.py` | Manifest-driven external airflow dataset discovery and manifest identity. |
 | `app/airflow_validation/` | Worker-safe VTI preflight, session validation signatures/receipts, normalized-phase mapping, and cross-dataset family compatibility. |
 | `app/workload_binding/` | Explicit workload-to-dataset resolution plus single-flight background/foreground validation arbitration. |
-| `app/flow/runtime.py` | Flow Attach/Detach lifecycle, playback commands, smoke/layout apply orchestration, and in-place attached workload transitions. |
-| `app/flow/smoke.py` | Smoke-only tracer emitters, Cloud rendering, smoke tuning, transport controls, and procedural emitter layout math. |
+| `app/flow/runtime.py` | Core Flow session lifecycle: Attach/Detach, playback commands, temporal proof, and shared attached-session state. |
+| `app/flow/workload_transition.py` | In-place attached workload transitions: pending/supersession, sample-boundary retargeting, native-consumption proof, and commit/failure semantics. |
+| `app/flow/quality_runtime.py` | Live DatasetVoxelization resolution switching and recovery for an attached Flow session. |
+| `app/smoke/` | Smoke/tracer visualisation: Cloud presentation, smoke tuning, transport controls, and procedural emitter layout behaviour. |
+| `app/flow/smoke.py` | Temporary compatibility re-export for smoke helpers now owned by `app/smoke/`. |
 | `app/flow/temporal.py` | VTI time-code authoring, temporal source switching, loop proof, and temporal evidence. |
 | `app/flow/performance.py` | Viewport FPS and memory sampling with periodic Flow performance reports. |
 | `app/flow/diagnostics.py` | Kit-CAE spatial/field validation, optional overlays, origin diagnostics, and detailed Flow probes. |

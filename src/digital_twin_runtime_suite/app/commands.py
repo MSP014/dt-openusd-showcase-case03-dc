@@ -131,27 +131,11 @@ class RuntimeController(
     """
 
     FACE_PANEL_ROTATE_OP_SUFFIX = "mspViewHinge"
-    KIT_CAE_SERVER_ROOT = "/blackwell_rig"
     FLOW_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
     FLOW_PERFORMANCE_LOG_INTERVAL_SECONDS = 30.0
     FLOW_DETACH_SETTLE_UPDATE_COUNT = 3
     FLOW_DETACH_OPERATOR_QUIESCE_SECONDS = 0.75
     FLOW_DETACH_OPERATOR_QUIESCE_TIMEOUT_SECONDS = 5.0
-    KIT_CAE_FRONT_INTAKE_BINDING_IDS = frozenset(
-        {"front_p120_01", "front_p120_02", "front_p120_03"}
-    )
-    KIT_CAE_INTAKE_TRACER_PASSIVE_CHANNEL_VALUES = (
-        ("radius", 1.0),
-        ("radiusIsWorldSpace", False),
-        ("velocity", (0.0, 0.0, 0.0)),
-        ("coupleRateVelocity", 0.0),
-        ("fuel", 0.0),
-        ("coupleRateFuel", 0.0),
-        ("temperature", 0.0),
-        ("coupleRateTemperature", 0.0),
-        ("burn", 0.0),
-        ("coupleRateBurn", 0.0),
-    )
     QLED_MATERIAL_PATHS = {
         "normal": "/DTRS_Runtime/Looks/QLEDOnNormal",
         "warning": "/DTRS_Runtime/Looks/QLEDOnWarning",
