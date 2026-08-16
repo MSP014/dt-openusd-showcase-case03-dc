@@ -17,12 +17,6 @@ import omni.ext
 import omni.ui as ui
 
 EXTENSION_SETTINGS = "/exts/msp.dtrs"
-# Kit persists user-facing extension state only below ``/persistent``.  The
-# Cache handoff must survive a full DTRS process restart, unlike launch
-# overrides that intentionally live under ``/exts``.
-STREAMLINES_CACHE_RESTART_SETTING = (
-    "/persistent/exts/msp.dtrs/streamlinesCacheRestartPending"
-)
 PANEL_WIDTH = 340
 ROW_LABEL_WIDTH = 104
 SERVER_VIEW_LABEL_WIDTH = 150
@@ -91,9 +85,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._airflow_cache_selector_label = None
         self._streamlines_status_label = None
         self._streamlines_cache_build_button = None
-        self._streamlines_cache_playback_button = None
-        self._streamlines_cache_workflow_step = "STARTUP"
-        self._streamlines_cache_restore_status = None
+        self._streamlines_cache_load_button = None
         self._airflow_background_validation_task = None
         self._view_task = None
         self._auxiliary_windows_task = None
@@ -172,7 +164,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
         )
         self._build_controller()
-        self._restore_streamlines_cache_workflow()
         if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
             self._start_background_airflow_validation()
         self._build_window()
@@ -1048,7 +1039,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
 
     def _build_streamlines_controls(self) -> None:
-        """Build controls for the restart-gated derived-cache workflow."""
+        """Build production controls for persistent cache build and load."""
 
         with ui.VStack(spacing=6, content_clipping=True):
             self._streamlines_cache_build_button = ui.Button(
@@ -1057,31 +1048,25 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 height=26,
                 width=ui.Percent(100),
             )
-            self._streamlines_cache_playback_button = ui.Button(
-                "Run Cache Playback Acceptance",
-                clicked_fn=self._schedule_run_streamlines_cache_playback,
+            self._streamlines_cache_load_button = ui.Button(
+                "Load Streamlines Cache",
+                clicked_fn=self._schedule_load_streamlines_cache,
                 height=26,
                 width=ui.Percent(100),
             )
             self._streamlines_status_label = ui.Label("Status: Ready", height=18)
             if self._controller:
-                self._set_streamlines_cache_workflow_step(
-                    self._streamlines_cache_workflow_step
-                )
-                if self._streamlines_cache_restore_status:
-                    self._set_streamlines_status(self._streamlines_cache_restore_status)
+                self._set_streamlines_cache_buttons_enabled(True)
+                cache_validation = self._controller.inspect_existing_streamlines_cache()
+                if cache_validation.valid:
+                    self._set_streamlines_status(
+                        "Existing valid Streamlines cache discovered. "
+                        "Load Streamlines Cache to inspect it."
+                    )
                 else:
-                    controller = self._controller
-                    if self._streamlines_cache_workflow_step == "POST_RESTART_READY":
-                        announce_ready = (
-                            controller.announce_streamlines_cache_playback_ready
-                        )
-                    else:
-                        announce_ready = (
-                            controller.announce_streamlines_cache_build_ready
-                        )
-                    cache_ready_message = announce_ready()
-                    self._set_streamlines_status(cache_ready_message)
+                    self._set_streamlines_status(
+                        self._controller.announce_streamlines_cache_build_ready()
+                    )
 
     def _build_lighting_config_controls(self, config) -> None:
         self._lighting_status_label = ui.Label(
@@ -1936,48 +1921,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._streamlines_status_label.text = _compact_text(text)
             self._streamlines_status_label.tooltip = text
 
-    def _set_streamlines_cache_workflow_step(self, step: str) -> None:
-        """Gate cache actions around the required real DTRS process restart."""
+    def _set_streamlines_cache_buttons_enabled(self, enabled: bool) -> None:
+        """Keep production cache actions available without a restart gate."""
 
-        availability = {
-            "STARTUP": (True, False),
-            "BUILD_RUNNING": (False, False),
-            "RESTART_REQUIRED": (False, False),
-            "POST_RESTART_READY": (False, True),
-            "PLAYBACK_RUNNING": (False, False),
-            "COMPLETE": (True, False),
-        }
-        try:
-            build_enabled, playback_enabled = availability[step]
-        except KeyError as error:
-            raise ValueError(
-                f"Unsupported Streamlines cache workflow step: {step}."
-            ) from error
-        self._streamlines_cache_workflow_step = step
         if self._streamlines_cache_build_button:
-            self._streamlines_cache_build_button.enabled = build_enabled
-        if self._streamlines_cache_playback_button:
-            self._streamlines_cache_playback_button.enabled = playback_enabled
-
-    def _set_streamlines_cache_restart_pending(self, value: bool) -> None:
-        """Persist the restart handoff without persisting runtime state."""
-
-        self._settings.set_bool(STREAMLINES_CACHE_RESTART_SETTING, value)
-
-    def _restore_streamlines_cache_workflow(self) -> None:
-        """Restore playback only when the persisted receipt still validates."""
-
-        if not self._settings.get_as_bool(STREAMLINES_CACHE_RESTART_SETTING):
-            return
-        validation = self._controller.inspect_streamlines_cache_restart_handoff()
-        if validation.valid:
-            self._streamlines_cache_workflow_step = "POST_RESTART_READY"
-            return
-        self._set_streamlines_cache_restart_pending(False)
-        self._streamlines_cache_workflow_step = "STARTUP"
-        self._streamlines_cache_restore_status = (
-            "Cache is stale; press Build Streamlines Cache. " f"{validation.message}"
-        )
+            self._streamlines_cache_build_button.enabled = enabled
+        if self._streamlines_cache_load_button:
+            self._streamlines_cache_load_button.enabled = enabled
 
     @staticmethod
     def _asset_loaded_status(message: str) -> str:
@@ -2006,29 +1956,22 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._airflow_task = asyncio.ensure_future(self._attach_airflow())
 
     def _schedule_build_streamlines_cache(self) -> None:
-        """Run one guarded cache build before the mandatory restart."""
+        """Build a persistent cache while no other airflow operation is active."""
 
         if self._airflow_task and not self._airflow_task.done():
             self._set_streamlines_status("Airflow operation is already in progress.")
             return
-        self._set_streamlines_cache_workflow_step("BUILD_RUNNING")
+        self._set_streamlines_cache_buttons_enabled(False)
         self._airflow_task = asyncio.ensure_future(self._build_streamlines_cache())
 
-    def _schedule_run_streamlines_cache_playback(self) -> None:
-        """Run cached playback only after the persisted restart handoff."""
+    def _schedule_load_streamlines_cache(self) -> None:
+        """Load a validated persistent cache while no airflow task is active."""
 
         if self._airflow_task and not self._airflow_task.done():
             self._set_streamlines_status("Airflow operation is already in progress.")
             return
-        if not self._settings.get_as_bool(STREAMLINES_CACHE_RESTART_SETTING):
-            self._set_streamlines_status(
-                "Build the cache, restart DTRS, then run playback acceptance."
-            )
-            return
-        self._set_streamlines_cache_workflow_step("PLAYBACK_RUNNING")
-        self._airflow_task = asyncio.ensure_future(
-            self._run_streamlines_cache_playback()
-        )
+        self._set_streamlines_cache_buttons_enabled(False)
+        self._airflow_task = asyncio.ensure_future(self._load_streamlines_cache())
 
     def _schedule_attached_workload_transition(self, workload_mode: str) -> None:
         """Forward a semantic workload change without owning Flow arbitration."""
@@ -2525,23 +2468,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_airflow_status(result.message)
 
     async def _build_streamlines_cache(self) -> None:
-        """Contain cache-build failures at the OmniUI task boundary."""
+        """Contain production cache-build failures at the OmniUI task boundary."""
 
         try:
             result = await self._controller.build_streamlines_cache_in_kit(
                 status_callback=self._set_streamlines_status,
             )
-            if result.success:
-                self._set_streamlines_cache_restart_pending(True)
-                self._set_streamlines_cache_workflow_step("RESTART_REQUIRED")
-                self._set_streamlines_status(
-                    "Cache build complete. Restart DTRS, then run playback "
-                    "acceptance."
-                )
-            else:
-                self._set_streamlines_cache_restart_pending(False)
-                self._set_streamlines_cache_workflow_step("STARTUP")
-                self._set_streamlines_status(result.message)
+            self._set_streamlines_status(result.message)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -2558,42 +2491,20 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 status_callback=self._set_streamlines_status,
                 error_logger=carb.log_error,
             )
-            self._set_streamlines_cache_restart_pending(False)
-            self._set_streamlines_cache_workflow_step("STARTUP")
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
 
-    async def _run_streamlines_cache_playback(self) -> None:
-        """Contain cached-playback failures at the OmniUI task boundary."""
+    async def _load_streamlines_cache(self) -> None:
+        """Contain production cache-load failures at the OmniUI task boundary."""
 
         try:
-            run_playback = (
-                self._controller.run_streamlines_cache_playback_acceptance_in_kit
-            )
-            result = await run_playback(
+            result = await self._controller.load_streamlines_cache_in_kit(
                 status_callback=self._set_streamlines_status,
             )
-            if result.decision == "CACHE_PLAYBACK_VIABLE":
-                self._set_streamlines_cache_restart_pending(False)
-                self._set_streamlines_cache_workflow_step("COMPLETE")
-                self._set_streamlines_status(
-                    "Cache playback TEST COMPLETE — VIABLE; no further manual "
-                    "action required."
-                )
-            elif result.decision == "CACHE_PLAYBACK_NOT_VIABLE":
-                self._set_streamlines_cache_restart_pending(False)
-                self._set_streamlines_cache_workflow_step("COMPLETE")
-                self._set_streamlines_status(
-                    "Cache playback TEST COMPLETE — NOT VIABLE; inspect log."
-                )
-            else:
-                if "Explicitly rebuild the cache." in result.message:
-                    self._set_streamlines_cache_restart_pending(False)
-                    self._set_streamlines_cache_workflow_step("STARTUP")
-                    self._set_streamlines_status(
-                        "Cache is stale; press Build Streamlines Cache."
-                    )
-                else:
-                    self._set_streamlines_cache_workflow_step("POST_RESTART_READY")
-                    self._set_streamlines_status(result.message)
+            self._set_streamlines_status(
+                "Streamlines cache loaded: exact manifest state "
+                f"{result.active_sample_index + 1}/{result.metadata.sample_count}."
+            )
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -2605,12 +2516,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
             report_streamlines_task_failure(
                 error,
-                area="CACHE_PLAYBACK",
-                display_name="Streamlines cache playback acceptance",
+                area="CACHE_LOAD",
+                display_name="Streamlines cache load",
                 status_callback=self._set_streamlines_status,
                 error_logger=carb.log_error,
             )
-            self._set_streamlines_cache_workflow_step("POST_RESTART_READY")
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
 
     async def _cancel_attach_then_detach(self, attach_task) -> None:
         """Serialize Detach behind the cooperative preflight cancellation result."""

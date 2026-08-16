@@ -208,36 +208,19 @@
         reference provider both return `TelemetrySnapshot`, and that the same
         DTRS consumer works with both.
 
-### [DEPENDENCY] Reassess `omni.cae.testing` Runtime Dependency After Stage 09 Diagnostics
-
-- **Status:** Deferred
-- **Severity:** Low (Runtime Dependency / Packaging)
-- **Description:**
-  - `omni.cae.testing` is currently present in the DTRS application runtime
-    dependencies.
-  - Stage 09 diagnostic/integration tooling, including the isolated Kit-CAE
-    reproducer, may currently justify that dependency.
-  - Extension metadata also treats CAE testing functionality as a test
-    dependency.
-  - It is not yet proven that the final production DTRS runtime requires
-    `omni.cae.testing`.
-- **Why Deferred:**
-  - Stage 09 diagnostic and acceptance tooling remains active.
-  - Removing the dependency now could break useful acceptance/reproducer paths
-    while Phase 2.5 and the later runtime decomposition remain in progress.
-  - Dependency cleanup should follow ownership clarification, not precede it.
-- **Action Plan:**
-  - [ ] After Phase 2.75 / Stage 09 diagnostic ownership is settled, trace all
-        production and diagnostic uses of `omni.cae.testing`.
-  - [ ] Test a clean DTRS startup without the runtime dependency.
-  - [ ] Run the accepted production Streamlines path plus relevant
-        Flow/Smoke/X-Ray lifecycle checks.
-  - [ ] If production runtime does not require it, remove it from the shipping
-        `.kit` dependency list and retain it only where tests/diagnostics
-        require it.
-  - [ ] If it remains required, document the exact runtime owner and reason.
-
 ## 2. Resolved Technical Debt
+
+### [DEPENDENCY] Removed `omni.cae.testing` Runtime Dependency
+
+- **Status:** Resolved
+- **Severity:** Low (Runtime Dependency / Packaging)
+- **Resolution:**
+  - Streamlines diagnostic pruning removed the isolated reproducer and shipping
+    `.kit` dependency on `omni.cae.testing`.
+  - Repository tracing found no remaining runtime owner.
+  - User-run clean DTRS startup reached `app ready` and `RTX ready` without
+    loading `omni.cae.testing`; DTRS, Flow, Smoke, and X-Ray startup remained
+    available.
 
 ### [DOCS] Reconcile USD Architecture Docs with Current DTRS Direction
 
