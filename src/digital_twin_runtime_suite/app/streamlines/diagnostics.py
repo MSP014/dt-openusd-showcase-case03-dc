@@ -1,4 +1,4 @@
-"""Structured Package A evidence for a static DTRS velocity source."""
+"""Structured diagnostics for DTRS velocity-source and operator state."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
-    StaticStreamlinesProofCleanup,
-    StaticStreamlinesProofRequest,
+    StreamlinesOperatorCleanup,
+    StreamlinesOperatorRequest,
     is_create_command_placeholder_geometry,
 )
 
@@ -30,8 +30,8 @@ class StaticSourceRuntimeEvidence:
     timeline_playback: str
 
     @property
-    def package_a_clean(self) -> bool:
-        """Return whether every forbidden Package A runtime state is absent."""
+    def clean(self) -> bool:
+        """Return whether forbidden runtime state is absent after VTI import."""
 
         return (
             self.duplicate_runtime_prim_count == 0
@@ -46,8 +46,8 @@ class StaticSourceRuntimeEvidence:
 
 
 @dataclass(frozen=True)
-class StaticStreamlinesProofEvidence:
-    """Programmatic evidence that one static source produced real BasisCurves."""
+class StreamlinesOperatorEvidence:
+    """Programmatic evidence that one source produced real BasisCurves."""
 
     authored_prims: tuple[str, ...]
     duplicate_runtime_prim_count: int
@@ -96,8 +96,8 @@ class StaticStreamlinesProofEvidence:
     viewport_preview_point_count: int = 0
     viewport_preview_matches_runtime: bool = False
 
-    def is_valid_for(self, request: StaticStreamlinesProofRequest) -> bool:
-        """Return whether one completed Package B operator has the required bindings."""
+    def is_valid_for(self, request: StreamlinesOperatorRequest) -> bool:
+        """Return whether one completed operator has the required bindings."""
 
         return (
             self.operator_type == "BasisCurves"
@@ -129,8 +129,8 @@ class StaticStreamlinesProofEvidence:
 
 
 @dataclass(frozen=True)
-class StaticStreamlinesBindingEvidence:
-    """Effective Package B input contract captured before enabling the operator."""
+class StreamlinesBindingEvidence:
+    """Effective input contract captured before enabling the operator."""
 
     operator_enabled: bool
     source_relationship: str
@@ -143,14 +143,14 @@ class StaticStreamlinesBindingEvidence:
     resolved_velocity_field_names: tuple[str, ...]
 
 
-def inspect_static_streamlines_bindings(
+def inspect_streamlines_bindings(
     stage,
     *,
     operator_prim,
     dataset_prim,
     cae_viz,
     cae_usd_utils,
-) -> StaticStreamlinesBindingEvidence:
+) -> StreamlinesBindingEvidence:
     """Capture the exact relationship-based selection contract before enable.
 
     The installed Kit-CAE FieldSelectionAPI resolves target prims to dataset
@@ -168,7 +168,7 @@ def inspect_static_streamlines_bindings(
         )
         for target_path in velocity_targets
     )
-    return StaticStreamlinesBindingEvidence(
+    return StreamlinesBindingEvidence(
         operator_enabled=bool(
             cae_viz.OperatorAPI(operator_prim).GetEnabledAttr().Get()
         ),
@@ -183,8 +183,8 @@ def inspect_static_streamlines_bindings(
     )
 
 
-def format_static_streamlines_binding_evidence(
-    evidence: StaticStreamlinesBindingEvidence,
+def format_streamlines_binding_evidence(
+    evidence: StreamlinesBindingEvidence,
 ) -> str:
     """Format the pre-enable input contract without requiring USD tree inspection."""
 
@@ -248,7 +248,7 @@ def format_static_source_acceptance(
     cleanup: StaticVelocitySourceCleanup,
     evidence: StaticSourceRuntimeEvidence,
 ) -> str:
-    """Format one concise human-readable Package A acceptance block."""
+    """Format one concise human-readable imported-source diagnostic block."""
 
     cleanup_result = (
         "PASS (previous static source replaced)"
@@ -294,10 +294,10 @@ def format_static_source_acceptance(
     )
 
 
-def inspect_static_streamlines_proof(
+def inspect_streamlines_operator(
     stage,
     *,
-    request: StaticStreamlinesProofRequest,
+    request: StreamlinesOperatorRequest,
     field_prim,
     cae_viz,
     cae_vtk,
@@ -311,12 +311,12 @@ def inspect_static_streamlines_proof(
     fresh_execution: bool,
     operator_execution_success: bool | None,
     source_world_bounds: tuple[tuple[float, float, float], tuple[float, float, float]],
-) -> StaticStreamlinesProofEvidence:
+) -> StreamlinesOperatorEvidence:
     """Read authored diagnostics and computed UsdRT geometry from known paths.
 
     Kit-CAE deliberately leaves the creation command's four-point USD value in
     place. The Streamlines operator writes its computed points into Fabric, so
-    Package B accepts only the UsdRT snapshot captured after ``operator_end``.
+    Runtime code accepts only the UsdRT snapshot captured after ``operator_end``.
     """
 
     operator_prim = stage.GetPrimAtPath(request.operator_path)
@@ -380,7 +380,7 @@ def inspect_static_streamlines_proof(
             stage.GetPrimAtPath(request.seed_path.rsplit("/", 1)[0])
         ),
     )
-    return StaticStreamlinesProofEvidence(
+    return StreamlinesOperatorEvidence(
         authored_prims=authored_prims,
         duplicate_runtime_prim_count=(len(authored_prims) - len(set(authored_prims))),
         operator_type=str(operator_prim.GetTypeName()),
@@ -436,15 +436,15 @@ def inspect_static_streamlines_proof(
     )
 
 
-def format_static_streamlines_proof_acceptance(
+def format_streamlines_operator_evidence(
     descriptor: StaticVelocitySourceDescriptor,
-    request: StaticStreamlinesProofRequest,
-    cleanup: StaticStreamlinesProofCleanup,
-    evidence: StaticStreamlinesProofEvidence,
+    request: StreamlinesOperatorRequest,
+    cleanup: StreamlinesOperatorCleanup,
+    evidence: StreamlinesOperatorEvidence,
     *,
     verbose: bool = False,
 ) -> str:
-    """Format concise Package B evidence; expose point arrays only on request."""
+    """Format concise operator evidence; expose point arrays only on request."""
 
     result = "PASS" if cleanup.success and evidence.is_valid_for(request) else "FAIL"
     cleanup_result = (
@@ -523,7 +523,8 @@ def format_static_streamlines_proof_acceptance(
                     "  authored_usd_curve_vertex_counts="
                     f"{evidence.authored_usd_curve_vertex_counts}"
                 ),
-                f"  runtime_curve_vertex_counts={evidence.runtime_curve_vertex_counts}",
+                "  runtime_curve_vertex_counts="
+                f"{evidence.runtime_curve_vertex_counts}",
                 f"  runtime_point_head={evidence.point_head}",
                 f"  runtime_point_tail={evidence.point_tail}",
             )
@@ -555,7 +556,7 @@ def _runtime_subtree_paths(root_prim) -> tuple[str, ...]:
 
     ``Usd.Prim`` exposes ``GetChildren()`` but not ``GetDescendants()`` in the
     installed bindings.  A small recursive walk also avoids traversing unrelated
-    scene content when Package A reports only its own static import.
+    scene content when the VTI import reports only its own source state.
     """
 
     if not root_prim or not root_prim.IsValid():

@@ -1,4 +1,4 @@
-"""Focused Stage 09 Package B Streamlines proof contracts."""
+"""Focused Streamlines operator-contract tests."""
 
 from __future__ import annotations
 
@@ -11,40 +11,40 @@ from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
 from digital_twin_runtime_suite.app.streamlines.diagnostics import (
-    StaticStreamlinesBindingEvidence,
-    StaticStreamlinesProofEvidence,
-    format_static_streamlines_binding_evidence,
-    format_static_streamlines_proof_acceptance,
+    StreamlinesBindingEvidence,
+    StreamlinesOperatorEvidence,
+    format_streamlines_binding_evidence,
+    format_streamlines_operator_evidence,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     CREATE_COMMAND_PLACEHOLDER_CURVE_VERTEX_COUNTS,
     CREATE_COMMAND_PLACEHOLDER_POINTS,
-    STATIC_PROOF_DIRECTION,
-    STATIC_PROOF_OPERATOR_PATH,
-    STATIC_PROOF_RUNTIME_PREVIEW_PATH,
-    STATIC_PROOF_SEED_PATH,
+    STREAMLINES_DIRECTION,
+    STREAMLINES_OPERATOR_PATH,
     STREAMLINES_OPERATOR_ROOT,
+    STREAMLINES_RUNTIME_PREVIEW_PATH,
+    STREAMLINES_SEED_PATH,
     STREAMLINES_SEED_ROOT,
-    StaticStreamlinesProofCleanup,
-    StaticStreamlinesProofError,
-    StaticStreamlinesProofRequest,
-    build_static_streamlines_proof_request,
-    clear_static_streamlines_proof_from_stage,
+    StreamlinesOperatorCleanup,
+    StreamlinesOperatorRequest,
+    StreamlinesOperatorRequestError,
+    build_streamlines_operator_request,
+    clear_streamlines_operator_from_stage,
     validate_generated_streamlines_geometry,
-    validate_static_streamlines_source,
+    validate_streamlines_source,
 )
 
 
-def test_static_streamlines_request_has_deterministic_paths_bindings_and_seed():
+def test_streamlines_request_has_deterministic_paths_bindings_and_seed():
     descriptor = _descriptor()
 
-    request = build_static_streamlines_proof_request(descriptor)
+    request = build_streamlines_operator_request(descriptor)
 
-    assert request.operator_path == STATIC_PROOF_OPERATOR_PATH
-    assert request.seed_path == STATIC_PROOF_SEED_PATH
+    assert request.operator_path == STREAMLINES_OPERATOR_PATH
+    assert request.seed_path == STREAMLINES_SEED_PATH
     assert request.dataset_prim_path == descriptor.dataset_prim_path
     assert request.velocity_field_prim_path == descriptor.velocity_field_prim_path
-    assert request.direction == STATIC_PROOF_DIRECTION == "forward"
+    assert request.direction == STREAMLINES_DIRECTION == "forward"
     assert request.seed_center == (0.0, 0.1, 0.07)
     assert request.seed_radius == pytest.approx(0.02)
     assert request.min_step_size == pytest.approx(0.0025)
@@ -53,19 +53,22 @@ def test_static_streamlines_request_has_deterministic_paths_bindings_and_seed():
     assert request.width == pytest.approx(0.002)
 
 
-def test_static_streamlines_proof_rejects_missing_source_or_velocity_field():
+def test_streamlines_request_rejects_missing_source_or_velocity_field():
     descriptor = _descriptor()
 
-    with pytest.raises(StaticStreamlinesProofError, match="dataset is unavailable"):
-        validate_static_streamlines_source(
+    with pytest.raises(
+        StreamlinesOperatorRequestError,
+        match="dataset is unavailable",
+    ):
+        validate_streamlines_source(
             descriptor,
             dataset_available=False,
             velocity_field_available=True,
         )
     with pytest.raises(
-        StaticStreamlinesProofError, match="velocity field is unavailable"
+        StreamlinesOperatorRequestError, match="velocity field is unavailable"
     ):
-        validate_static_streamlines_source(
+        validate_streamlines_source(
             descriptor,
             dataset_available=True,
             velocity_field_available=False,
@@ -73,18 +76,18 @@ def test_static_streamlines_proof_rejects_missing_source_or_velocity_field():
 
 
 @pytest.mark.parametrize("curve_count, point_count", ((0, 4), (1, 0)))
-def test_static_streamlines_proof_rejects_completed_zero_geometry(
+def test_streamlines_request_rejects_completed_zero_geometry(
     curve_count,
     point_count,
 ):
     with pytest.raises(
-        StaticStreamlinesProofError, match="without generated BasisCurves"
+        StreamlinesOperatorRequestError, match="without generated BasisCurves"
     ):
         validate_generated_streamlines_geometry(curve_count, point_count)
 
 
-def test_static_streamlines_proof_rejects_create_command_placeholder_geometry():
-    with pytest.raises(StaticStreamlinesProofError, match="placeholder geometry"):
+def test_streamlines_request_rejects_create_command_placeholder_geometry():
+    with pytest.raises(StreamlinesOperatorRequestError, match="placeholder geometry"):
         validate_generated_streamlines_geometry(
             1,
             4,
@@ -93,8 +96,8 @@ def test_static_streamlines_proof_rejects_create_command_placeholder_geometry():
         )
 
 
-def test_static_streamlines_proof_rejects_float32_create_command_placeholder():
-    with pytest.raises(StaticStreamlinesProofError, match="placeholder geometry"):
+def test_streamlines_request_rejects_float32_create_command_placeholder():
+    with pytest.raises(StreamlinesOperatorRequestError, match="placeholder geometry"):
         validate_generated_streamlines_geometry(
             1,
             4,
@@ -109,7 +112,7 @@ def test_static_streamlines_proof_rejects_float32_create_command_placeholder():
 
 
 def test_runtime_usdrt_geometry_passes_while_authored_usd_remains_placeholder():
-    request = build_static_streamlines_proof_request(_descriptor())
+    request = build_streamlines_operator_request(_descriptor())
     evidence = _runtime_evidence(request)
 
     assert evidence.authored_usd_point_count == 4
@@ -127,24 +130,24 @@ def test_runtime_usdrt_geometry_passes_while_authored_usd_remains_placeholder():
     )
 
 
-def test_static_streamlines_acceptance_compacts_curve_counts_by_default():
-    """Keep Package B acceptance readable while allowing explicit deep inspection."""
+def test_operator_evidence_compacts_curve_counts_by_default():
+    """Keep operator diagnostics readable while allowing deep inspection."""
 
     descriptor = _descriptor()
-    request = build_static_streamlines_proof_request(descriptor)
+    request = build_streamlines_operator_request(descriptor)
     evidence = _runtime_evidence(request)
-    cleanup = StaticStreamlinesProofCleanup(
+    cleanup = StreamlinesOperatorCleanup(
         previous_runtime_present=False,
         success=True,
     )
 
-    concise = format_static_streamlines_proof_acceptance(
+    concise = format_streamlines_operator_evidence(
         descriptor,
         request,
         cleanup,
         evidence,
     )
-    verbose = format_static_streamlines_proof_acceptance(
+    verbose = format_streamlines_operator_evidence(
         descriptor,
         request,
         cleanup,
@@ -155,14 +158,14 @@ def test_static_streamlines_acceptance_compacts_curve_counts_by_default():
     assert "points_per_curve_min_mean_max=(150, 150, 150)" in concise
     assert "runtime_curve_vertex_counts=" not in concise
     assert "runtime_point_head=" not in concise
-    assert f"path={STATIC_PROOF_RUNTIME_PREVIEW_PATH}" in concise
+    assert f"path={STREAMLINES_RUNTIME_PREVIEW_PATH}" in concise
     assert "matches_runtime=True" in concise
     assert "result=PASS" in concise
     assert "runtime_curve_vertex_counts=" in verbose
 
 
 def test_streamlines_binding_diagnostics_identify_relationship_field_contract():
-    evidence = StaticStreamlinesBindingEvidence(
+    evidence = StreamlinesBindingEvidence(
         operator_enabled=False,
         source_relationship="cae:viz:datasetSelection:source:target",
         source_targets=("/DTRS_HoudiniVelocity/VTKImageData",),
@@ -174,20 +177,20 @@ def test_streamlines_binding_diagnostics_identify_relationship_field_contract():
         resolved_velocity_field_names=("vel",),
     )
 
-    block = format_static_streamlines_binding_evidence(evidence)
+    block = format_streamlines_binding_evidence(evidence)
 
     assert "operator_enabled=False" in block
     assert "resolved_dataset_fields=('vel',)" in block
     assert "fieldNames_attribute=NOT_AUTHORED" in block
 
 
-def test_static_streamlines_proof_cleanup_removes_both_runtime_roots_from_layers():
+def test_streamlines_operator_cleanup_removes_both_runtime_roots_from_layers():
     stage = _LayeredFakeStage(
         session_paths={STREAMLINES_OPERATOR_ROOT, STREAMLINES_SEED_ROOT},
         root_paths={STREAMLINES_OPERATOR_ROOT, STREAMLINES_SEED_ROOT},
     )
 
-    cleanup = clear_static_streamlines_proof_from_stage(stage)
+    cleanup = clear_streamlines_operator_from_stage(stage)
 
     assert cleanup.previous_runtime_present is True
     assert cleanup.success is True
@@ -214,11 +217,11 @@ def _descriptor() -> StaticVelocitySourceDescriptor:
 
 
 def _runtime_evidence(
-    request: StaticStreamlinesProofRequest,
-) -> StaticStreamlinesProofEvidence:
-    """Represent the accepted A/B fact without pretending USD owns the output."""
+    request: StreamlinesOperatorRequest,
+) -> StreamlinesOperatorEvidence:
+    """Represent an accepted operator result without pretending USD owns it."""
 
-    return StaticStreamlinesProofEvidence(
+    return StreamlinesOperatorEvidence(
         authored_prims=(request.operator_path, request.seed_path),
         duplicate_runtime_prim_count=0,
         operator_type="BasisCurves",
@@ -259,7 +262,7 @@ def _runtime_evidence(
         timeline_playback="INACTIVE",
         authored_usd_fallback_visibility="invisible",
         runtime_usdrt_visibility="inherited",
-        viewport_preview_path=STATIC_PROOF_RUNTIME_PREVIEW_PATH,
+        viewport_preview_path=STREAMLINES_RUNTIME_PREVIEW_PATH,
         viewport_preview_curve_count=256,
         viewport_preview_point_count=38400,
         viewport_preview_matches_runtime=True,
@@ -267,7 +270,7 @@ def _runtime_evidence(
 
 
 class _LayeredFakeStage:
-    """Small layered-stage double for Package B replacement ownership."""
+    """Small layered-stage double for operator replacement ownership."""
 
     def __init__(self, *, session_paths: set[str], root_paths: set[str]):
         self.session_paths = set(session_paths)
@@ -301,9 +304,10 @@ class _LayeredFakeStage:
             if self.edit_target is self._session_layer
             else self.root_paths
         )
-        paths.difference_update(
-            tuple(item for item in paths if item == path or item.startswith(f"{path}/"))
+        matching_paths = tuple(
+            item for item in paths if item == path or item.startswith(f"{path}/")
         )
+        paths.difference_update(matching_paths)
 
 
 class _FakePrim:
