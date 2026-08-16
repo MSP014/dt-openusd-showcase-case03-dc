@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,9 @@ from digital_twin_runtime_suite.app.streamlines.cache import (
     topology_signature,
     validate_streamlines_cache,
     vti_file_identity,
+)
+from digital_twin_runtime_suite.app.streamlines.cache_runtime import (
+    StreamlinesCacheRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     build_streamlines_operator_request,
@@ -360,3 +364,37 @@ def test_cache_startup_inspection_never_starts_a_build(tmp_path: Path) -> None:
 
     assert streamlines_cache_build_mode(paths) == "NEW"
     assert paths.directory.exists() is False
+
+
+def test_cache_layer_attach_and_detach_keep_persistence_outside_the_stage(
+    tmp_path: Path,
+) -> None:
+    paths = streamlines_cache_paths(tmp_path)
+    stage = _CacheStage()
+    runtime = _CacheLayerRuntime(tmp_path)
+
+    runtime._attach_streamlines_cache_playback_layer(stage, paths)
+
+    assert stage.GetSessionLayer().subLayerPaths == [
+        paths.geometry_path.resolve().as_posix()
+    ]
+    runtime._detach_streamlines_cache_playback_layer(stage)
+    assert stage.GetSessionLayer().subLayerPaths == []
+
+
+class _CacheLayerRuntime(StreamlinesCacheRuntimeMixin):
+    def __init__(self, repo_root: Path) -> None:
+        self.config = SimpleNamespace(repo_root=repo_root)
+
+
+class _CacheSessionLayer:
+    def __init__(self) -> None:
+        self.subLayerPaths: list[str] = []
+
+
+class _CacheStage:
+    def __init__(self) -> None:
+        self._session_layer = _CacheSessionLayer()
+
+    def GetSessionLayer(self) -> _CacheSessionLayer:
+        return self._session_layer

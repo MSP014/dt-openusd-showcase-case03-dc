@@ -45,6 +45,18 @@ class StaticSourceRuntimeEvidence:
         )
 
 
+def require_clean_static_source_runtime(
+    evidence: StaticSourceRuntimeEvidence,
+) -> None:
+    """Reject forbidden runtime state independently of diagnostic formatting."""
+
+    if not evidence.clean:
+        raise RuntimeError(
+            "Velocity-source import detected forbidden runtime state; "
+            "review the DTRS STREAMLINES acceptance block."
+        )
+
+
 @dataclass(frozen=True)
 class StreamlinesOperatorEvidence:
     """Programmatic evidence that one source produced real BasisCurves."""
@@ -255,7 +267,7 @@ def format_static_source_acceptance(
         if cleanup.previous_source_present
         else "PASS (no previous static source)"
     )
-    result = "PASS" if cleanup.success and evidence.package_a_clean else "FAIL"
+    result = "PASS" if cleanup.success and evidence.clean else "FAIL"
     return "\n".join(
         (
             f"DTRS STREAMLINES | STATIC_SOURCE_TEST | {result}",
