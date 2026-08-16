@@ -1,29 +1,14 @@
-"""Focused Stage 09 Package D contracts for static Streamlines teardown."""
+"""Focused contracts for DTRS-owned Streamlines teardown."""
 
 from __future__ import annotations
 
 from digital_twin_runtime_suite.app.streamlines.lifecycle import (
     STATIC_VELOCITY_SOURCE_ROOT,
-    StaticStreamlinesCleanupReceipt,
-    format_static_lifecycle_cleanup_receipt,
-    inspect_static_runtime_cleanup,
-    remove_static_runtime_roots_from_layers,
+    StreamlinesCleanupReceipt,
+    format_streamlines_cleanup_receipt,
+    inspect_streamlines_runtime_cleanup,
+    remove_streamlines_runtime_roots_from_layers,
 )
-from digital_twin_runtime_suite.app.streamlines.runtime import (
-    streamlines_lifecycle_workflow_state,
-)
-
-
-def test_package_d_workflow_requires_pre_restart_pass_before_post_restart_check():
-    startup = streamlines_lifecycle_workflow_state("STARTUP")
-    running = streamlines_lifecycle_workflow_state("RUNNING")
-    pre_restart = streamlines_lifecycle_workflow_state("PRE_RESTART_PASS")
-    post_restart = streamlines_lifecycle_workflow_state("POST_RESTART_PASS")
-
-    assert startup == type(startup)(True, False)
-    assert running == type(running)(False, False)
-    assert pre_restart == type(pre_restart)(True, True)
-    assert post_restart == type(post_restart)(True, True)
 
 
 def test_package_d_cleanup_removes_canonical_and_suffixed_runtime_roots():
@@ -38,8 +23,8 @@ def test_package_d_cleanup_removes_canonical_and_suffixed_runtime_roots():
         }
     )
 
-    removed = remove_static_runtime_roots_from_layers(stage)
-    receipt = inspect_static_runtime_cleanup(stage, pending_tasks=0)
+    removed = remove_streamlines_runtime_roots_from_layers(stage)
+    receipt = inspect_streamlines_runtime_cleanup(stage, pending_tasks=0)
 
     assert STATIC_VELOCITY_SOURCE_ROOT in removed
     assert "/DTRS_KitCAE/Streamlines_001" in removed
@@ -49,19 +34,18 @@ def test_package_d_cleanup_removes_canonical_and_suffixed_runtime_roots():
 
 
 def test_package_d_cleanup_receipt_is_compact_and_explicit_when_clean():
-    receipt = StaticStreamlinesCleanupReceipt(
+    receipt = StreamlinesCleanupReceipt(
         source_present=False,
         operator_present=False,
         seed_present=False,
         runtime_preview_present=False,
-        comparison_present=False,
         stale_relationships=0,
         remaining_layer_specs=0,
         duplicate_prims=0,
         pending_tasks=0,
     )
 
-    report = format_static_lifecycle_cleanup_receipt(receipt)
+    report = format_streamlines_cleanup_receipt(receipt)
 
     assert receipt.clean
     assert "source_present=False" in report

@@ -717,9 +717,10 @@ Apply the project code-readability review at these checkpoints:
    asynchronous state, Kit-CAE authoring, cleanup, or a visualization-mode
    invariant, apply the review and document the non-obvious reason locally.
 3. **Each phase gate:** before accepting the Phase 1 static proof, Phase 2
-   temporal feasibility result, Phase 3 shared-source refactor, or Phase 4
-   production mode, apply the review by rereading the changed surface as a
-   first-time technical reader and filling only real explanatory gaps.
+   temporal feasibility result, Phase 2.5 cache decision, Phase 2.75 runtime
+   decomposition, Phase 3 shared-source refactor, or Phase 4 production mode,
+   apply the review by rereading the changed surface as a first-time technical
+   reader and filling only real explanatory gaps.
 
 The runtime source contract remains:
 
@@ -974,16 +975,149 @@ against the fixed 16-second loop. Exact mapping, loop wrap, no-op handling,
 sustained scheduling headroom, recovery, and cleanup are proven before any
 change to Flow or Stage 8 ownership.
 
+#### Phase 2.5 - Precomputed Streamlines cache feasibility — ✅ passed
+
+Purpose: determine whether deterministic Kit-CAE Streamlines geometry can be
+precomputed once from the manifest-defined temporal VTI dataset, persisted as a
+derived visualization cache, and replayed substantially faster than runtime
+Streamlines recomputation. This is a bounded feasibility experiment; Phase 2
+runtime recomputation remains the proven fallback while cache production
+parameters are refined later.
+
+1. ✅ Establish the cache contract. Treat the VTI dataset as the authoritative
+   simulation source and the Streamlines cache as a derived artifact. Preserve
+   workload/dataset identity, manifest sample index, source time, USD timecode,
+   source VTI identity, Streamlines settings/seed configuration identity, and
+   generated curve topology/points for every cached state. Do not interpolate,
+   average, synthesize velocity data, or invent source samples.
+
+   Cache invalidation must at minimum distinguish changes to the source dataset
+   or manifest, source VTI identity, Streamlines seed/settings, and cache
+   schema/version.
+
+2. ✅ Build one complete representative cache from the existing Nominal 80-sample
+   dataset and the already-proven diagnostic Streamlines configuration. For each
+   real manifest sample run `VTI sample -> Kit-CAE Streamlines -> confirmed
+   UsdRT curves -> persistent cache`. Do not involve Flow, Smoke, Stage 8
+   workload switching, or RuntimePreview unless it is required solely for
+   validation. Record total build time, per-sample generation time, cache size
+   on disk, topology consistency, and failed or non-deterministic samples. The
+   cache is a build artifact and must not be recomputed during normal DTRS
+   startup.
+
+3. ✅ Prove restart persistence. Close and restart DTRS, then load the existing
+   Streamlines cache without executing the Kit-CAE Streamlines operator for
+   playback. Prove that every cached state resolves back to its exact manifest
+   sample identity.
+
+4. ✅ Prove temporal cached playback with the existing 16-second loop and the
+   manifest source clock. For the current Nominal dataset this means the exact
+   `80 samples / 16 s = 5 Hz` source sequence. At every source boundary display
+   the corresponding precomputed state, preserving sample order, loop wrap, and
+   phase semantics. Do not interpolate or execute runtime Streamlines
+   recomputation. Measure cached-state visible latency, sustained FPS, deadline
+   misses, timing drift, RAM, GPU/process memory, startup/load cost, and loop
+   consistency.
+
+5. ✅ Compare against the proven Phase 2 baseline:
+   `presentation_period_seconds=2.6`. Cache feasibility succeeds only if
+   playback is materially cheaper and sustains the current 5 Hz source cadence
+   without backlog or timing drift. Record whether measured cache-state latency
+   leaves credible headroom for a future 10-12 Hz source cadence; do not create
+   higher-cadence VTI datasets during this phase.
+
+6. ✅ Make an explicit Phase 2.5 decision before Phase 3 begins:
+
+   - `CACHE_PLAYBACK_VIABLE`: retain the Phase 2 runtime-recompute path as the
+     proven fallback; select precomputed Streamlines cache as the preferred
+     production direction; update Phase 3 architecture before implementing the
+     shared airflow source; and defer production seed/layout tuning plus full
+     four-workload cache generation to the appropriate later phase.
+   - `CACHE_PLAYBACK_NOT_VIABLE`: means that exact cached playback at the full
+     5 Hz source cadence is not viable. Preserve the Phase 2 2.6-second
+     runtime-recompute contract as proven fallback, retain the precomputed
+     cache architecture as the preferred production direction, and stop
+     density-reduction R&D in this phase.
+
+**Phase 2.5 conclusion — accepted:** `CACHE_PLAYBACK_NOT_VIABLE` rejects the
+full manifest source-boundary playback hypothesis on the current RTX 3080 path;
+it does not reject the precomputed Streamlines cache architecture.
+
+- The 256-curve cache measured cached switch-latency median `891 ms`.
+- The 128-curve diagnostic cache measured cached switch-latency median
+  `469 ms`. Geometry-density scaling was strong and approximately
+  proportional, but 5 Hz / 200 ms playback remained `NOT_VIABLE`.
+- The 128-curve probe preserved exact manifest mapping, loop wrap, persistent
+  cache playback after restart, zero runtime Kit-CAE Streamlines executions,
+  and zero RuntimePreview rebuilds.
+- Further density reduction is rejected: the predicted density required for
+  credible 5 Hz playback would materially compromise diagnostic Streamlines
+  readability without credible worst-case 5 Hz headroom.
+- The precomputed cache remains the preferred production direction because it
+  removes repeated Kit-CAE Streamlines computation from runtime and makes
+  geometry updates substantially cheaper than the accepted 2.6-second
+  runtime-recompute path. Phase 2 recomputation remains fallback evidence only.
+- Do not freeze 128 curves or a cached presentation period as production
+  values. They are Phase 2.5 evidence, not the final production configuration.
+
+**Code-readability checkpoint — ✅ passed before the Phase 2.5 gate:** Review
+the cache identity and invalidation contract, the authoritative-versus-derived
+data boundary, persistent cache ownership, restart lifecycle, and the guarantee
+that playback never silently recomputes Streamlines.
+
+**Phase 2.5 gate — ✅ passed:** the full 5 Hz cached source-boundary playback
+hypothesis is rejected; the precomputed cache architecture is retained as the
+preferred production direction, and runtime Streamlines recomputation remains
+the Phase 2 fallback. Do not perform further density-reduction R&D in Phase
+2.5.
+
+#### Phase 2.75 - Streamlines runtime decomposition — ✅ passed
+
+Purpose: refactor the now-large `app/streamlines/runtime.py` only after Phase
+2.5 establishes which production architecture survives. Drive the decomposition
+from that decision rather than speculative module boundaries.
+
+1. ✅ Begin only after Phase 2.5 records an explicit cache-playback decision, and
+   preserve every accepted Phase 1/2 contract and evidence. Preserve the proven
+   2.6-second runtime-recompute path as fallback unless Phase 2.5 evidence
+   explicitly makes it unnecessary.
+2. ✅ Use the retained precomputed-cache architecture when defining production and
+   cache ownership boundaries. Keep the rejected full-5-Hz acceptance harness
+   distinct from production cache behaviour, and retain Phase 2 runtime
+   recomputation as fallback evidence.
+3. ✅ Keep `StreamlinesRuntimeMixin` and `RuntimeController` public behaviour
+   stable unless evidence requires a contract change. Do not combine the
+   refactor with visual features, seed tuning, AnimatedStreaks, workload-mode
+   implementation, or Phase 3 shared-source work.
+4. ✅ Prefer modules based on responsibilities actually discovered by Phase 2.5;
+   do not prescribe empty modules in advance. Preserve lifecycle cleanup,
+   Kit-CAE execution receipts, time/source mapping, logging semantics, and
+   focused tests.
+5. ✅ Run the Code Readability review after the decomposition.
+
+**Phase 2.75 gate — ✅ passed:** A first-time technical reader can distinguish
+the production Streamlines runtime; cache build/playback ownership if accepted;
+the runtime-recompute fallback; diagnostic/acceptance harnesses; and
+lifecycle/cleanup ownership without tracing a monolithic ~5k-line runtime
+module. All focused tests must remain green, and the accepted Phase 2.5 path
+must still pass its relevant Kit acceptance after the refactor.
+
+Do not begin Phase 3 until Phase 2.75 closes.
+
 #### Phase 3 - Shared airflow source architecture
 
-1. Only after Phase 2 passes, separate the airflow source lifecycle from the
-   Flow consumer. The consumer-neutral source layer owns manifest discovery,
+1. Only after Phase 2.75 closes, separate the airflow source lifecycle from the
+   Flow consumer. The consumer-neutral source layer owns
+   manifest discovery,
    validation, VTI import, temporal sample authoring, origin/grid validation,
    source identity, normalized phase mapping, pending target, source-commit
    verification, supersession, and failure rollback.
-2. Flow, smoke, and Streamlines become consumers of the prepared source. Keep
-   the current Stage 6 Attach workflow visually and functionally unchanged,
-   with focused regression tests for that guarantee.
+2. Flow, smoke, and Streamlines become consumers of the prepared source. The
+   intended Streamlines production route is `Houdini-authored temporal VTI ->
+   offline/precomputed Kit-CAE Streamlines cache -> runtime cached geometry
+   playback`, rather than per-presentation Kit-CAE recomputation. Keep the
+   current Stage 6 Attach workflow visually and functionally unchanged, with
+   focused regression tests for that guarantee.
 3. Move the generic parts of the Stage 8 workload transition contract into the
    shared source layer. Replace Flow-specific `Field + DataSetEmitter required`
    proof with `source transition committed -> active consumer validates result`.
@@ -1001,7 +1135,11 @@ unchanged.
 
 **Phase 3 gate:** Workload switching is owned by the shared airflow source,
 not by Flow, and both Flow and Streamlines prove consumption without a
-regression to the existing Attach workflow.
+regression to the existing Attach workflow. Phase 3 determines practical cache
+parameters: cached Streamlines presentation cadence, production geometry
+density, seed/layout/integration settings, workload-aware cache behaviour, and
+interaction with the shared airflow-source architecture; it does not inherit
+128 curves or a specific cached presentation period as a frozen value.
 
 #### Phase 4 - Production modes and acceptance
 

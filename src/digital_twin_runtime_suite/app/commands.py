@@ -201,16 +201,7 @@ class RuntimeController(
         self._flow_vti_spacing: tuple[float, float, float] | None = None
         self._flow_voxel_max_resolution: int | None = None
         self._flow_lifecycle_state = "DETACHED"
-        self._streamlines_static_source_descriptor = None
-        self._streamlines_static_source_diagnostics_failure = None
-        self._streamlines_operator_type_comparison = None
-        self._streamlines_temporal_source_descriptor = None
-        self._streamlines_temporal_probe_active_sample_index = None
-        self._streamlines_temporal_probe_active_stage = None
-        self._streamlines_cadence_active_sample_index = None
-        self._streamlines_cadence_active_stage = None
-        self._streamlines_presentation_cadence_active_sample_index = None
-        self._streamlines_presentation_cadence_active_stage = None
+        self.reset_streamlines_runtime_state()
         self._flow_active_transition_id = None
         self._flow_attach_cancel_event: Event | None = None
         self._flow_kit_cae_operator_lock = Lock()
@@ -268,16 +259,7 @@ class RuntimeController(
         self._flow_vti_spacing = None
         self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
-        self._streamlines_static_source_descriptor = None
-        self._streamlines_static_source_diagnostics_failure = None
-        self._streamlines_operator_type_comparison = None
-        self._streamlines_temporal_source_descriptor = None
-        self._streamlines_temporal_probe_active_sample_index = None
-        self._streamlines_temporal_probe_active_stage = None
-        self._streamlines_cadence_active_sample_index = None
-        self._streamlines_cadence_active_stage = None
-        self._streamlines_presentation_cadence_active_sample_index = None
-        self._streamlines_presentation_cadence_active_stage = None
+        self.reset_streamlines_runtime_state()
         self._flow_session_workload_binding = None
         self._flow_pending_workload_binding = None
         self._flow_last_airflow_failure = None
@@ -1174,7 +1156,10 @@ class RuntimeController(
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
-            return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
+            return SimulationCacheResult(
+                False,
+                "Airflow cache skipped: no open stage.",
+            )
 
         # IndeX compositing is an RTX feature, not the standalone Scientific
         # renderer. Set it before the Volume enters the composed stage.
@@ -1276,7 +1261,11 @@ class RuntimeController(
             camera.CreateFocalLengthAttr(35.0)
             camera.CreateClippingRangeAttr(Gf.Vec2f(0.001, 10000.0))
             if self.config.camera:
-                self._apply_camera_config(camera.GetPrim(), self.config.camera, UsdGeom)
+                self._apply_camera_config(
+                    camera.GetPrim(),
+                    self.config.camera,
+                    UsdGeom,
+                )
 
             lighting_result = self._apply_review_lighting(stage, self.config.lighting)
         finally:
@@ -1595,7 +1584,8 @@ class RuntimeController(
         if not target_prim or not target_prim.IsValid():
             return FacePanelApplyResult(
                 False,
-                f"Front panel skipped: target prim not found: {face_panel.target_path}",
+                "Front panel skipped: target prim not found: "
+                f"{face_panel.target_path}",
             )
 
         target_angle = (
@@ -1638,7 +1628,8 @@ class RuntimeController(
             xformable = UsdGeom.Xformable(target_prim)
             ops = list(xformable.GetOrderedXformOps())
             axis_name = rotation_axis.upper()
-            rotate_name = f"xformOp:rotate{axis_name}:{cls.FACE_PANEL_ROTATE_OP_SUFFIX}"
+            rotate_suffix = cls.FACE_PANEL_ROTATE_OP_SUFFIX
+            rotate_name = f"xformOp:rotate{axis_name}:{rotate_suffix}"
             rotate_op = cls._find_xform_op(ops, rotate_name)
             if rotate_op is None:
                 rotate_op = cls._add_axis_rotate_op(
@@ -2149,7 +2140,11 @@ class RuntimeController(
                 return name
         return "YXZ"
 
-    def _apply_review_lighting(self, stage, lighting: LightingConfig) -> LightingResult:
+    def _apply_review_lighting(
+        self,
+        stage,
+        lighting: LightingConfig,
+    ) -> LightingResult:
         """Create or update transient review lighting in the session layer."""
 
         from pxr import Gf, Sdf, UsdGeom, UsdLux

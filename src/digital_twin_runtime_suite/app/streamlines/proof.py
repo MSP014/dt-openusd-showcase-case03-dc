@@ -1,4 +1,4 @@
-"""Plain contracts and cleanup ownership for the first static Streamlines proof."""
+"""Plain Streamlines operator request, geometry validation, and cleanup contracts."""
 
 from __future__ import annotations
 
@@ -11,15 +11,13 @@ from digital_twin_runtime_suite.app.flow.static_source import (
 
 STREAMLINES_OPERATOR_ROOT = "/DTRS_KitCAE/Streamlines"
 STREAMLINES_SEED_ROOT = "/DTRS_KitCAE/StreamlineSeeds"
-STREAMLINES_COMPARISON_OPERATOR_ROOT = "/DTRS_KitCAE/StreamlinesComparison"
-STREAMLINES_COMPARISON_SEED_ROOT = "/DTRS_KitCAE/StreamlinesComparisonSeeds"
-STATIC_PROOF_OPERATOR_PATH = f"{STREAMLINES_OPERATOR_ROOT}/StaticVelocityProof"
-STATIC_PROOF_RUNTIME_PREVIEW_PATH = (
+STREAMLINES_OPERATOR_PATH = f"{STREAMLINES_OPERATOR_ROOT}/VelocityField"
+STREAMLINES_RUNTIME_PREVIEW_PATH = (
     f"{STREAMLINES_OPERATOR_ROOT}/StaticVelocityRuntimePreview"
 )
-STATIC_PROOF_SEED_PATH = f"{STREAMLINES_SEED_ROOT}/DiagnosticUnitSphere"
-STATIC_PROOF_OPERATOR_TYPE = "standard"
-STATIC_PROOF_DIRECTION = "forward"
+STREAMLINES_SEED_PATH = f"{STREAMLINES_SEED_ROOT}/UnitSphere"
+STREAMLINES_OPERATOR_TYPE = "standard"
+STREAMLINES_DIRECTION = "forward"
 CREATE_COMMAND_PLACEHOLDER_POINTS = (
     (0.0, 0.0, 0.0),
     (0.1, 0.0, 0.0),
@@ -29,13 +27,13 @@ CREATE_COMMAND_PLACEHOLDER_POINTS = (
 CREATE_COMMAND_PLACEHOLDER_CURVE_VERTEX_COUNTS = (4,)
 
 
-class StaticStreamlinesProofError(RuntimeError):
-    """Raised when Package B cannot consume the accepted Package A source."""
+class StreamlinesOperatorRequestError(RuntimeError):
+    """Raised when the operator cannot consume the imported velocity source."""
 
 
 @dataclass(frozen=True)
-class StaticStreamlinesProofRequest:
-    """Deterministic binding and geometry contract for one diagnostic operator."""
+class StreamlinesOperatorRequest:
+    """Deterministic binding and geometry contract for one operator execution."""
 
     dataset_prim_path: str
     velocity_field_prim_path: str
@@ -53,16 +51,16 @@ class StaticStreamlinesProofRequest:
 
 
 @dataclass(frozen=True)
-class StaticStreamlinesProofCleanup:
-    """Result of replacing the two DTRS-owned Package B runtime roots."""
+class StreamlinesOperatorCleanup:
+    """Result of replacing the DTRS-owned operator and seed roots."""
 
     previous_runtime_present: bool
     success: bool
 
 
-def build_static_streamlines_proof_request(
+def build_streamlines_operator_request(
     descriptor: StaticVelocitySourceDescriptor | None,
-) -> StaticStreamlinesProofRequest:
+) -> StreamlinesOperatorRequest:
     """Derive one reproducible seed just inside the source's front domain face.
 
     Stage 6 establishes positive-Z as the server-front side.  Keeping the
@@ -72,29 +70,29 @@ def build_static_streamlines_proof_request(
     """
 
     if descriptor is None:
-        raise StaticStreamlinesProofError(
-            "Run Static Test successfully before creating the Streamlines proof."
+        raise StreamlinesOperatorRequestError(
+            "Import a velocity source before creating Streamlines."
         )
     minimum, maximum = descriptor.world_bounds
     extent = tuple(maximum[index] - minimum[index] for index in range(3))
     if any(value <= 0.0 for value in extent):
-        raise StaticStreamlinesProofError(
+        raise StreamlinesOperatorRequestError(
             "Static source bounds must have positive extent."
         )
     max_spacing = max(descriptor.spacing)
     seed_radius = min(min(extent) * 0.1, max_spacing * 4.0)
     front_inset = max(seed_radius * 1.5, max_spacing * 4.0)
     if front_inset >= extent[2]:
-        raise StaticStreamlinesProofError(
-            "Static source depth is too small for the diagnostic Streamlines seed."
+        raise StreamlinesOperatorRequestError(
+            "Velocity-source depth is too small for the Streamlines seed."
         )
-    return StaticStreamlinesProofRequest(
+    return StreamlinesOperatorRequest(
         dataset_prim_path=descriptor.dataset_prim_path,
         velocity_field_prim_path=descriptor.velocity_field_prim_path,
-        operator_path=STATIC_PROOF_OPERATOR_PATH,
-        seed_path=STATIC_PROOF_SEED_PATH,
-        operator_type=STATIC_PROOF_OPERATOR_TYPE,
-        direction=STATIC_PROOF_DIRECTION,
+        operator_path=STREAMLINES_OPERATOR_PATH,
+        seed_path=STREAMLINES_SEED_PATH,
+        operator_type=STREAMLINES_OPERATOR_TYPE,
+        direction=STREAMLINES_DIRECTION,
         seed_center=(
             (minimum[0] + maximum[0]) / 2.0,
             (minimum[1] + maximum[1]) / 2.0,
@@ -109,21 +107,21 @@ def build_static_streamlines_proof_request(
     )
 
 
-def validate_static_streamlines_source(
+def validate_streamlines_source(
     descriptor: StaticVelocitySourceDescriptor | None,
     *,
     dataset_available: bool,
     velocity_field_available: bool,
-) -> StaticStreamlinesProofRequest:
-    """Reject a missing static dataset or field before authoring Package B prims."""
+) -> StreamlinesOperatorRequest:
+    """Reject a missing dataset or field before authoring Streamlines prims."""
 
-    request = build_static_streamlines_proof_request(descriptor)
+    request = build_streamlines_operator_request(descriptor)
     if not dataset_available:
-        raise StaticStreamlinesProofError(
+        raise StreamlinesOperatorRequestError(
             f"Accepted static dataset is unavailable: {request.dataset_prim_path}."
         )
     if not velocity_field_available:
-        raise StaticStreamlinesProofError(
+        raise StreamlinesOperatorRequestError(
             "Configured static velocity field is unavailable: "
             f"{request.velocity_field_prim_path}."
         )
@@ -145,14 +143,14 @@ def validate_generated_streamlines_geometry(
     """
 
     if curve_count <= 0 or point_count <= 0:
-        raise StaticStreamlinesProofError(
+        raise StreamlinesOperatorRequestError(
             "Streamlines operator completed without generated BasisCurves geometry."
         )
     if is_create_command_placeholder_geometry(
         point_positions,
         curve_vertex_counts,
     ):
-        raise StaticStreamlinesProofError(
+        raise StreamlinesOperatorRequestError(
             "Streamlines operator completed but left the CreateCaeVizStreamlines "
             "placeholder geometry unchanged."
         )
@@ -166,7 +164,7 @@ def is_create_command_placeholder_geometry(
 
     ``CreateCaeVizStreamlines`` creates a visible placeholder before its
     asynchronous operator has produced data.  Treating those points as a
-    successful streamline would make the Package B proof misleading.
+    successful streamline would make the operator result misleading.
     """
 
     if curve_vertex_counts != CREATE_COMMAND_PLACEHOLDER_CURVE_VERTEX_COUNTS:
@@ -182,10 +180,10 @@ def is_create_command_placeholder_geometry(
     )
 
 
-def clear_static_streamlines_proof_from_stage(
+def clear_streamlines_operator_from_stage(
     stage,
-) -> StaticStreamlinesProofCleanup:
-    """Remove prior Package B roots from Session and root layers before a retry."""
+) -> StreamlinesOperatorCleanup:
+    """Remove prior operator roots from Session and root layers before a retry."""
 
     paths = (STREAMLINES_OPERATOR_ROOT, STREAMLINES_SEED_ROOT)
     previous_runtime_present = any(
@@ -200,7 +198,7 @@ def clear_static_streamlines_proof_from_stage(
                     stage.RemovePrim(path)
     finally:
         stage.SetEditTarget(previous_target)
-    return StaticStreamlinesProofCleanup(
+    return StreamlinesOperatorCleanup(
         previous_runtime_present=previous_runtime_present,
         success=not any(stage.GetPrimAtPath(path).IsValid() for path in paths),
     )
