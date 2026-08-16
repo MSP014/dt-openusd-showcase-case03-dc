@@ -15,3 +15,12 @@ keywords = ["openusd", "kit", "viewer", "runtime"]
 
 [[python.module]]
 name = "msp.dtrs"
+
+[[test]]
+dependencies = [
+    "omni.cae.importer.cgns",
+    "omni.cae.delegate.vtk",
+    "omni.cae.importer.vtk",
+    "omni.cae.testing",
+    "omni.cae.viz",
+]

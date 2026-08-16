@@ -53,6 +53,9 @@ from digital_twin_runtime_suite.app.flow.workload_transition import (
     AttachedWorkloadTransitionMixin,
 )
 from digital_twin_runtime_suite.app.smoke.runtime import SmokeRuntimeMixin
+from digital_twin_runtime_suite.app.streamlines.runtime import (
+    StreamlinesRuntimeMixin,
+)
 from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin
 from digital_twin_runtime_suite.app.workload_binding import (
     AttachValidationLease,
@@ -64,7 +67,10 @@ from digital_twin_runtime_suite.app.airflow_dataset import (
     AirflowDatasetError,
     discover_airflow_dataset_registry,
 )
-from digital_twin_runtime_suite.app.qled import SEGMENTS, qled_state_from_temperature
+from digital_twin_runtime_suite.app.qled import (
+    SEGMENTS,
+    qled_state_from_temperature,
+)
 from digital_twin_runtime_suite.app.simulation_cache import (
     SimulationCacheContract,
     run_simulation_cache_preflight,
@@ -116,6 +122,7 @@ class FacePanelApplyResult:
 
 
 class RuntimeController(
+    StreamlinesRuntimeMixin,
     FlowRuntimeMixin,
     FlowQualityRuntimeMixin,
     AttachedWorkloadTransitionMixin,
@@ -194,11 +201,29 @@ class RuntimeController(
         self._flow_vti_spacing: tuple[float, float, float] | None = None
         self._flow_voxel_max_resolution: int | None = None
         self._flow_lifecycle_state = "DETACHED"
+        self._streamlines_static_source_descriptor = None
+        self._streamlines_static_source_diagnostics_failure = None
+        self._streamlines_operator_type_comparison = None
+        self._streamlines_temporal_source_descriptor = None
+        self._streamlines_temporal_probe_active_sample_index = None
+        self._streamlines_temporal_probe_active_stage = None
+        self._streamlines_cadence_active_sample_index = None
+        self._streamlines_cadence_active_stage = None
+        self._streamlines_presentation_cadence_active_sample_index = None
+        self._streamlines_presentation_cadence_active_stage = None
         self._flow_active_transition_id = None
         self._flow_attach_cancel_event: Event | None = None
         self._flow_kit_cae_operator_lock = Lock()
         self._flow_kit_cae_active_operator_paths: set[str] = set()
+        self._flow_kit_cae_operator_begin_counts: dict[str, int] = {}
         self._flow_kit_cae_operator_completion_counts: dict[str, int] = {}
+        self._flow_kit_cae_operator_completion_success: dict[str, bool] = {}
+        self._flow_kit_cae_operator_completion_success_by_count: dict[
+            str, dict[int, bool]
+        ] = {}
+        self._flow_kit_cae_operator_completion_begin_counts: dict[
+            str, dict[int, int]
+        ] = {}
         self._flow_kit_cae_operator_subscriptions: tuple[object, ...] = ()
         self._flow_temporal_asset_hashes: dict[Path, str] = {}
         self._flow_temporal_records: list[dict[str, object]] = []
@@ -243,6 +268,16 @@ class RuntimeController(
         self._flow_vti_spacing = None
         self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
+        self._streamlines_static_source_descriptor = None
+        self._streamlines_static_source_diagnostics_failure = None
+        self._streamlines_operator_type_comparison = None
+        self._streamlines_temporal_source_descriptor = None
+        self._streamlines_temporal_probe_active_sample_index = None
+        self._streamlines_temporal_probe_active_stage = None
+        self._streamlines_cadence_active_sample_index = None
+        self._streamlines_cadence_active_stage = None
+        self._streamlines_presentation_cadence_active_sample_index = None
+        self._streamlines_presentation_cadence_active_stage = None
         self._flow_session_workload_binding = None
         self._flow_pending_workload_binding = None
         self._flow_last_airflow_failure = None
@@ -460,7 +495,9 @@ class RuntimeController(
 
         self._workload_source = workload_source
 
-    def resolve_current_workload_airflow_binding(self) -> WorkloadAirflowBinding:
+    def resolve_current_workload_airflow_binding(
+        self,
+    ) -> WorkloadAirflowBinding:
         """Resolve the workload current when a Flow Attach begins."""
 
         return self._workload_binding_runtime().resolve_current()
@@ -1072,7 +1109,13 @@ class RuntimeController(
         )
         self._front_panel_indicator_last_snapshot = snapshot
         self._front_panel_indicator_last_state = state
-        state_key = (id(stage), state.power, state.hdd, state.lan_01, state.lan_02)
+        state_key = (
+            id(stage),
+            state.power,
+            state.hdd,
+            state.lan_01,
+            state.lan_02,
+        )
         if state_key == self._front_panel_indicator_state_key:
             return True
         self._front_panel_indicator_state_key = state_key
@@ -1774,7 +1817,10 @@ class RuntimeController(
                 indicators.power_path,
                 materials["power"] if state.power else materials["off"],
             ),
-            (indicators.hdd_path, materials["hdd"] if state.hdd else materials["off"]),
+            (
+                indicators.hdd_path,
+                materials["hdd"] if state.hdd else materials["off"],
+            ),
             (
                 indicators.lan_01_path,
                 materials["lan_01"] if state.lan_01 else materials["off"],

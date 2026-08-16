@@ -25,10 +25,15 @@ from digital_twin_runtime_suite.app.airflow_validation.cache import (
     ValidationCacheLookup,
     build_dataset_validation_signature,
 )
-from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
+from digital_twin_runtime_suite.app.diagnostics import (
+    with_dtrs_local_timestamp,
+)
+from digital_twin_runtime_suite.app.flow import static_source
 from digital_twin_runtime_suite.app.flow import temporal as flow_temporal
 from digital_twin_runtime_suite.app.flow import validation as flow_validation
-from digital_twin_runtime_suite.app.flow.diagnostics import FlowDiagnosticsMixin
+from digital_twin_runtime_suite.app.flow.diagnostics import (
+    FlowDiagnosticsMixin,
+)
 from digital_twin_runtime_suite.app.flow.performance import (
     FlowPerformanceMixin,
 )
@@ -42,7 +47,9 @@ from digital_twin_runtime_suite.app.kit_cae_flow_parity import (
     capture_flow_scene,
     write_flow_snapshot,
 )
-from digital_twin_runtime_suite.app.workload_binding import BackgroundValidationError
+from digital_twin_runtime_suite.app.workload_binding import (
+    BackgroundValidationError,
+)
 
 StatusCallback = Callable[[str], None]
 
@@ -96,7 +103,10 @@ class FlowRuntimeMixin(
                             ("Result:", lookup.result),
                             ("Reason:", lookup.reason),
                             ("Signature:", lookup.signature.compact_digest),
-                            ("Preflight:", "REUSED" if lookup.preflight else "RUN"),
+                            (
+                                "Preflight:",
+                                "REUSED" if lookup.preflight else "RUN",
+                            ),
                             (
                                 "Temporal proof:",
                                 "REUSED" if lookup.temporal_proof else "RUN",
@@ -136,7 +146,7 @@ class FlowRuntimeMixin(
             total_sample_count=total_sample_count,
             current_sample_index=current_sample_index,
             current_asset_name=current_asset_name,
-            elapsed_seconds=(now - started_at) if started_at is not None else 0.0,
+            elapsed_seconds=((now - started_at) if started_at is not None else 0.0),
             loop_closure_state=loop_closure_state,
             failure_reason=failure_reason,
             generation_id=generation_id,
@@ -309,7 +319,7 @@ class FlowRuntimeMixin(
                 current_asset_name=velocity_paths[-1].name,
                 started_at=started_at,
                 loop_closure_state=("PASSED" if passed else "FAILED"),
-                failure_reason=None if passed else "See temporal validation log.",
+                failure_reason=(None if passed else "See temporal validation log."),
             )
             if passed:
                 # Store only after the task survived generation/lifecycle checks above;
@@ -614,6 +624,7 @@ class FlowRuntimeMixin(
             import_started_at = time.monotonic()
             if stage.GetPrimAtPath(runtime_root).IsValid():
                 stage.RemovePrim(runtime_root)
+            static_source.clear_static_velocity_source_from_stage(stage, import_root)
             await import_to_stage(str(velocity_path), import_root)
             await app.next_update_async()
             self._log_kit_cae_attach_phase(
@@ -1479,11 +1490,34 @@ class FlowRuntimeMixin(
             with self._flow_kit_cae_operator_lock:
                 if is_begin:
                     self._flow_kit_cae_active_operator_paths.add(prim_path)
+                    self._flow_kit_cae_operator_begin_counts[prim_path] = (
+                        self._flow_kit_cae_operator_begin_counts.get(prim_path, 0) + 1
+                    )
                 else:
                     self._flow_kit_cae_active_operator_paths.discard(prim_path)
-                    self._flow_kit_cae_operator_completion_counts[prim_path] = (
+                    completion_count = (
                         self._flow_kit_cae_operator_completion_counts.get(prim_path, 0)
                         + 1
+                    )
+                    self._flow_kit_cae_operator_completion_counts[prim_path] = (
+                        completion_count
+                    )
+                    # Kit emits operator_end after both success and handled
+                    # failures. Retain the payload so Streamlines diagnostics
+                    # never mistake lifecycle completion for generated output.
+                    self._flow_kit_cae_operator_completion_success[prim_path] = bool(
+                        event.get("success")
+                    )
+                    self._flow_kit_cae_operator_completion_success_by_count.setdefault(
+                        prim_path, {}
+                    )[completion_count] = bool(event.get("success"))
+                    # Preserve the begin generation that produced this exact
+                    # end event.  A caller can then reject a late end from an
+                    # earlier execution instead of reading only "last status".
+                    self._flow_kit_cae_operator_completion_begin_counts.setdefault(
+                        prim_path, {}
+                    )[completion_count] = self._flow_kit_cae_operator_begin_counts.get(
+                        prim_path, 0
                     )
 
         self._flow_kit_cae_operator_subscriptions = (
@@ -1510,7 +1544,11 @@ class FlowRuntimeMixin(
                 reset()
         with self._flow_kit_cae_operator_lock:
             self._flow_kit_cae_active_operator_paths.clear()
+            self._flow_kit_cae_operator_begin_counts.clear()
             self._flow_kit_cae_operator_completion_counts.clear()
+            self._flow_kit_cae_operator_completion_success.clear()
+            self._flow_kit_cae_operator_completion_success_by_count.clear()
+            self._flow_kit_cae_operator_completion_begin_counts.clear()
 
     async def _await_kit_cae_operator_quiescence(self, app, carb) -> bool:
         """Wait for tracked Kit-CAE work without freezing the Kit update loop."""
@@ -1540,6 +1578,42 @@ class FlowRuntimeMixin(
 
         with self._flow_kit_cae_operator_lock:
             return self._flow_kit_cae_operator_completion_counts.get(prim_path, 0)
+
+    def _kit_cae_operator_begin_count(self, prim_path: str) -> int:
+        """Return the observed number of Kit executions started for one operator."""
+
+        with self._flow_kit_cae_operator_lock:
+            return self._flow_kit_cae_operator_begin_counts.get(prim_path, 0)
+
+    def _kit_cae_operator_last_completion_success(self, prim_path: str) -> bool | None:
+        """Return the success flag for the latest observed CAE operator end event."""
+
+        with self._flow_kit_cae_operator_lock:
+            return self._flow_kit_cae_operator_completion_success.get(prim_path)
+
+    def _kit_cae_operator_completion_success_at(
+        self,
+        prim_path: str,
+        completion_count: int,
+    ) -> bool | None:
+        """Read success for the exact observed end event, not a later one."""
+
+        with self._flow_kit_cae_operator_lock:
+            return self._flow_kit_cae_operator_completion_success_by_count.get(
+                prim_path, {}
+            ).get(completion_count)
+
+    def _kit_cae_operator_completion_begin_count_at(
+        self,
+        prim_path: str,
+        completion_count: int,
+    ) -> int | None:
+        """Return the begin generation paired with one exact end event."""
+
+        with self._flow_kit_cae_operator_lock:
+            return self._flow_kit_cae_operator_completion_begin_counts.get(
+                prim_path, {}
+            ).get(completion_count)
 
     async def _await_kit_cae_fresh_dataset_emitter_rebuild(
         self,
@@ -1625,7 +1699,10 @@ class FlowRuntimeMixin(
                     (
                         "",
                         (
-                            ("Requested resolution:", requested_max_resolution),
+                            (
+                                "Requested resolution:",
+                                requested_max_resolution,
+                            ),
                             ("Operator execution:", "COMPLETE"),
                             (
                                 "Previous density cell:",
@@ -2202,7 +2279,10 @@ class FlowRuntimeMixin(
                     (
                         "Voxelization",
                         (
-                            ("mode:", voxelization_api.GetVoxelSizeModeAttr().Get()),
+                            (
+                                "mode:",
+                                voxelization_api.GetVoxelSizeModeAttr().Get(),
+                            ),
                             ("requested:", requested_max_resolution),
                             ("readback:", readback_max_resolution),
                             ("densityCellSize:", density_cell_size_text),
@@ -2235,7 +2315,10 @@ class FlowRuntimeMixin(
                     (
                         "DataSetEmitter",
                         (
-                            ("enabled:", emitter_operator.CreateEnabledAttr().Get()),
+                            (
+                                "enabled:",
+                                emitter_operator.CreateEnabledAttr().Get(),
+                            ),
                             ("operator ready:", operator_ready),
                         ),
                     ),
@@ -2352,8 +2435,14 @@ class FlowRuntimeMixin(
                         "Tracer injection",
                         (
                             ("Tracer mode:", "SMOKE_ONLY"),
-                            ("Smoke target:", f"{tracer_config.smoke_target:g}"),
-                            ("Smoke coupling:", f"{tracer_config.smoke_couple_rate:g}"),
+                            (
+                                "Smoke target:",
+                                f"{tracer_config.smoke_target:g}",
+                            ),
+                            (
+                                "Smoke coupling:",
+                                f"{tracer_config.smoke_couple_rate:g}",
+                            ),
                             ("Renderer:", "VOLUME_SMOKE_CLOUD"),
                             (
                                 "Smoke base color:",
@@ -2398,7 +2487,10 @@ class FlowRuntimeMixin(
                             ("Density:", f"{smoke_tuning.density:g}"),
                             ("Brightness:", f"{smoke_tuning.brightness:g}"),
                             ("Ambient:", f"{smoke_tuning.ambient:g}"),
-                            ("Shadow density:", f"{smoke_tuning.shadow_density:g}"),
+                            (
+                                "Shadow density:",
+                                f"{smoke_tuning.shadow_density:g}",
+                            ),
                             (
                                 "Base color:",
                                 ", ".join(
@@ -2410,7 +2502,10 @@ class FlowRuntimeMixin(
                             ("Fade:", f"{smoke_tuning.fade:g}"),
                             ("Sharpness:", f"{smoke_tuning.sharpness:g}"),
                             ("Vorticity:", f"{smoke_tuning.vorticity:g}"),
-                            ("Raymarch quality:", f"{smoke_tuning.raymarch_quality:g}"),
+                            (
+                                "Raymarch quality:",
+                                f"{smoke_tuning.raymarch_quality:g}",
+                            ),
                         ),
                     ),
                 ),

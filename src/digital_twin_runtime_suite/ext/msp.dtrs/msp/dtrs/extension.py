@@ -17,11 +17,23 @@ import omni.ext
 import omni.ui as ui
 
 EXTENSION_SETTINGS = "/exts/msp.dtrs"
+# Kit persists user-facing extension state only below ``/persistent``.  The
+# Package D handoff must survive a full DTRS process restart, unlike launch
+# overrides that intentionally live under ``/exts``.
+STREAMLINES_LIFECYCLE_PRE_RESTART_SETTING = (
+    "/persistent/exts/msp.dtrs/streamlinesStaticLifecyclePreRestartPending"
+)
 PANEL_WIDTH = 340
 ROW_LABEL_WIDTH = 104
 SERVER_VIEW_LABEL_WIDTH = 150
 TELEMETRY_VALUE_RIGHT_PADDING = 8
 COMPACT_TEXT_LENGTH = 44
+
+# During Stage 09 Package B, suppress only these noisy Airflow diagnostics:
+# the successful dataset-registry report, workload-to-cache mapping reports,
+# and the background-validation startup task/logs. Keep all error reporting
+# active. Set this to False as an explicit Stage 09 closure requirement.
+STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = True
 
 
 def _compact_text(value: str, max_length: int = COMPACT_TEXT_LENGTH) -> str:
@@ -54,7 +66,9 @@ def _ensure_source_root(source_root: Path) -> None:
 def _with_dtrs_local_timestamp(message: str) -> str:
     """Load the shared formatter only after the extension source root exists."""
 
-    from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
+    from digital_twin_runtime_suite.app.diagnostics import (
+        with_dtrs_local_timestamp,
+    )
 
     return with_dtrs_local_timestamp(message)
 
@@ -75,6 +89,18 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._airflow_transition_task = None
         self._airflow_detach_requested = False
         self._airflow_cache_selector_label = None
+        self._streamlines_status_label = None
+        self._streamlines_presentation_cadence_button = None
+        self._streamlines_lifecycle_acceptance_button = None
+        self._streamlines_post_restart_check_button = None
+        self._streamlines_lifecycle_workflow_step = "STARTUP"
+        # Retain these fields only for dormant A-C helpers/tests.  Package D no
+        # longer exposes their controls in the user-facing Streamlines section.
+        self._streamlines_static_test_button = None
+        self._streamlines_benchmark_button = None
+        self._streamlines_show_standard_button = None
+        self._streamlines_show_nanovdb_button = None
+        self._streamlines_review_workflow_step = "STARTUP"
         self._airflow_background_validation_task = None
         self._view_task = None
         self._auxiliary_windows_task = None
@@ -147,13 +173,16 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._camera_rotation_order = "YXZ"
 
         self._settings = carb.settings.get_settings()
+        if self._settings.get_as_bool(STREAMLINES_LIFECYCLE_PRE_RESTART_SETTING):
+            self._streamlines_lifecycle_workflow_step = "PRE_RESTART_PASS"
         carb.log_info(
             "DTRS renderer delegate\n"
             "/app/useFabricSceneDelegate = "
             f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
         )
         self._build_controller()
-        self._start_background_airflow_validation()
+        if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
+            self._start_background_airflow_validation()
         self._build_window()
         asyncio.ensure_future(self._dock_left())
         self._auxiliary_windows_task = asyncio.ensure_future(
@@ -189,6 +218,16 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._telemetry_task.cancel()
             self._telemetry_task = None
         if self._controller:
+            try:
+                receipt = (
+                    self._controller.clear_streamlines_static_runtime_from_open_stage()
+                )
+                if not receipt.clean:
+                    carb.log_error(
+                        "DTRS STREAMLINES | SHUTDOWN_CLEANUP | FAIL\n" "result=DIRTY"
+                    )
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
+                carb.log_error(f"DTRS Streamlines shutdown cleanup failed: {error}")
             try:
                 self._controller.clear_xray_material_in_kit()
             except RuntimeError as error:
@@ -270,9 +309,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             discover_airflow_dataset_registry,
             format_airflow_dataset_registry,
         )
-        from digital_twin_runtime_suite.app.motion import MultiRotationMotionController
+        from digital_twin_runtime_suite.app.motion import (
+            MultiRotationMotionController,
+        )
         from digital_twin_runtime_suite.app.telemetry import SnapshotLatch
-        from digital_twin_runtime_suite.app.telemetry import SyntheticTelemetryProvider
+        from digital_twin_runtime_suite.app.telemetry import (
+            SyntheticTelemetryProvider,
+        )
         from digital_twin_runtime_suite.app.telemetry import TelemetryConfig
 
         # isort: on
@@ -291,7 +334,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             )
         else:
             registry_log = format_airflow_dataset_registry(registry)
-            carb.log_warn(_with_dtrs_local_timestamp(registry_log))
+            if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
+                carb.log_warn(_with_dtrs_local_timestamp(registry_log))
         self._set_application_title_version(self._controller.config)
         telemetry_config_path = (
             config_path.parent / "telemetry_provider.toml"
@@ -319,7 +363,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             carb.log_warn("DTRS could not access the native application window.")
             return
         carb.windowing.acquire_windowing_interface().set_window_title(
-            app_window.get_window(), f"{config.app_name} {config.display_version}"
+            app_window.get_window(),
+            f"{config.app_name} {config.display_version}",
         )
 
     def _build_window(self) -> None:
@@ -456,6 +501,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     lambda: self._build_server_appearance_controls(
                         config.chassis_presentation
                     ),
+                )
+                self._build_config_section(
+                    "Streamlines",
+                    self._build_streamlines_controls,
                 )
                 self._build_config_section(
                     "Airflow cache",
@@ -670,7 +719,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         field_name: str,
         value: float,
     ) -> None:
-        from digital_twin_runtime_suite.app.config import SMOKE_TUNING_VALUE_OPTIONS
+        from digital_twin_runtime_suite.app.config import (
+            SMOKE_TUNING_VALUE_OPTIONS,
+        )
         from digital_twin_runtime_suite.app.view_controls import (
             smoke_tuning_option_index,
         )
@@ -688,7 +739,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self,
         base_color: tuple[float, float, float],
     ) -> None:
-        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
+        from digital_twin_runtime_suite.app.view_controls import (
+            rgb_to_hex,
+            rgb_to_hsv,
+        )
 
         hue, saturation, value = rgb_to_hsv(base_color)
         self._updating_smoke_color_controls = False
@@ -730,7 +784,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self,
         base_color: tuple[float, float, float],
     ) -> None:
-        from digital_twin_runtime_suite.app.view_controls import rgb_to_hex, rgb_to_hsv
+        from digital_twin_runtime_suite.app.view_controls import (
+            rgb_to_hex,
+            rgb_to_hsv,
+        )
 
         self._updating_smoke_color_controls = True
         try:
@@ -747,7 +804,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self,
         base_color: tuple[float, float, float],
     ) -> None:
-        from digital_twin_runtime_suite.app.view_controls import rgb_to_omniui_color
+        from digital_twin_runtime_suite.app.view_controls import (
+            rgb_to_omniui_color,
+        )
 
         with self._smoke_color_preview_frame:
             ui.Rectangle(
@@ -797,7 +856,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         field_name: str,
         value: float | int,
     ) -> None:
-        from digital_twin_runtime_suite.app.config import EMITTER_LAYOUT_VALUE_OPTIONS
+        from digital_twin_runtime_suite.app.config import (
+            EMITTER_LAYOUT_VALUE_OPTIONS,
+        )
         from digital_twin_runtime_suite.app.view_controls import (
             emitter_layout_option_index,
         )
@@ -870,6 +931,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 clicked_fn=lambda: self._capture_flow_camera_bookmark("Close-up"),
                 width=ui.Fraction(1),
             )
+
         with ui.HStack(height=24, spacing=6, content_clipping=True):
             ui.Button(
                 "Overview",
@@ -993,6 +1055,22 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             width=ui.Percent(100),
         )
 
+    def _build_streamlines_controls(self) -> None:
+        """Build Package G's single guided presentation-cadence action."""
+
+        with ui.VStack(spacing=6, content_clipping=True):
+            self._streamlines_presentation_cadence_button = ui.Button(
+                "Run Presentation Cadence Test",
+                clicked_fn=self._schedule_run_streamlines_presentation_cadence,
+                height=26,
+                width=ui.Percent(100),
+            )
+            self._streamlines_status_label = ui.Label("Status: Ready", height=18)
+            if self._controller:
+                self._set_streamlines_status(
+                    self._controller.announce_streamlines_presentation_cadence_ready()
+                )
+
     def _build_lighting_config_controls(self, config) -> None:
         self._lighting_status_label = ui.Label(
             _compact_text(f"HDRI: {config.default_hdri_path.name}"),
@@ -1086,7 +1164,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             TUNING_METRIC_LABELS,
             TUNING_METRICS,
         )
-        from digital_twin_runtime_suite.app.telemetry.model import METRIC_LABELS
+        from digital_twin_runtime_suite.app.telemetry.model import (
+            METRIC_LABELS,
+        )
 
         # isort: on
 
@@ -1314,8 +1394,12 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _build_telemetry_tab(self) -> None:
         # isort: off
-        from digital_twin_runtime_suite.app.telemetry.model import METRIC_LABELS
-        from digital_twin_runtime_suite.app.telemetry.model import TELEMETRY_GROUPS
+        from digital_twin_runtime_suite.app.telemetry.model import (
+            METRIC_LABELS,
+        )
+        from digital_twin_runtime_suite.app.telemetry.model import (
+            TELEMETRY_GROUPS,
+        )
 
         # isort: on
 
@@ -1510,7 +1594,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     def _log_workload_cache_mapping(self, workload_mode: str) -> None:
         """Report mapping resolution without changing the Flow lifecycle."""
 
-        if not self._controller:
+        if STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS or not self._controller:
             return
         mapping_log = self._controller.resolve_workload_airflow_binding(
             workload_mode
@@ -1547,9 +1631,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
             app = omni.kit.app.get_app()
             usd_context = omni.usd.get_context()
-            next_provider_tick = (
-                time.monotonic() + self._telemetry_provider.config.provider_tick_seconds
+            provider_tick_seconds = (
+                self._telemetry_provider.config.provider_tick_seconds
             )
+            next_provider_tick = time.monotonic() + provider_tick_seconds
             self._next_telemetry_ui_update = 0.0
 
             while self._telemetry_provider and self._window:
@@ -1713,14 +1798,30 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_status(cleanup.message)
             return
         try:
+            streamlines_cleanup = (
+                self._controller.clear_streamlines_static_runtime_from_open_stage()
+            )
+        except Exception as error:  # noqa: BLE001 - keep Reload Config usable.
+            self._set_status(
+                f"Streamlines cleanup before Reload Config failed: {error}"
+            )
+            return
+        if not streamlines_cleanup.clean:
+            self._set_status(
+                "Streamlines cleanup before Reload Config left runtime state."
+            )
+            return
+        try:
             config = self._controller.reload_config()
         except RuntimeError:
             self._set_status("Detach airflow before reloading config")
             return
         if self._motion_controller:
             self._motion_controller.reset()
-        # Motion bindings are config-backed; rebuild them after a runtime config reload.
-        from digital_twin_runtime_suite.app.motion import MultiRotationMotionController
+        # Motion bindings are config-backed. Rebuild after a runtime config reload.
+        from digital_twin_runtime_suite.app.motion import (
+            MultiRotationMotionController,
+        )
 
         self._motion_controller = MultiRotationMotionController(
             config.fan_motion_bindings
@@ -1741,6 +1842,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_airflow_status("Not attached")
         result = await self._load_default_asset("Reload Config (stage open)")
         if result.success:
+            self._set_streamlines_pre_restart_pending(False)
+            self._set_streamlines_lifecycle_workflow_step("STARTUP")
             self._set_status("Configuration reloaded and stage reopened.")
 
     def _set_status(self, message: str) -> None:
@@ -1815,6 +1918,66 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             payload={"progress": progress},
         )
 
+    def _set_streamlines_status(self, message: str) -> None:
+        """Publish the independent static-source state in its collapsed UI section."""
+
+        if self._streamlines_status_label:
+            text = f"Status: {message}"
+            self._streamlines_status_label.text = _compact_text(text)
+            self._streamlines_status_label.tooltip = text
+
+    def _set_streamlines_review_workflow_step(self, step: str) -> None:
+        """Gate forward review actions while retaining repeatable evidence steps."""
+
+        from digital_twin_runtime_suite.app.streamlines.runtime import (
+            streamlines_review_workflow_state,
+        )
+
+        state = streamlines_review_workflow_state(step)
+        self._streamlines_review_workflow_step = step
+        buttons = (
+            (self._streamlines_static_test_button, state.static_test_enabled),
+            (self._streamlines_benchmark_button, state.benchmark_enabled),
+            (
+                self._streamlines_show_standard_button,
+                state.show_standard_enabled,
+            ),
+            (
+                self._streamlines_show_nanovdb_button,
+                state.show_nanovdb_enabled,
+            ),
+        )
+        for button, enabled in buttons:
+            if button:
+                button.enabled = enabled
+
+    def _set_streamlines_lifecycle_workflow_step(self, step: str) -> None:
+        """Gate Package D's restart proof without re-exposing Package A-C controls."""
+
+        from digital_twin_runtime_suite.app.streamlines.runtime import (
+            streamlines_lifecycle_workflow_state,
+        )
+
+        state = streamlines_lifecycle_workflow_state(step)
+        self._streamlines_lifecycle_workflow_step = step
+        for button, enabled in (
+            (
+                self._streamlines_lifecycle_acceptance_button,
+                state.lifecycle_acceptance_enabled,
+            ),
+            (
+                self._streamlines_post_restart_check_button,
+                state.post_restart_check_enabled,
+            ),
+        ):
+            if button:
+                button.enabled = enabled
+
+    def _set_streamlines_pre_restart_pending(self, value: bool) -> None:
+        """Persist only the handoff needed to enable the post-process check."""
+
+        self._settings.set_bool(STREAMLINES_LIFECYCLE_PRE_RESTART_SETTING, value)
+
     @staticmethod
     def _asset_loaded_status(message: str) -> str:
         if "viewport framed" in message:
@@ -1840,6 +2003,102 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._set_airflow_status("Airflow operation is already in progress.")
             return
         self._airflow_task = asyncio.ensure_future(self._attach_airflow())
+
+    def _schedule_run_streamlines_static_test(self) -> None:
+        """Serialize the no-Flow static source action with Airflow Cache work."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_review_workflow_step("STATIC_TEST_RUNNING")
+        self._airflow_task = asyncio.ensure_future(self._run_streamlines_static_test())
+
+    def _schedule_run_streamlines_presentation_cadence(self) -> None:
+        """Run Package G as one serialized action with no concurrent airflow work."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if self._streamlines_presentation_cadence_button:
+            self._streamlines_presentation_cadence_button.enabled = False
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_presentation_cadence()
+        )
+
+    def _schedule_run_streamlines_static_lifecycle_acceptance(self) -> None:
+        """Run the complete in-process Package D matrix as one guarded task."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_lifecycle_workflow_step("RUNNING")
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_static_lifecycle_acceptance()
+        )
+
+    def _schedule_run_streamlines_post_restart_check(self) -> None:
+        """Require the persisted pre-restart receipt before a fresh process passes."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if not self._settings.get_as_bool(STREAMLINES_LIFECYCLE_PRE_RESTART_SETTING):
+            self._set_streamlines_status(
+                "Complete Static Lifecycle Acceptance and restart DTRS first."
+            )
+            return
+        self._set_streamlines_lifecycle_workflow_step("POST_RESTART_RUNNING")
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_post_restart_check()
+        )
+
+    def _schedule_run_isolated_streamlines_reproducer(self) -> None:
+        """Run the one-off VTI compatibility bisect without Package B runtime state."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(
+            self._run_isolated_streamlines_reproducer()
+        )
+
+    def _schedule_run_streamlines_operator_proof(self) -> None:
+        """Serialize the Package B proof with the static-source and Flow actions."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_operator_proof()
+        )
+
+    def _schedule_run_streamlines_operator_type_comparison(self) -> None:
+        """Serialize the Package C benchmark with every other airflow action."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_review_workflow_step("BENCHMARK_RUNNING")
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_operator_type_comparison()
+        )
+
+    def _schedule_show_streamlines_comparison_result(self, operator_type: str) -> None:
+        """Switch retained Package C previews without triggering a new benchmark."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if (
+            operator_type == "nanovdb"
+            and self._streamlines_review_workflow_step
+            not in ("STANDARD_ACTIVE", "NANOVDB_ACTIVE")
+        ):
+            self._set_streamlines_status('Press "Show Standard" before Show NanoVDB.')
+            return
+        self._airflow_task = asyncio.ensure_future(
+            self._show_streamlines_comparison_result(operator_type)
+        )
 
     def _schedule_attached_workload_transition(self, workload_mode: str) -> None:
         """Forward a semantic workload change without owning Flow arbitration."""
@@ -1992,7 +2251,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     def _selected_xray_target_ids(self) -> frozenset[str]:
         """Return the UI-owned target selection without persisting it to config."""
 
-        from digital_twin_runtime_suite.app.view_controls import bool_model_value
+        from digital_twin_runtime_suite.app.view_controls import (
+            bool_model_value,
+        )
 
         return frozenset(
             group_id
@@ -2152,7 +2413,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     def _set_face_panel_action_label(self, is_open: bool) -> None:
         if not self._face_panel_action_label:
             return
-        from digital_twin_runtime_suite.app.view_controls import face_panel_action_label
+        from digital_twin_runtime_suite.app.view_controls import (
+            face_panel_action_label,
+        )
 
         action_text = face_panel_action_label(is_open)
         self._face_panel_action_label.text = action_text
@@ -2196,7 +2459,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _build_lighting_config_from_controls(self):
         # isort: off
-        from digital_twin_runtime_suite.app.config import LightingConfig, RotationConfig
+        from digital_twin_runtime_suite.app.config import (
+            LightingConfig,
+            RotationConfig,
+        )
 
         # isort: on
 
@@ -2216,7 +2482,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
     def _build_camera_config_from_controls(self):
         # isort: off
-        from digital_twin_runtime_suite.app.config import CameraConfig, RotationConfig
+        from digital_twin_runtime_suite.app.config import (
+            CameraConfig,
+            RotationConfig,
+        )
 
         # isort: on
 
@@ -2313,6 +2582,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         return result
 
     async def _attach_airflow(self) -> None:
+
         def update_status(message: str) -> None:
             self._refresh_airflow_cache_selector_label()
             self._set_airflow_status(message)
@@ -2322,6 +2592,289 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
+
+    async def _run_streamlines_static_test(self) -> None:
+        """Run Package A source preparation without leaking a detached task error."""
+
+        try:
+            result = await self._controller.run_streamlines_static_test_in_kit(
+                status_callback=self._set_streamlines_status,
+            )
+            accepted = (
+                result.success
+                and not self._controller.streamlines_static_source_diagnostics_failure()
+            )
+            self._set_streamlines_review_workflow_step(
+                "STATIC_PASS" if accepted else "STARTUP"
+            )
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_static_test_task_failure,
+            )
+
+            report_streamlines_static_test_task_failure(
+                error,
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+            self._set_streamlines_review_workflow_step("STARTUP")
+
+    async def _run_streamlines_presentation_cadence(self) -> None:
+        """Keep Package G task errors contained at the OmniUI async boundary."""
+
+        try:
+            result = await self._controller.run_streamlines_presentation_cadence_in_kit(
+                status_callback=self._set_streamlines_status,
+            )
+            if result.viable:
+                self._set_streamlines_status(
+                    "Presentation Cadence TEST COMPLETE — VIABLE; "
+                    "no further manual action required."
+                )
+            elif result.decision == "NO_CREDIBLE_PRESENTATION_CADENCE":
+                self._set_streamlines_status(
+                    "Presentation Cadence TEST COMPLETE — REASSESS; "
+                    "inspect the structured log."
+                )
+            else:
+                self._set_streamlines_status(
+                    "Presentation Cadence TEST COMPLETE — FAIL; "
+                    "inspect the structured log."
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="PRESENTATION_CADENCE",
+                display_name="Streamlines presentation cadence test",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+        finally:
+            if self._streamlines_presentation_cadence_button:
+                self._streamlines_presentation_cadence_button.enabled = True
+
+    async def _run_streamlines_static_lifecycle_acceptance(self) -> None:
+        """Bridge Package D runtime ownership to the extension's reload/open seams."""
+
+        try:
+            run_lifecycle_acceptance = (
+                self._controller.run_streamlines_static_lifecycle_acceptance_in_kit
+            )
+            reload_config = self._reload_config_for_streamlines_lifecycle
+            result = await run_lifecycle_acceptance(
+                reload_config_callback=reload_config,
+                stage_reopen_callback=self._reopen_stage_for_streamlines_lifecycle,
+                status_callback=self._set_streamlines_status,
+            )
+            if result.success and result.pre_restart_ready:
+                self._set_streamlines_pre_restart_pending(True)
+                self._set_streamlines_lifecycle_workflow_step("PRE_RESTART_PASS")
+            else:
+                self._set_streamlines_pre_restart_pending(False)
+                self._set_streamlines_lifecycle_workflow_step("STARTUP")
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="STATIC_LIFECYCLE",
+                display_name="Static lifecycle acceptance",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+            self._set_streamlines_pre_restart_pending(False)
+            self._set_streamlines_lifecycle_workflow_step("STARTUP")
+
+    async def _run_streamlines_post_restart_check(self) -> None:
+        """Complete the process-bound half of the Package D acceptance gate."""
+
+        try:
+            result = await self._controller.run_streamlines_post_restart_check_in_kit(
+                status_callback=self._set_streamlines_status,
+            )
+            if result.success:
+                self._set_streamlines_pre_restart_pending(False)
+                self._set_streamlines_lifecycle_workflow_step("POST_RESTART_PASS")
+            else:
+                self._set_streamlines_lifecycle_workflow_step("PRE_RESTART_PASS")
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="POST_RESTART_CHECK",
+                display_name="Post-restart static lifecycle check",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+            self._set_streamlines_lifecycle_workflow_step("PRE_RESTART_PASS")
+
+    def _reload_config_for_streamlines_lifecycle(self) -> bool:
+        """Reload config only after the lifecycle owner has proven clean teardown."""
+
+        try:
+            self._controller.reload_config()
+        except RuntimeError:
+            return False
+        return True
+
+    async def _reopen_stage_for_streamlines_lifecycle(self) -> bool:
+        """Run canonical teardown again immediately before reopening the asset."""
+
+        receipt = await self._controller.clear_streamlines_static_runtime_in_kit()
+        if not receipt.clean:
+            return False
+        result = await self._load_default_asset(
+            "Streamlines static lifecycle stage reopen"
+        )
+        return result.success
+
+    async def _run_isolated_streamlines_reproducer(self) -> None:
+        """Run the standalone VTI compatibility bisect from the Streamlines panel."""
+
+        try:
+            from digital_twin_runtime_suite.app.streamlines.reproducer import (
+                run_isolated_vti_streamlines_reproducer_in_kit,
+            )
+
+            result = await run_isolated_vti_streamlines_reproducer_in_kit(
+                self._controller.config.asset_root,
+                status_callback=self._set_streamlines_status,
+            )
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="VTI_REPRODUCER",
+                display_name="Isolated Kit-CAE reproducer",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+
+    async def _run_streamlines_operator_proof(self) -> None:
+        """Run the Package B BasisCurves proof without leaking a task error."""
+
+        try:
+            result = (
+                await self._controller.run_streamlines_static_operator_proof_in_kit(
+                    status_callback=self._set_streamlines_status,
+                )
+            )
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="OPERATOR_PROOF",
+                display_name="Streamlines operator proof",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+
+    async def _run_streamlines_operator_type_comparison(self) -> None:
+        """Run Package C's fixed-input operator benchmark behind the UI boundary."""
+
+        try:
+            result = (
+                await self._controller.run_streamlines_operator_type_comparison_in_kit(
+                    status_callback=self._set_streamlines_status,
+                )
+            )
+            self._set_streamlines_review_workflow_step(
+                "BENCHMARK_PASS" if result.success else "STATIC_PASS"
+            )
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="OPERATOR_TYPE_COMPARISON",
+                display_name="Streamlines operator type comparison",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+            self._set_streamlines_review_workflow_step("STATIC_PASS")
+
+    async def _show_streamlines_comparison_result(self, operator_type: str) -> None:
+        """Show a completed Package C preview without leaking task exceptions."""
+
+        try:
+            show_comparison_result = (
+                self._controller.show_streamlines_operator_type_comparison_result_in_kit
+            )
+            result = await show_comparison_result(operator_type)
+            if result.success:
+                self._set_streamlines_review_workflow_step(
+                    "STANDARD_ACTIVE"
+                    if operator_type == "standard"
+                    else "NANOVDB_ACTIVE"
+                )
+            self._set_streamlines_status(result.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="OPERATOR_TYPE_REVIEW",
+                display_name=f"Streamlines {operator_type} benchmark preview",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
 
     async def _cancel_attach_then_detach(self, attach_task) -> None:
         """Serialize Detach behind the cooperative preflight cancellation result."""

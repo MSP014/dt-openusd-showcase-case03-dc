@@ -670,28 +670,428 @@ starting this stage.
 
 Jira: `DC-49`
 
-Release track: `0.5.0` (released on Stage 10 completion).
+Target release milestone: `0.5.0` (not released; assigned after Stage 10 completion).
 
-Prove the velocity-trail implementation against the full server before adding
-rack and data-hall scale. Use an exported server-level vector velocity field from the
-Stage 6 simulation package and the cache selected through Stage 8.
+Deliver a reusable Kit-CAE Streamlines subsystem at `Server` scale. It must
+consume the same manifest-backed Houdini airflow datasets as Stages 6--8,
+without duplicating VTI discovery, spatial registration, or workload identity.
+The result is an engineering visualisation of the active velocity field, not a
+second smoke implementation and not a custom streamline integrator.
 
-Required scope:
+The first proof must run from a clean DTRS startup state and must not require
+the existing full airflow Attach workflow. Attach currently imports and authors
+the complete temporal sequence before creating Flow objects; that remains the
+right workflow for smoke, but it is intentionally too large for the initial
+Streamlines proof.
 
-- establish a reusable trail renderer and runtime controller rather than a
-  throwaway server-only prototype;
-- validate vector-field coordinates, units, time mapping, and playback
-  synchronisation;
-- develop and tune trail seeding, advection, lifetime, density, width, colour,
-  and presentation-speed behaviour at `Server` scale;
-- validate performance and clean reset across cache changes, reload, and
-  shutdown;
-- verify that trails remain readable with the Stage 7 Engineering X-Ray mode;
-- exclude rack and data-hall trail generation from this stage.
+#### Scope and semantic boundary
 
-Done when exported server airflow velocity can be displayed as stable, readable
-trails through a reusable implementation that survives cache switching and
-stage reload.
+- Streamlines are **instantaneous streamlines derived from the active
+  Houdini-authored velocity field**. They are not particles or pathlines moving
+  through a transient simulation.
+- An optional animated-streak material may improve directional readability over
+  already-generated `BasisCurves`; it must never be presented as a particle
+  simulation or as interpolated vector data.
+- Do not write a custom streamline integrator. Use the Kit-CAE Streamlines
+  operator after the VTI source and spatial contract have been validated.
+- Preserve the current Stage 6 Flow Attach behaviour while extracting shared
+  source preparation. Do not migrate the working Flow path merely to introduce
+  Streamlines.
+- Rack and Data Hall streamlines, a user-facing timeline/frame selector, and
+  artificial intermediate velocity fields are out of scope.
+
+#### Code-readability checkpoints
+
+New Streamlines code must follow the established `app/flow` readability
+pattern: document module responsibility, public runtime entry points,
+plain-data contracts, lifecycle/state transitions, and non-obvious Kit-CAE
+constraints at the point of implementation. Comments explain engineering
+intent and invariants, not obvious Python syntax.
+
+Apply the project code-readability review at these checkpoints:
+
+1. **Every runtime change set:** before adding or refactoring implementation
+   code, apply the review to identify its owner, public contract, and lifecycle
+   boundary.
+2. **Every contract or lifecycle seam:** when changing airflow-source data,
+   asynchronous state, Kit-CAE authoring, cleanup, or a visualization-mode
+   invariant, apply the review and document the non-obvious reason locally.
+3. **Each phase gate:** before accepting the Phase 1 static proof, Phase 2
+   temporal feasibility result, Phase 3 shared-source refactor, or Phase 4
+   production mode, apply the review by rereading the changed surface as a
+   first-time technical reader and filling only real explanatory gaps.
+
+The runtime source contract remains:
+
+```text
+telemetry workload
+    -> Stage 8 workload-to-dataset binding
+    -> manifest-backed server/load_* dataset
+    -> Houdini VTI velocity field
+    -> /DTRS_HoudiniVelocity/VTKImageData
+    -> /DTRS_HoudiniVelocity/PointData/<configured velocity field; currently vel>
+```
+
+The implementation must use the API provided by the selected DTRS Kit-CAE
+build:
+
+```python
+from omni.cae.data.commands import execute_command
+from omni.cae.schema import viz as cae_viz
+```
+
+`CreateCaeVizStreamlines` receives the imported dataset path and creates the
+operator at a DTRS-owned path. A DTRS-owned UnitSphere seed source is then
+created and related to the operator; creating the operator alone is not a
+valid visual proof.
+
+#### Phase 1 - Static source and operator proof
+
+1. ✅ Add only the responsibilities that are immediately needed under
+   `app/streamlines/`: runtime ownership and Kit-CAE authoring. Do not create
+   empty diagnostics, validation, or performance modules before they have an
+   owner. Add the `StreamlinesRuntimeMixin` to `RuntimeController` alongside
+   the existing runtime mixins.
+2. ✅ Add a collapsed `Streamlines` section in the Airflow Cache UI with one
+   initial diagnostic action, `Run Static Test`, and a clear status. The action
+   is available only from a clean, non-attached airflow state; if Flow Attach
+   is active it is disabled or explains why it cannot run.
+3. ✅ Extract a narrow source helper beside the existing Flow code, for example
+   `prepare_static_velocity_sample_in_kit(sample_index=0)`. It resolves the
+   current telemetry workload through the Stage 8 binding, validates the
+   manifest-selected VTI, imports exactly that one sample, applies the proven
+   origin correction, and returns a plain descriptor containing workload,
+   dataset identity, sample index, VTI path, dataset path, velocity-field path,
+   bounds, dimensions, spacing, and origin. This is source preparation, not a
+   partial Flow attach.
+4. ✅ Sample `0` is the deterministic initial test input. Re-running the test for
+   the same workload must select the same VTI; changing workload selects the
+   corresponding dataset's sample `0`.
+5. ✅ Reuse the existing VTI checks before authoring Streamlines: configured
+   velocity field (currently `vel`), dimensions, spacing, VTI origin, imported
+   origin, world bounds, and stage units. Reuse the accepted session-layer VTI
+   origin compatibility shim; upstream investigation of importer origin loss
+   remains separate technical debt. The first phase gate is that the imported
+   VTI is a correct spatial velocity source while no Flow environment, emitter,
+   injector, or temporal loop exists.
+6. ✅ Create one Streamlines operator beneath `/DTRS_KitCAE/Streamlines` through
+   `CreateCaeVizStreamlines`, and a small diagnostic UnitSphere beneath
+   `/DTRS_KitCAE/StreamlineSeeds`. Bind the configured vector-valued velocity
+   field (currently `vel`) directly, set a known direction, and verify generated
+   `BasisCurves` both visually and through diagnostics. The line must be in the
+   expected region and direction, remain inside the credible airflow domain,
+   and show no axis or scale error. Stage 7 documents that
+   `/app/useFabricSceneDelegate=true` breaks Engineering X-Ray viewport rollback,
+   so FSD remains disabled. For this Package B human gate, hide the command's
+   authored four-point fallback and author a short-lived DTRS-owned
+   `RuntimePreview` `BasisCurves` snapshot from the accepted UsdRT points and
+   curve counts. It is a diagnostic presentation bridge for the normal USD
+   viewport, not a second operator, custom integrator, or new airflow source;
+   proof cleanup removes it with the Streamlines runtime roots.
+7. ✅ Run a controlled `standard` versus `nanovdb` comparison using the identical
+   VTI, seed, and integration settings. Record creation/rebuild duration,
+   curve and point count, viewport FPS, visual quality, stability, and memory
+   pressure. Choose one production type; do not support both without an
+   evidenced reason.
+
+   Package C procedure: retain the accepted Package B setup exactly
+   (`Nominal`, sample `0`, `server_airflow_velocity_normal_1001.vti`, `vel`,
+   seed transform, direction, integration settings, width, camera/viewport,
+   FSD=false, and the RuntimePreview bridge), changing only `operator_type`.
+   Run one warm-up plus three measured executions per type; use medians for
+   rebuild, preview-mirror, total-visible-update, FPS, and available Kit/RTX
+   memory evidence. Each warm-up and measured execution must have its own
+   causally matched Kit-CAE begin/end completion receipt; real UsdRT geometry
+   is necessary evidence but is not a substitute for that receipt. Log NanoVDB
+   voxelization time only if it is separately observable. NanoVDB's effective
+   uniform voxel size must be no coarser than the imported VTI spacing; log its
+   effective dimensions and voxel size rather than only the requested setting.
+   Do not tune a separate ROI or lower-fidelity resolution merely to make it
+   win. Recreate and clean the disposable comparison operator for the warm-up
+   and for each measured run; never perturb the shared VTI, seed, velocity
+   field, integration settings, or NanoVDB fidelity simply to make Kit dirty.
+   Treat steady FPS as a post-operation recovery/sanity metric rather than the
+   primary `standard`/`nanovdb` discriminator: under FSD=false both paths are
+   displayed through equivalent RuntimePreview geometry. After each final
+   visible preview becomes stable, wait 5 seconds, then reuse the Flow
+   performance snapshot source for 5 snapshots at 5-second intervals. Log
+   `fps_snapshots`, FPS median/min/max, GPU-memory snapshots, and process-memory
+   snapshots; never derive evidence from repeated adjacent `next_update()`
+   frame-time reads. Leave either measured preview selectable under the unchanged viewport
+   for visual review.
+
+   **Package C decision — accepted:** `standard` is the sole production
+   Streamlines operator. Under the fixed Package B setup, standard rebuilt in
+   median **63 ms** versus NanoVDB **94 ms**; steady viewport FPS medians were
+   **49.8** versus **48.9**; GPU memory was **4.0 GiB** versus **4.1 GiB**.
+   Both produced **256 curves / 51,200 points**, and human review found no
+   material NanoVDB visual-quality, stability, or artifact advantage. NanoVDB
+   remains only in the Package C comparison/integration harness as regression
+   evidence; no production runtime path may retain it.
+8. ✅ Make the static action idempotent. Before a new run, clean the preceding
+   Streamlines operator, seed source, and static imported dataset from every
+   layer to which the importer or command authored them. The same cleanup must
+   run on reload, stage reopen, and shutdown.
+
+   **Package D acceptance — passed:** canonical cleanup passed on rerun and
+   after a deterministic post-import failure rollback; the recovery run, Reload
+   Config path, stage reopen path, and pre-shutdown cleanup all passed. A full
+   DTRS restart then passed clean-startup verification, a new static run and
+   cleanup, and a second idempotent cleanup. Every receipt reported
+   `stale_relationships=0`, `remaining_layer_specs=0`, `duplicate_prims=0`,
+   and `pending_tasks=0`. The production operator decision remains
+   `standard`; NanoVDB is retained only in the regression comparison harness.
+
+**Code-readability checkpoint -- ✅ passed before the Phase 1 gate:** Reviewed
+the new `app/streamlines/` ownership boundary, static-source descriptor,
+Kit-CAE authoring path, and cleanup behaviour. A first-time reader can follow
+why this proof neither creates nor requires Flow, why cleanup spans session and
+root layers, and why the post-restart handoff uses a persistent Kit setting.
+
+**Phase 1 gate — ✅ passed:** From clean startup, one validated Houdini VTI
+produces correctly placed Kit-CAE Streamlines, with no Flow objects and no
+duplicate runtime prims after repeated run/cleanup cycles. The Package D
+in-process lifecycle matrix and full post-restart check also verified clean
+rollback, reload, stage reopen, shutdown, and second-cleanup idempotence.
+
+#### Phase 2 - Temporal feasibility
+
+1. ✅ Extend the static helper into a minimal no-Flow temporal probe path. It must
+   prepare the real manifest-selected VTI source and use the same temporal
+   field-relation/timecode mechanism intended for DTRS, but it creates neither
+   a Flow environment nor emitters and does not move Stage 8 transition
+   ownership. Minimal means minimal consumer and state ownership, not an
+   artificial VTI or an unrelated reimport path.
+2. ✅ Add `Run Temporal Probe` only after this narrow helper exists. For the active
+   workload it derives a representative deterministic sequence from that
+   dataset's manifest-defined sample count and cadence: first sample, early
+   samples, approximately 25% and 50% phase, final sample, then the first
+   sample again. Deduplicate indices for short sequences. Wait for the
+   DTRS-owned Kit-CAE operator tracker and record selected VTI, sample index,
+   operator start/end, rebuild duration, geometry replacement, curve/point
+   count, and a viewport-recovery observation. Package E does not interpret
+   FPS or rebuild timings as a cadence result; that measurement belongs to
+   Package F.
+
+   **Package E evidence — accepted:** the manifest temporal source passed with
+   the deterministic sequence `0 → 1 → 2 → 20 → 40 → 79 → 0`. Exact VTI
+   selection passed for all 7 samples; all 7/7 standard Streamlines consumer
+   recreations produced fresh successful Kit-CAE executions and confirmed UsdRT
+   geometry replacements. The final-to-first boundary passed and the returned
+   first-sample geometry was consistent with the initial result. Flow,
+   emitters, and smoke remained absent; canonical cleanup was clean. The
+   installed consumer therefore refreshes explicitly at each selected source
+   boundary. Per-sample rebuild timings are retained as Package F evidence only;
+   they do not yet support a cadence conclusion. Production operator remains
+   `standard`.
+3. ✅ Treat the selected Kit-CAE Streamlines operator as non-temporal until an
+   installed-build experiment proves otherwise. Measure its cost at real source
+   boundaries, repeated samples, and the intended 5 Hz source cadence. Do not
+   promise 5 Hz production updates, build production UI, or add synthetic
+   intermediate vectors before this measurement.
+
+   **Package F evidence — accepted measurement, classification B:** the source
+   cadence is 5 Hz / 200 ms. On the frozen Package E path, sequential boundaries
+   measured median `source_transition=31 ms`, `operator_rebuild=1204 ms`,
+   `UsdRT_ready=1437 ms`, `RuntimePreview_update=1125 ms`, and
+   `total_visible_update=2547 ms`. Repeating one sample measured a median
+   `total_visible_update=1562 ms`. The 5 Hz burst processed all 10/10 requested
+   samples correctly, but missed all 10 deadlines, reached queue depth 8, and
+   accumulated median/max completion lateness of `8044/18512 ms`. The final to
+   first boundary, geometry correctness, and canonical cleanup all passed.
+   Baseline/during/recovery FPS medians were `48.4/7.0/41.7`; recovery did not
+   reach 90% of baseline in the observed window. Therefore temporal Streamlines
+   are functionally stable, but 5 Hz visible presentation is not viable with
+   explicit consumer rebuild plus the FSD-safe RuntimePreview bridge. No
+   optimisation or cadence reduction was applied in Package F; `standard`
+   remains the production operator and Package G owns the time-based
+   presentation decision.
+4. ✅ Define the maximum practical time-based presentation cadence from the evidence.
+   Treat source cadence and Streamlines presentation cadence as separate clocks:
+   each workload dataset retains its own manifest-defined sample count and source
+   cadence, while Streamlines presentation is scheduled by a runtime presentation
+   period in seconds against the shared 16-second loop phase.
+
+   If every source boundary is viable, retain the dataset cadence. Otherwise,
+   measure and select the minimum practical `presentation_period_seconds`
+   independently of dataset sample count. At each presentation tick, resolve the
+   latest real manifest sample whose source time is at or before the current loop
+   phase, preserving the exact selected sample index, source time, timecode, and
+   VTI identity. Do not interpolate, average, or synthesize intermediate velocity
+   vectors.
+
+   If a presentation tick resolves to the same source sample that is already
+   presented, treat it as a no-op rather than rebuilding the Streamlines consumer.
+   Validate the selected period across loop wrap and demonstrate that it does not
+   accumulate queue depth or timing drift during sustained operation.
+
+   If no credible time-based presentation period is viable, stop before the
+   shared-source refactor and reassess Stage 09 scope.
+
+   **Package G evidence — accepted:**
+
+   ```text
+   decision=TIME_BASED_PRESENTATION_VIABLE
+   presentation_period_seconds=2.6
+   presentation_cadence_hz=0.384615
+   loop_duration_seconds=16
+
+   source_cadence=manifest-defined per workload
+   source_resolution=latest sample at or before loop phase
+   same_source_sample=NO_OP
+   interpolation=NONE
+
+   sustained_confirmation:
+     measured_ticks=12
+     rebuilt_ticks=11
+     no_op_ticks=1
+     missed_deadlines=0
+     max_pending_requests=0
+     visible_update_ms_median_max=(1906, 2031)
+     headroom_ms_median_min=(694, 569)
+     loop_wrap=PASS
+     exact_mapping=PASS
+     cleanup=CLEAN
+
+   fps:
+     baseline=50.9
+     sustained=14.6
+     recovered=53.0
+     recovery_to_90_percent_seconds=5
+   ```
+
+**Code-readability checkpoint — ✅ passed before the Phase 2 gate:** Reviewed
+the temporal source-time resolver, explicit consumer-rebuild boundary,
+same-source no-op decision, bounded scheduler, candidate state transitions,
+and cleanup ownership. The fixed 16-second loop and the separation of
+manifest-defined source time from time-based presentation are explicit at the
+relevant runtime boundaries.
+
+**Phase 2 gate — ✅ passed:** DTRS has measured the real server Streamlines
+behaviour on RTX 3080. The source clock remains manifest-defined per workload;
+the selected, defensible presentation clock is 2.6 seconds (0.384615 Hz)
+against the fixed 16-second loop. Exact mapping, loop wrap, no-op handling,
+sustained scheduling headroom, recovery, and cleanup are proven before any
+change to Flow or Stage 8 ownership.
+
+#### Phase 3 - Shared airflow source architecture
+
+1. Only after Phase 2 passes, separate the airflow source lifecycle from the
+   Flow consumer. The consumer-neutral source layer owns manifest discovery,
+   validation, VTI import, temporal sample authoring, origin/grid validation,
+   source identity, normalized phase mapping, pending target, source-commit
+   verification, supersession, and failure rollback.
+2. Flow, smoke, and Streamlines become consumers of the prepared source. Keep
+   the current Stage 6 Attach workflow visually and functionally unchanged,
+   with focused regression tests for that guarantee.
+3. Move the generic parts of the Stage 8 workload transition contract into the
+   shared source layer. Replace Flow-specific `Field + DataSetEmitter required`
+   proof with `source transition committed -> active consumer validates result`.
+   Do not count Flow `DataSetEmitter` consumption as evidence that Streamlines
+   consumed a new source.
+4. Establish concise consumer proofs for both paths: the Flow consumer retains
+   its current behaviour, while the Streamlines consumer reports selected VTI,
+   operator completion, generated geometry, and confirmed workload identity.
+
+**Code-readability checkpoint -- apply before the Phase 3 gate:** Review the
+consumer-neutral source contract, commit/rollback and supersession rules, and
+the explicit ownership boundary between the shared source, Flow, and
+Streamlines. A reader must be able to see why the existing Attach path remains
+unchanged.
+
+**Phase 3 gate:** Workload switching is owned by the shared airflow source,
+not by Flow, and both Flow and Streamlines prove consumption without a
+regression to the existing Attach workflow.
+
+#### Phase 4 - Production modes and acceptance
+
+1. Introduce the DTRS-owned Airflow Visualization Mode state: `Smoke`,
+   `Streamlines`, and, if necessary internally, `Off`. Enforce the product
+   invariant in the runtime controller, not only in the UI: smoke and
+   Streamlines must never be active together.
+2. Preserve the familiar Attach workflow: it prepares the temporal dataset and
+   activates Smoke by default. A mode switch is not Attach/Detach and must
+   preserve `/DTRS_HoudiniVelocity`. Implement both switch directions with
+   Flow quiescence, source preservation, stale-presentation cleanup, and
+   completed-operator confirmation.
+3. Build one deterministic, configuration-backed `Front Intake` seed preset
+   before considering additional semantic groups. Tune in this order: seed
+   placement, direction, integration step sizes, maximum steps/length, seed
+   density, then width. Add GPU, CPU, PSU, or interior seed groups only when
+   the primary preset cannot explain the server airflow clearly.
+4. After real operator properties have been measured, add
+   `StreamlinesConfig` and `[simulation_cache.streamlines]`. Its production
+   contract includes operator type, direction, integration limits, width, seed
+   preset, colour domain/mode, and optional animated-streak setting. Values are
+   evidence-derived, not speculative defaults.
+5. Colour production streamlines from the imported velocity data with one fixed
+   cross-workload domain. Explicitly prevent the operator's automatic rescale
+   path from redefining that domain during rebuild. The same colour must retain
+   the same physical meaning across Idle, Nominal, Surge, and Critical.
+6. Verify all four workload transitions in Streamlines mode without a new
+   Attach or whole-dataset reimport. Each transition must prove: target accepted,
+   selected VTI committed, Streamlines operator completed, new geometry exists,
+   consumer state names the new workload, and Smoke remains inactive. On failure
+   keep the last confirmed visualisation understandable and report the reason.
+7. Replace temporary static/probe controls with production controls only after
+   the preceding gates pass. The final Airflow UI exposes the selected mode and
+   only the measured Streamlines settings; retain diagnostic actions only when
+   they remain useful and clearly labelled as diagnostics.
+8. Consider `AnimatedStreaks` only after static geometry, temporal cadence, and
+   mode switching are accepted. Confirm that its material and timeline behaviour
+   does not cause a geometry rebuild on render ticks. If that isolation is not
+   achieved, Stage 09 ships `ScalarColor` Streamlines; no custom animation
+   system is introduced to compensate.
+9. Run the full lifecycle matrix: startup/static test/cleanup, Attach/Smoke,
+   both mode-switch directions, workload switch while Streamlines are active,
+   play/pause/reset, Detach/re-Attach, config reload, stage reopen, shutdown,
+   and DTRS restart. Verify no duplicate operators or seeds, stale curves or
+   smoke, invalid source relations, surviving runtime prims, or leaked tasks.
+10. Validate Streamlines alone and with the Stage 7 Engineering X-Ray modes:
+    chassis, GPU shrouds, and relevant group combinations. Assess readability,
+    depth/occlusion, width, colour competition, flicker/ghosting, and FPS.
+11. Record RTX 3080 evidence at fixed camera conditions for server baseline,
+    Smoke, Streamlines ScalarColor, accepted AnimatedStreaks if any, X-Ray, and
+    X-Ray plus Streamlines. Record viewport FPS, Streamlines rebuild duration,
+    workload-switch visual latency, curve/point count, and visible artifacts.
+12. Add focused automated tests for DTRS-owned logic: config parsing and
+    validation, static/temporal source requests, sample-index checks,
+    deterministic seeds, mode-state transitions and XOR enforcement,
+    duplicate-create prevention, cleanup idempotence, workload commit/failure,
+    fixed colour-domain policy, and reload/shutdown reset. Kit-CAE geometry
+    remains a DTRS/Kit integration acceptance check.
+13. Update public documentation with the correct physical claim:
+   "DTRS visualizes instantaneous streamlines derived from the active
+   Houdini-authored temporal velocity field, with workload-aware dataset
+   switching and optional animated-streak presentation for directional
+   readability."
+14. Before closing Stage 09 / `DC-49`, set
+    `STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = False` and restore exactly these
+    temporarily suppressed Airflow diagnostics: successful
+    `DTRS AIRFLOW DATASET REGISTRY` startup output,
+    `DTRS WORKLOAD CACHE MAPPING` output, and the
+    `DTRS AIRFLOW BACKGROUND VALIDATION` startup task with its normal log
+    output. Error reporting remains enabled throughout Stage 09. Verify that
+    the restored diagnostics do not interfere with the accepted Streamlines
+    lifecycle or diagnostic evidence, and record the restoration in the Stage
+    09 acceptance evidence. This is a closure condition, not optional cleanup.
+
+**Code-readability checkpoint -- apply before Stage 09 acceptance:** Review
+the visualization-mode state machine and its Smoke XOR Streamlines invariant,
+the mode-switch teardown/preservation paths, workload-transition reporting,
+and the UI-facing presentation contract. Confirm that success, failure, and
+shutdown can be understood without unstated runtime knowledge.
+
+Done when DTRS can prepare and validate Houdini-authored server airflow
+velocity data independently of NVIDIA Flow, visualise the active field through
+a reusable Kit-CAE Streamlines subsystem, and reuse the same manifest-backed
+temporal dataset across mutually exclusive Smoke and Streamlines modes. The
+accepted implementation preserves correct spatial and source-time mapping,
+recomputes through Stage 8 workload transitions at its measured presentation
+cadence, uses reproducible server-scale seeding and fixed physical colour
+meaning, composes with Engineering X-Ray, and survives mode switching, detach,
+reload, and shutdown within the accepted RTX 3080 runtime budget. Stage 09
+cannot close while `STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS` remains enabled.
 
 ### Stage 10 - Server Heatmap Foundation Slice
 
