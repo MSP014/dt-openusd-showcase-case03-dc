@@ -318,6 +318,10 @@ def test_failure_does_not_invoke_lifecycle_and_next_matching_request_is_accepted
     )
 
     monkeypatch.setitem(sys.modules, "carb", types.SimpleNamespace())
+    controller._live_flow_consumer_matches_dataset = lambda _dataset: (
+        True,
+        "normal_0.vti",
+    )
     result = asyncio.run(
         controller.request_attached_workload_transition_in_kit("Nominal")
     )
@@ -406,7 +410,7 @@ def test_cache_miss_can_validate_and_continue_to_normal_transition(monkeypatch):
     assert controller.airflow_failure_state() is None
 
 
-def test_transition_is_gated_by_full_registered_family_verdict(monkeypatch):
+def test_transition_is_gated_by_active_target_pair_compatibility(monkeypatch):
     controller = _attached_transition_controller()
     _install_fake_carb(monkeypatch)
     _mock_transition_dataset_signature(monkeypatch, controller)
@@ -419,15 +423,18 @@ def test_transition_is_gated_by_full_registered_family_verdict(monkeypatch):
         retarget_calls.append(object())
         return SimulationCacheResult(True, "unexpected")
 
-    def incompatible_family():
+    def incompatible_pair(**_kwargs):
         raise flow_runtime.AirflowDatasetFamilyCompatibilityError(
-            "Airflow family compatibility mismatch: dataset=server/load_surge; "
+            "Airflow family compatibility mismatch: dataset=server/load_critical; "
             "property=spacing; expected=(0.01, 0.01, 0.01); "
             "actual=(0.02, 0.01, 0.01)."
         )
 
     controller.acquire_airflow_validation_for_transition = validation_pass
-    controller.validate_registered_airflow_dataset_family = incompatible_family
+    controller.validate_attached_airflow_transition_pair = incompatible_pair
+    controller.validate_registered_airflow_dataset_family = lambda: (
+        _ for _ in ()
+    ).throw(AssertionError("Live pair transitions must not require global readiness."))
     controller._retarget_attached_workload_in_kit = unexpected_retarget
 
     result = asyncio.run(
@@ -435,7 +442,7 @@ def test_transition_is_gated_by_full_registered_family_verdict(monkeypatch):
     )
 
     assert result.success is False
-    assert "dataset=server/load_surge; property=spacing" in result.message
+    assert "dataset=server/load_critical; property=spacing" in result.message
     assert retarget_calls == []
     assert controller.airflow_transition_state() == {
         "semantic_workload": "Critical",
@@ -458,11 +465,7 @@ def test_missing_transition_target_reports_dataset_discovery_failure(monkeypatch
         retarget_calls.append(object())
         return SimulationCacheResult(True, "unexpected")
 
-    monkeypatch.setattr(
-        workload_transition,
-        "discover_airflow_dataset",
-        missing_dataset,
-    )
+    monkeypatch.setattr(controller._airflow_state, "resolve_target", missing_dataset)
     controller._retarget_attached_workload_in_kit = retarget
 
     result = asyncio.run(
@@ -489,9 +492,6 @@ def test_detached_attach_validation_failure_remains_detached_without_partial_run
     controller = RuntimeController("configs/digital_twin_runtime_suite.toml")
     controller.set_workload_source(lambda: "Surge")
     _install_fake_carb(monkeypatch)
-    monkeypatch.setattr(
-        flow_runtime, "discover_airflow_dataset", lambda *_args: object()
-    )
     lifecycle_calls: list[str] = []
 
     async def validation_failure(_binding):
@@ -564,6 +564,10 @@ def test_already_active_request_does_not_start_validation_or_retarget(monkeypatc
 
     controller.acquire_airflow_validation_for_transition = unexpected_validation
     controller._retarget_attached_workload_in_kit = unexpected_retarget
+    controller._live_flow_consumer_matches_dataset = lambda _dataset: (
+        True,
+        "normal_0.vti",
+    )
 
     result = asyncio.run(
         controller.request_attached_workload_transition_in_kit("Nominal")
@@ -572,6 +576,40 @@ def test_already_active_request_does_not_start_validation_or_retarget(monkeypatc
     assert result.success is True
     assert calls == []
     assert controller._flow_pending_workload_binding is None
+
+
+def test_same_workload_with_live_mismatch_enters_reconciliation(monkeypatch):
+    controller = _attached_transition_controller(workload="Nominal")
+    _install_fake_carb(monkeypatch)
+    _mock_transition_dataset_signature(monkeypatch, controller)
+    calls: list[str] = []
+
+    async def validation(_binding):
+        calls.append("validation")
+        return _FakeValidationLease()
+
+    async def repair(_active, requested, *_args):
+        calls.append("retarget")
+        assert controller._commit_attached_workload_transition(requested, True)
+        return SimulationCacheResult(True, "Normal runtime reconciled")
+
+    controller._live_flow_consumer_matches_dataset = lambda _dataset: (
+        False,
+        "critical_1081.vti",
+    )
+    controller.acquire_airflow_validation_for_transition = validation
+    controller._retarget_attached_workload_in_kit = repair
+
+    result = asyncio.run(
+        controller.request_attached_workload_transition_in_kit("Nominal")
+    )
+
+    assert result.success is True
+    assert calls == ["validation", "retarget"]
+    assert controller.airflow_transition_state()["active_airflow_selector"] == (
+        "server/load_normal"
+    )
+    assert controller.airflow_transition_state()["pending_airflow_selector"] is None
 
 
 def test_transition_log_block_has_structured_authoritative_fields():
@@ -687,6 +725,271 @@ def test_runtime_contract_prevents_transition_commit():
     assert controller._commit_attached_workload_transition(
         target, True, runtime_contract_match=True
     )
+
+
+def test_runtime_proof_accepts_later_target_family_samples(tmp_path):
+    critical = tuple(tmp_path / f"critical_{index}.vti" for index in range(3))
+
+    proof = RuntimeController._evaluate_runtime_dataset_consumption_proof(
+        critical,
+        critical[0],
+        (critical[1], critical[2]),
+        operator_completion_delta=1,
+        payload_digest_changed=True,
+    )
+
+    assert proof["target_family_observed"] is True
+    assert proof["exact_target_sample_observed"] is False
+    assert proof["target_family_boundaries"] == 2
+    assert proof["foreign_family_source_observed"] is False
+    assert proof["passed"] is True
+
+
+def test_runtime_proof_initializes_payload_accumulator_before_observation(
+    monkeypatch,
+):
+    async def scenario():
+        controller = _attached_transition_controller()
+        target = controller.resolve_workload_airflow_binding("Critical")
+        controller._flow_pending_workload_binding = target
+        transition_id = controller._flow_active_transition_id
+        target_dataset = controller._airflow_state.resolve_target(target).dataset
+        selected_source = target_dataset.velocity_vti_sequence_paths[1]
+
+        async def next_update_async():
+            return None
+
+        app = types.SimpleNamespace(next_update_async=next_update_async)
+        timeline = types.SimpleNamespace(
+            is_playing=lambda: True,
+            get_current_time=lambda: 0.0,
+        )
+        stage = types.SimpleNamespace(GetTimeCodesPerSecond=lambda: 1.0)
+        payload_attr = types.SimpleNamespace(IsValid=lambda: True, Get=lambda: [1])
+        monkeypatch.setattr(
+            workload_transition.flow_temporal,
+            "kit_cae_selected_velocity_asset",
+            lambda *_args: selected_source,
+        )
+        controller._kit_cae_operator_completion_count = lambda _path: 1
+
+        proof = await controller._await_runtime_dataset_consumption_proof(
+            app=app,
+            timeline=timeline,
+            stage=stage,
+            field_prim=object(),
+            payload_attr=payload_attr,
+            emitter_path="/DTRS_KitCAE/DataSetEmitter",
+            expected_paths=target_dataset.velocity_vti_sequence_paths,
+            initial_target_source=target_dataset.velocity_vti_sequence_paths[0],
+            completions_before=0,
+            payload_before_digest="before",
+            cae_vtk=object(),
+            Usd=object(),
+            transition_id=transition_id,
+            target_binding=target,
+        )
+
+        assert proof["payload_digest_changed"] is True
+        assert proof["passed"] is True
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_pre_mutation_exception_preserves_previous_state(monkeypatch):
+    async def scenario():
+        controller = _attached_transition_controller()
+        _install_fake_carb(monkeypatch)
+        _mock_transition_dataset_signature(monkeypatch, controller)
+
+        async def unexpected_validation(_binding):
+            raise ValueError("pre-mutation validation fault")
+
+        controller.acquire_airflow_validation_for_transition = unexpected_validation
+
+        result = await controller.request_attached_workload_transition_in_kit(
+            "Critical"
+        )
+
+        assert result.success is False
+        assert "pre-mutation validation fault" in result.message
+        assert controller.airflow_transition_state() == {
+            "semantic_workload": "Critical",
+            "active_airflow_selector": "server/load_normal",
+            "pending_airflow_selector": None,
+        }
+
+    asyncio.run(scenario())
+
+
+def test_unexpected_post_mutation_exception_rolls_back_before_failure(monkeypatch):
+    async def scenario():
+        controller = _attached_transition_controller()
+        _install_fake_carb(monkeypatch)
+        target = controller.resolve_workload_airflow_binding("Critical")
+        transition = controller._airflow_state.begin(
+            controller._airflow_state.resolve_target(target)
+        )
+        assert transition is not None
+        controller._flow_runtime_mutation_context = {
+            "transition_id": transition.transition_id,
+            "target_dataset": transition.target.dataset,
+        }
+
+        async def unexpected_request(*_args, **_kwargs):
+            raise RuntimeError("post-mutation proof fault")
+
+        async def verified_rollback(**_kwargs):
+            return True, "previous dataset restored"
+
+        controller._request_attached_workload_transition_in_kit = unexpected_request
+        controller._rollback_attached_runtime_target_mutation = verified_rollback
+
+        result = await controller.request_attached_workload_transition_in_kit(
+            "Critical"
+        )
+
+        assert result.success is False
+        assert "Rollback verified" in result.message
+        assert controller.airflow_transition_state() == {
+            "semantic_workload": "Critical",
+            "active_airflow_selector": "server/load_normal",
+            "pending_airflow_selector": None,
+        }
+
+    asyncio.run(scenario())
+
+
+def test_runtime_proof_rejects_foreign_dataset_source(tmp_path):
+    critical = tuple(tmp_path / f"critical_{index}.vti" for index in range(2))
+    normal = tmp_path / "normal_0.vti"
+
+    proof = RuntimeController._evaluate_runtime_dataset_consumption_proof(
+        critical,
+        critical[0],
+        (critical[1], normal),
+        operator_completion_delta=1,
+        payload_digest_changed=True,
+    )
+
+    assert proof["foreign_family_source_observed"] is True
+    assert proof["foreign_family_sources"] == ("normal_0.vti",)
+    assert proof["passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("completion_delta", "payload_changed"),
+    ((0, True), (1, False)),
+)
+def test_runtime_proof_requires_operator_and_payload_evidence(
+    tmp_path,
+    completion_delta,
+    payload_changed,
+):
+    critical = (tmp_path / "critical_0.vti",)
+
+    proof = RuntimeController._evaluate_runtime_dataset_consumption_proof(
+        critical,
+        critical[0],
+        critical,
+        operator_completion_delta=completion_delta,
+        payload_digest_changed=payload_changed,
+    )
+
+    assert proof["target_family_observed"] is True
+    assert proof["passed"] is False
+
+
+def test_runtime_proof_rejects_missing_target_dataset_observation(tmp_path):
+    critical = (tmp_path / "critical_0.vti",)
+
+    proof = RuntimeController._evaluate_runtime_dataset_consumption_proof(
+        critical,
+        critical[0],
+        (),
+        operator_completion_delta=1,
+        payload_digest_changed=True,
+    )
+
+    assert proof["target_family_observed"] is False
+    assert proof["last_observed_source"] == "unavailable"
+    assert proof["passed"] is False
+
+
+def test_verified_runtime_rollback_keeps_previous_committed_dataset(monkeypatch):
+    async def scenario():
+        controller = _attached_transition_controller()
+        _install_fake_carb(monkeypatch)
+        _mock_transition_dataset_signature(monkeypatch, controller)
+
+        async def validate(_binding):
+            return _FakeValidationLease()
+
+        async def failed_retarget(*_args):
+            return SimulationCacheResult(
+                False,
+                "Airflow transition is pending live runtime consumption. "
+                "Rollback verified: previous committed dataset restored.",
+            )
+
+        controller.acquire_airflow_validation_for_transition = validate
+        controller._retarget_attached_workload_in_kit = failed_retarget
+
+        result = await controller.request_attached_workload_transition_in_kit(
+            "Critical"
+        )
+
+        assert result.success is False
+        assert controller.airflow_transition_state() == {
+            "semantic_workload": "Critical",
+            "active_airflow_selector": "server/load_normal",
+            "pending_airflow_selector": None,
+        }
+        assert controller.airflow_failure_state()["action"] == (
+            "kept_previous_safe_dataset"
+        )
+
+    asyncio.run(scenario())
+
+
+def test_unreconciled_runtime_failure_clears_committed_consumer_truth(monkeypatch):
+    async def scenario():
+        controller = _attached_transition_controller()
+        _install_fake_carb(monkeypatch)
+        _mock_transition_dataset_signature(monkeypatch, controller)
+
+        async def validate(_binding):
+            return _FakeValidationLease()
+
+        async def unreconciled_retarget(*_args):
+            return SimulationCacheResult(
+                False,
+                "Airflow transition runtime reconciliation required: "
+                "previous dataset did not pass runtime rollback proof.",
+            )
+
+        controller.acquire_airflow_validation_for_transition = validate
+        controller._retarget_attached_workload_in_kit = unreconciled_retarget
+
+        result = await controller.request_attached_workload_transition_in_kit(
+            "Critical"
+        )
+
+        assert result.success is False
+        assert "reconciliation required" in result.message
+        assert controller.airflow_transition_state() == {
+            "semantic_workload": "Critical",
+            "active_airflow_selector": None,
+            "pending_airflow_selector": None,
+        }
+        assert controller.airflow_failure_state()["action"] == (
+            "runtime_reconciliation_required"
+        )
+        assert controller.airflow_failure_state()["active_airflow_selector"] == (
+            "UNRECONCILED"
+        )
+
+    asyncio.run(scenario())
 
 
 def test_target_family_proof_requires_full_ordered_loop_without_foreign_source(
@@ -989,12 +1292,18 @@ def _install_fake_carb(monkeypatch) -> list[str]:
 
 def _mock_transition_dataset_signature(monkeypatch, controller) -> None:
     monkeypatch.setattr(
-        flow_runtime, "discover_airflow_dataset", lambda *_args: object()
-    )
-    monkeypatch.setattr(
-        flow_runtime, "build_dataset_validation_signature", lambda *_args: object()
+        workload_transition,
+        "build_dataset_validation_signature",
+        lambda *_args: object(),
     )
     controller._flow_validation_cache = _FakeValidationCache()
+    controller.validate_attached_airflow_transition_pair = lambda **_kwargs: (
+        types.SimpleNamespace(
+            family_compatible=True,
+            member_selectors=("server/load_normal", "server/load_critical"),
+            phase_mapping="normalized_discrete",
+        )
+    )
     monkeypatch.setattr(
         controller,
         "validate_registered_airflow_dataset_family",

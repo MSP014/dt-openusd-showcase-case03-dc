@@ -8,6 +8,10 @@ from math import isclose
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
+from digital_twin_runtime_suite.app.streamlines.profile import (
+    PRODUCTION_STREAMLINES_PROFILE,
+    ProductionStreamlinesProfile,
+)
 
 STREAMLINES_OPERATOR_ROOT = "/DTRS_KitCAE/Streamlines"
 STREAMLINES_SEED_ROOT = "/DTRS_KitCAE/StreamlineSeeds"
@@ -48,6 +52,10 @@ class StreamlinesOperatorRequest:
     max_step_size: float
     max_steps: int
     width: float
+    seed_resolution: int = 16
+    profile_name: str = "unprofiled"
+    profile_signature: str = ""
+    persisted_attributes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,8 @@ class StreamlinesOperatorCleanup:
 
 def build_streamlines_operator_request(
     descriptor: StaticVelocitySourceDescriptor | None,
+    *,
+    profile: ProductionStreamlinesProfile = PRODUCTION_STREAMLINES_PROFILE,
 ) -> StreamlinesOperatorRequest:
     """Derive one reproducible seed just inside the source's front domain face.
 
@@ -80,8 +90,14 @@ def build_streamlines_operator_request(
             "Static source bounds must have positive extent."
         )
     max_spacing = max(descriptor.spacing)
-    seed_radius = min(min(extent) * 0.1, max_spacing * 4.0)
-    front_inset = max(seed_radius * 1.5, max_spacing * 4.0)
+    seed_radius = min(
+        min(extent) * profile.seed_radius_domain_fraction,
+        max_spacing * profile.seed_radius_cell_multiplier,
+    )
+    front_inset = max(
+        seed_radius * profile.seed_front_inset_radius_multiplier,
+        max_spacing * profile.seed_front_inset_cell_multiplier,
+    )
     if front_inset >= extent[2]:
         raise StreamlinesOperatorRequestError(
             "Velocity-source depth is too small for the Streamlines seed."
@@ -91,19 +107,23 @@ def build_streamlines_operator_request(
         velocity_field_prim_path=descriptor.velocity_field_prim_path,
         operator_path=STREAMLINES_OPERATOR_PATH,
         seed_path=STREAMLINES_SEED_PATH,
-        operator_type=STREAMLINES_OPERATOR_TYPE,
-        direction=STREAMLINES_DIRECTION,
+        operator_type=profile.operator_type,
+        direction=profile.direction,
         seed_center=(
             (minimum[0] + maximum[0]) / 2.0,
             (minimum[1] + maximum[1]) / 2.0,
             maximum[2] - front_inset,
         ),
         seed_radius=seed_radius,
-        min_step_size=max_spacing * 0.5,
-        initial_step_size=max_spacing * 2.0,
-        max_step_size=max_spacing * 4.0,
-        max_steps=200,
-        width=max_spacing * 0.4,
+        min_step_size=max_spacing * profile.min_step_cell_multiplier,
+        initial_step_size=max_spacing * profile.initial_step_cell_multiplier,
+        max_step_size=max_spacing * profile.max_step_cell_multiplier,
+        max_steps=profile.max_steps,
+        width=max_spacing * profile.width_cell_multiplier,
+        seed_resolution=profile.seed_resolution,
+        profile_name=profile.name,
+        profile_signature=profile.settings_signature,
+        persisted_attributes=profile.persisted_attributes,
     )
 
 
@@ -202,3 +222,22 @@ def clear_streamlines_operator_from_stage(
         previous_runtime_present=previous_runtime_present,
         success=not any(stage.GetPrimAtPath(path).IsValid() for path in paths),
     )
+
+
+def clear_streamlines_seed_from_stage(stage) -> bool:
+    """Remove a disposable seed without deleting an accepted RuntimePreview.
+
+    The explicit recompute fallback owns a short-lived Kit-CAE operator and
+    seed, but its authored preview is the visible result. Clearing the whole
+    Streamlines root here would make a successful fallback immediately vanish.
+    """
+
+    previous_target = stage.GetEditTarget()
+    try:
+        for layer in (stage.GetSessionLayer(), stage.GetRootLayer()):
+            stage.SetEditTarget(layer)
+            if stage.GetPrimAtPath(STREAMLINES_SEED_ROOT).IsValid():
+                stage.RemovePrim(STREAMLINES_SEED_ROOT)
+    finally:
+        stage.SetEditTarget(previous_target)
+    return not stage.GetPrimAtPath(STREAMLINES_SEED_ROOT).IsValid()

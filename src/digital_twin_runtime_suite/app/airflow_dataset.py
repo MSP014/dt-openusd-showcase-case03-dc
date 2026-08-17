@@ -134,32 +134,38 @@ def discover_airflow_dataset(
     asset_root: Path,
     selector: AirflowDatasetSelector,
 ) -> AirflowDataset:
-    """Resolve one dataset by manifest identity without relying on path prefixes."""
+    """Discover the registry once, then resolve one manifest identity from it."""
+
+    registry = discover_airflow_dataset_registry(asset_root, selector.root)
+    return resolve_airflow_dataset_from_registry(registry, selector)
+
+
+def resolve_airflow_dataset_from_registry(
+    registry: tuple[AirflowDataset, ...],
+    selector: AirflowDatasetSelector,
+) -> AirflowDataset:
+    """Resolve one selector from already discovered authoritative datasets."""
 
     _validate_selector(selector)
-    root = _resolve_dataset_root(asset_root, selector.root)
-
-    matches: list[tuple[Path, AirflowDatasetManifest]] = []
-    for manifest_path in root.rglob("manifest.toml"):
-        manifest = parse_airflow_dataset_manifest(manifest_path)
-        if (manifest.scope, manifest.state) == (selector.scope, selector.state):
-            matches.append((manifest_path, manifest))
+    matches = tuple(
+        dataset
+        for dataset in registry
+        if (dataset.manifest.scope, dataset.manifest.state)
+        == (selector.scope, selector.state)
+    )
     if not matches:
         raise AirflowDatasetError(
             "Airflow dataset not found:\n"
             f"scope={selector.scope}\n"
-            f"state={selector.state}\n\n"
-            f"Dataset root:\n{root}"
+            f"state={selector.state}"
         )
     if len(matches) > 1:
-        paths = ", ".join(str(path.parent) for path, _ in matches)
+        paths = ", ".join(str(dataset.directory) for dataset in matches)
         raise AirflowDatasetError(
             "Airflow dataset identity is ambiguous: "
             f"scope={selector.scope}, state={selector.state}; matches={paths}"
         )
-
-    manifest_path, manifest = matches[0]
-    return _build_airflow_dataset(root, manifest_path, manifest)
+    return matches[0]
 
 
 def parse_airflow_dataset_manifest(manifest_path: Path) -> AirflowDatasetManifest:
