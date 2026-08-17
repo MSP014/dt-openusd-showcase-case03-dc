@@ -669,6 +669,17 @@ class _CacheSessionLayer:
 class _CacheStage:
     def __init__(self) -> None:
         self._session_layer = _CacheSessionLayer()
+        self._edit_target = object()
+        self.removed_prims: list[str] = []
 
     def GetSessionLayer(self) -> _CacheSessionLayer:
         return self._session_layer
+
+    def GetEditTarget(self):
+        return self._edit_target
+
+    def SetEditTarget(self, edit_target) -> None:
+        self._edit_target = edit_target
+
+    def RemovePrim(self, prim_path: str) -> None:
+        self.removed_prims.append(prim_path)

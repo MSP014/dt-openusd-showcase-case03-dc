@@ -284,6 +284,7 @@ class StreamlinesCacheValidation:
 
     valid: bool
     message: str
+    geometry_sha256_recomputed: bool = False
 
 
 def streamlines_cache_paths(
@@ -480,16 +481,32 @@ def validate_streamlines_cache(
     if not geometry_path.is_file():
         return StreamlinesCacheValidation(False, "Cache geometry file is missing.")
     if file_sha256(geometry_path) != metadata.geometry_sha256:
-        return StreamlinesCacheValidation(False, "Cache geometry file is stale.")
+        return StreamlinesCacheValidation(
+            False,
+            "Cache geometry file is stale.",
+            geometry_sha256_recomputed=True,
+        )
     try:
         _validate_complete_state_sequence(source, metadata.states)
     except ValueError as error:
-        return StreamlinesCacheValidation(False, str(error))
+        return StreamlinesCacheValidation(
+            False,
+            str(error),
+            geometry_sha256_recomputed=True,
+        )
     if any(
         state.curve_count <= 0 or state.point_count <= 0 for state in metadata.states
     ):
-        return StreamlinesCacheValidation(False, "Cache contains empty geometry.")
-    return StreamlinesCacheValidation(True, "Cache matches the active manifest.")
+        return StreamlinesCacheValidation(
+            False,
+            "Cache contains empty geometry.",
+            geometry_sha256_recomputed=True,
+        )
+    return StreamlinesCacheValidation(
+        True,
+        "Cache matches the active manifest.",
+        geometry_sha256_recomputed=True,
+    )
 
 
 def streamlines_cache_build_mode(paths: StreamlinesCachePaths) -> str:

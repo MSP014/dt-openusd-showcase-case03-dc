@@ -45,6 +45,23 @@ def test_phase36_controls_and_callbacks_are_retired(monkeypatch) -> None:
     )
 
 
+def test_phase3_acceptance_wiring_is_retired_without_removing_flow_controls(
+    monkeypatch,
+) -> None:
+    module = _load_extension(monkeypatch)
+    extension = module.DigitalTwinRuntimeSuiteExtension
+
+    assert not hasattr(module, "PHASE33_MANUAL_ACCEPTANCE_ENABLED")
+    assert not hasattr(module, "PHASE35_MANUAL_ACCEPTANCE_ENABLED")
+    assert not hasattr(extension, "_report_airflow_acceptance")
+    assert not hasattr(extension, "_report_airflow_waiting")
+    assert not hasattr(extension, "_schedule_run_production_cache_sanity")
+    assert not hasattr(extension, "_schedule_streamlines_cadence_characterization")
+    assert hasattr(extension, "_schedule_attach_airflow")
+    assert hasattr(extension, "_run_attached_workload_transition")
+    assert hasattr(extension, "_schedule_detach_airflow")
+
+
 def _load_extension(monkeypatch):
     carb = types.ModuleType("carb")
     carb.log_warn = lambda _message: None

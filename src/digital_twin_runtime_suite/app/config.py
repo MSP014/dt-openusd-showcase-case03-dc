@@ -345,6 +345,14 @@ class SimulationCacheConfig:
 
 
 @dataclass(frozen=True)
+class ValidationReceiptReuseConfig:
+    """Local operator preferences for proven validation evidence reuse."""
+
+    reuse_verified_vti_receipts: bool = False
+    reuse_verified_streamlines_cache_receipts: bool = False
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Resolved runtime configuration for the current DTRS slice."""
 
@@ -362,6 +370,7 @@ class RuntimeConfig:
     chassis_presentation: ChassisPresentationConfig
     fan_motion_bindings: tuple[FanMotionBindingConfig, ...]
     simulation_cache: SimulationCacheConfig
+    validation_receipts: ValidationReceiptReuseConfig
 
     @property
     def display_version(self) -> str:
@@ -451,6 +460,9 @@ class RuntimeConfig:
         )
         fan_motion_bindings = _parse_fan_motion_bindings(data.get("motion"))
         simulation_cache = _parse_simulation_cache_config(data.get("simulation_cache"))
+        validation_receipts = _parse_validation_receipt_reuse_config(
+            data.get("validation_receipts")
+        )
 
         return cls(
             app_name=data["app"]["name"],
@@ -467,6 +479,7 @@ class RuntimeConfig:
             chassis_presentation=chassis_presentation,
             fan_motion_bindings=fan_motion_bindings,
             simulation_cache=simulation_cache,
+            validation_receipts=validation_receipts,
         )
 
     @property
@@ -535,6 +548,7 @@ def format_runtime_override(
     emitter_layout: EmitterLayoutConfig | None = None,
     chassis_presentation: ChassisPresentationConfig | None = None,
     streamlines_presentation_period_seconds: float | None = None,
+    validation_receipts: ValidationReceiptReuseConfig | None = None,
 ) -> str:
     """Serialize local operator overrides as minimal TOML."""
 
@@ -560,6 +574,18 @@ def format_runtime_override(
             "[simulation_cache]\n"
             "streamlines_presentation_period_seconds = "
             f"{streamlines_presentation_period_seconds:.6g}\n"
+        )
+    if validation_receipts is not None:
+        reuse_vti = _toml_bool(validation_receipts.reuse_verified_vti_receipts)
+        reuse_streamlines = _toml_bool(
+            validation_receipts.reuse_verified_streamlines_cache_receipts
+        )
+        text += (
+            "\n"
+            "[validation_receipts]\n"
+            f"reuse_verified_vti_receipts = {reuse_vti}\n"
+            "reuse_verified_streamlines_cache_receipts = "
+            f"{reuse_streamlines}\n"
         )
     if camera:
         text += (
@@ -821,6 +847,26 @@ def _merge_runtime_override(
                     emitter_layout[key] = local_emitter_layout[key]
             simulation_cache["emitter_layout"] = emitter_layout
         data["simulation_cache"] = simulation_cache
+
+    local_validation_receipts = local_data.get("validation_receipts")
+    if isinstance(local_validation_receipts, dict):
+        validation_receipts = dict(data.get("validation_receipts", {}))
+        for key in (
+            "reuse_verified_vti_receipts",
+            "reuse_verified_streamlines_cache_receipts",
+        ):
+            value = local_validation_receipts.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, bool):
+                LOGGER.warning(
+                    "Ignoring validation_receipts.%s=%r; expected bool.",
+                    key,
+                    value,
+                )
+                continue
+            validation_receipts[key] = value
+        data["validation_receipts"] = validation_receipts
 
 
 def _parse_camera_config(data: Any) -> CameraConfig | None:
@@ -1407,6 +1453,30 @@ def _parse_emitter_layout_config(data: Any) -> EmitterLayoutConfig:
             value = default
         values[field_name] = value
     return EmitterLayoutConfig(**values)
+
+
+def _parse_validation_receipt_reuse_config(
+    data: Any,
+) -> ValidationReceiptReuseConfig:
+    """Parse opt-in local reuse without treating truthy strings as enabled."""
+
+    if not isinstance(data, dict):
+        return ValidationReceiptReuseConfig()
+    values = {}
+    for key in (
+        "reuse_verified_vti_receipts",
+        "reuse_verified_streamlines_cache_receipts",
+    ):
+        value = data.get(key, False)
+        if not isinstance(value, bool):
+            LOGGER.warning(
+                "Unsupported validation_receipts.%s=%r; using false.",
+                key,
+                value,
+            )
+            value = False
+        values[key] = value
+    return ValidationReceiptReuseConfig(**values)
 
 
 def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:

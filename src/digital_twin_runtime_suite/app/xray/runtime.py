@@ -38,6 +38,74 @@ class XRayRuntimeMixin(XRayMaterialMixin):
     XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
     XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
+    def xray_target_snapshot(self):
+        """Expose manual and temporary target ownership without UI state."""
+
+        return self._xray_target_state.snapshot
+
+    def apply_manual_xray_material_in_kit(
+        self,
+        xray: XRayMaterialConfig,
+        target_ids: frozenset[str],
+    ) -> XRayApplyResult:
+        """Apply operator selection while respecting a temporary override."""
+
+        self._xray_target_state.set_manual_target_ids(target_ids)
+        return self.apply_xray_material_in_kit(
+            xray,
+            self._xray_target_state.snapshot.effective_target_ids,
+        )
+
+    def apply_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
+        """Temporarily expose every configured X-Ray group for Heatmap preview."""
+
+        snapshot = self._xray_target_state.snapshot
+        target_ids = frozenset(
+            group.group_id for group in self._configured_xray_target_groups()
+        )
+        if not self._xray_target_state.activate_override(
+            "heatmap_preview",
+            target_ids,
+        ):
+            return XRayApplyResult(False, "Another X-Ray target override is active.")
+        result = self.apply_xray_material_in_kit(
+            self.config.chassis_presentation.materials.xray,
+            self._xray_target_state.snapshot.effective_target_ids,
+        )
+        if not result.success:
+            self._xray_target_state.restore(snapshot)
+        return result
+
+    def release_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
+        """Release Heatmap targets and restore the preserved manual selection."""
+
+        snapshot = self._xray_target_state.snapshot
+        if snapshot.override_owner is None:
+            return XRayApplyResult(True, "No Heatmap X-Ray override is active.")
+        if not self._xray_target_state.release_override("heatmap_preview"):
+            return XRayApplyResult(
+                False,
+                "A different X-Ray target override is active.",
+            )
+        result = self.apply_xray_material_in_kit(
+            self.config.chassis_presentation.materials.xray,
+            self._xray_target_state.snapshot.effective_target_ids,
+        )
+        if not result.success:
+            self._xray_target_state.restore(snapshot)
+        return result
+
+    def restore_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
+        """Reapply the existing Heatmap preview after a later mode step fails."""
+
+        snapshot = self._xray_target_state.snapshot
+        if snapshot.override_owner != "heatmap_preview":
+            return XRayApplyResult(False, "Heatmap X-Ray override is unavailable.")
+        return self.apply_xray_material_in_kit(
+            self.config.chassis_presentation.materials.xray,
+            snapshot.effective_target_ids,
+        )
+
     def apply_xray_material_in_kit(
         self, xray: XRayMaterialConfig, selected_target_ids: frozenset[str]
     ) -> XRayApplyResult:
@@ -102,6 +170,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 self._reapply_front_panel_indicator_current_state(
                     stage, Gf, Sdf, Usd, UsdShade
                 )
+            self._xray_material_active = True
             self._start_xray_material_performance_sampler()
             self._log_xray_lifecycle_diagnostic(
                 carb,
@@ -163,6 +232,9 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         import omni.usd
 
         try:
+            if not self._xray_material_active:
+                self._stop_xray_material_performance_sampler()
+                return False
             stage = omni.usd.get_context().get_stage()
             material = stage.GetPrimAtPath(self.XRAY_MATERIAL_PATH) if stage else None
             if not material or not material.IsValid():
@@ -287,6 +359,8 @@ class XRayRuntimeMixin(XRayMaterialMixin):
 
         stage = omni.usd.get_context().get_stage()
         if not stage:
+            self._xray_material_active = False
+            self._stop_xray_material_performance_sampler()
             return XRayApplyResult(True, "X-Ray is inactive; no open stage.")
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
@@ -377,6 +451,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 "X-Ray binding cleanup did not remove: "
                 + self._format_xray_mismatch_paths(cleanup_failures)
             )
+        self._xray_material_active = False
         self._stop_xray_material_performance_sampler()
         self._xray_session_binding_snapshots.clear()
         self._xray_baseline_composed_bindings.clear()

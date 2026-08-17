@@ -7,8 +7,6 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
@@ -206,13 +204,14 @@ def test_cache_without_raw_speed_contract_is_stale_after_profile_extension(
     assert validation.message == "Cache settings or seed are stale."
 
 
-def test_profile_must_be_previewed_before_freeze_or_cache_build() -> None:
+def test_source_controlled_profile_is_accepted_after_runtime_reset() -> None:
     runtime = _ProfileRuntime()
 
-    with pytest.raises(RuntimeError, match="Preview Production Profile"):
+    assert runtime.is_streamlines_production_profile_frozen() is True
+    assert (
         runtime.accept_streamlines_production_profile()
-    with pytest.raises(RuntimeError, match="Accept Production Streamlines Profile"):
-        asyncio.run(runtime.build_validate_production_cache_set_in_kit())
+        == PRODUCTION_STREAMLINES_PROFILE
+    )
 
 
 def test_frozen_profile_reuses_four_independently_valid_caches(
@@ -256,9 +255,7 @@ class _CacheSetRuntime(StreamlinesCacheRuntimeMixin):
     def __init__(self, repo_root: Path, failed_workload: str | None) -> None:
         self.config = SimpleNamespace(repo_root=repo_root)
         self._flow_lifecycle_state = "DETACHED"
-        self._streamlines_profile_state = (
-            ProductionStreamlinesProfileState().mark_previewed().freeze()
-        )
+        self._streamlines_profile_state = ProductionStreamlinesProfileState()
         self.failed_workload = failed_workload
         self.build_calls: list[str] = []
         self.targets = tuple(

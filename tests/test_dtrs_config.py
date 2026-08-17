@@ -20,6 +20,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    ValidationReceiptReuseConfig,
     VisibilityGroupConfig,
     chassis_presentation_with_operator_state,
 )
@@ -714,6 +715,76 @@ def test_runtime_controller_saves_and_clears_lighting_override(tmp_path):
     assert not local_path.exists()
     assert config.lighting.hdri_path == "hdri/base.exr"
     assert config.lighting.intensity == 10.0
+
+
+def test_validation_receipt_reuse_is_opt_in_by_default():
+    config = RuntimeConfig.load(
+        Path("configs/digital_twin_runtime_suite.toml"),
+        apply_local_overrides=False,
+    )
+
+    assert config.validation_receipts == ValidationReceiptReuseConfig()
+
+
+def test_validation_receipt_reuse_flags_survive_controller_restart(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+
+    local_path = controller.save_validation_receipt_reuse_override(
+        reuse_verified_vti_receipts=True,
+        reuse_verified_streamlines_cache_receipts=True,
+    )
+    restarted = RuntimeController(config_path)
+
+    assert local_path.exists()
+    assert restarted.config.validation_receipts == ValidationReceiptReuseConfig(
+        reuse_verified_vti_receipts=True,
+        reuse_verified_streamlines_cache_receipts=True,
+    )
+
+
+def test_validation_receipt_reuse_flags_are_independent(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+
+    controller.save_validation_receipt_reuse_override(
+        reuse_verified_vti_receipts=True,
+        reuse_verified_streamlines_cache_receipts=False,
+    )
+    assert RuntimeConfig.load(config_path).validation_receipts == (
+        ValidationReceiptReuseConfig(
+            reuse_verified_vti_receipts=True,
+            reuse_verified_streamlines_cache_receipts=False,
+        )
+    )
+
+    controller.save_validation_receipt_reuse_override(
+        reuse_verified_vti_receipts=False,
+        reuse_verified_streamlines_cache_receipts=True,
+    )
+    assert RuntimeConfig.load(config_path).validation_receipts == (
+        ValidationReceiptReuseConfig(
+            reuse_verified_vti_receipts=False,
+            reuse_verified_streamlines_cache_receipts=True,
+        )
+    )
+
+
+def test_saving_another_override_preserves_validation_receipt_flags(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+    controller.save_validation_receipt_reuse_override(
+        reuse_verified_vti_receipts=True,
+        reuse_verified_streamlines_cache_receipts=True,
+    )
+
+    controller.save_smoke_tuning_override(SmokeTuningConfig(density=1.5))
+    reloaded = RuntimeConfig.load(config_path)
+
+    assert reloaded.validation_receipts.reuse_verified_vti_receipts is True
+    assert (
+        reloaded.validation_receipts.reuse_verified_streamlines_cache_receipts is True
+    )
 
 
 def test_runtime_controller_persists_200ms_streamlines_presentation_period(

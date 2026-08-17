@@ -75,6 +75,7 @@ class _JobResult:
     receipt: PreflightValidationReceipt | None = None
     reason: str = ""
     reused: bool = False
+    receipt_source: str = "NONE"
 
 
 class AttachValidationLease:
@@ -412,9 +413,15 @@ class BackgroundAirflowValidationCoordinator:
         self._active_job = job
         try:
             signature = self._signature_builder(job.dataset, self._velocity_field_name)
-            cached_receipt = self._validation_cache.lookup(signature).preflight
+            lookup = self._validation_cache.lookup(signature)
+            cached_receipt = lookup.preflight
             if cached_receipt:
-                result = _JobResult("PASS", receipt=cached_receipt, reused=True)
+                result = _JobResult(
+                    "PASS",
+                    receipt=cached_receipt,
+                    reused=True,
+                    receipt_source=lookup.receipt_source,
+                )
                 prefix = (
                     "DTRS AIRFLOW BACKGROUND VALIDATION"
                     if job.priority == "BACKGROUND"
@@ -422,6 +429,9 @@ class BackgroundAirflowValidationCoordinator:
                 )
                 self._log(
                     f"{prefix} | REUSED | selector={job.selector} "
+                    f"| receipt_source={lookup.receipt_source} "
+                    f"| current_cache_location={lookup.cache_location} "
+                    "| validation_executed=False "
                     f"| receipt={cached_receipt.signature.compact_digest}"
                 )
             else:
@@ -430,10 +440,21 @@ class BackgroundAirflowValidationCoordinator:
                     f"| selector={job.selector} "
                     f"| attempt={job.attempt}/{self.MAX_ATTEMPTS}"
                 )
-                receipt, reused = await self._validate_dataset(
+                receipt, reused, receipt_source = await self._validate_dataset(
                     job.dataset, job.cancel_requested
                 )
-                result = _JobResult("PASS", receipt=receipt, reused=reused)
+                result = _JobResult(
+                    "PASS",
+                    receipt=receipt,
+                    reused=reused,
+                    receipt_source=receipt_source,
+                )
+                self._log(
+                    "DTRS AIRFLOW VALIDATION | VALIDATED "
+                    f"| selector={job.selector} | receipt_source=FRESH "
+                    "| validation_executed=True "
+                    f"| receipt={receipt.signature.compact_digest}"
+                )
         except airflow_preflight.TemporalVtiValidationCancelled:
             result = _JobResult("CANCELLED")
         except Exception as error:
@@ -448,11 +469,12 @@ class BackgroundAirflowValidationCoordinator:
         self,
         dataset: AirflowDataset,
         cancel_requested: Event,
-    ) -> tuple[PreflightValidationReceipt, bool]:
+    ) -> tuple[PreflightValidationReceipt, bool, str]:
         signature = self._signature_builder(dataset, self._velocity_field_name)
         lookup = self._validation_cache.lookup(signature)
         if lookup.preflight:
-            return lookup.preflight, True
+            return lookup.preflight, True, lookup.receipt_source
+        self._validation_cache.record_expensive_preflight_call()
         metadata, grid_match = await asyncio.to_thread(
             self._preflight_validator,
             dataset.velocity_vti_sequence_paths,
@@ -472,6 +494,7 @@ class BackgroundAirflowValidationCoordinator:
         return (
             self._validation_cache.store_preflight(signature, metadata, grid_match),
             False,
+            "FRESH",
         )
 
     def _take_queued_job(self, selector: str) -> _ValidationJob | None:

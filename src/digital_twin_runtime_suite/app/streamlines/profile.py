@@ -7,7 +7,6 @@ import json
 import math
 from dataclasses import dataclass
 
-PROFILE_STATE_CANDIDATE = "CANDIDATE"
 PROFILE_STATE_FROZEN = "FROZEN"
 
 
@@ -104,11 +103,11 @@ PRODUCTION_STREAMLINES_PROFILE = ProductionStreamlinesProfile()
 
 @dataclass(frozen=True)
 class ProductionStreamlinesProfileState:
-    """Session acceptance state; it never changes the profile signature."""
+    """Source-controlled acceptance state for the immutable production profile."""
 
     profile: ProductionStreamlinesProfile = PRODUCTION_STREAMLINES_PROFILE
-    state: str = PROFILE_STATE_CANDIDATE
-    previewed: bool = False
+    state: str = PROFILE_STATE_FROZEN
+    previewed: bool = True
 
     @property
     def frozen(self) -> bool:
@@ -117,21 +116,11 @@ class ProductionStreamlinesProfileState:
         return self.state == PROFILE_STATE_FROZEN
 
     def mark_previewed(self) -> "ProductionStreamlinesProfileState":
-        """Record successful representative previews before operator acceptance."""
+        """Retain the accepted profile after an optional maintenance preview."""
 
-        return ProductionStreamlinesProfileState(
-            profile=self.profile,
-            state=self.state,
-            previewed=True,
-        )
+        return self
 
     def freeze(self) -> "ProductionStreamlinesProfileState":
-        """Freeze only a previewed profile for the four-cache production build."""
+        """Return the already accepted source-controlled production profile."""
 
-        if not self.previewed:
-            raise RuntimeError("Preview Production Profile before accepting it.")
-        return ProductionStreamlinesProfileState(
-            profile=self.profile,
-            state=PROFILE_STATE_FROZEN,
-            previewed=True,
-        )
+        return self

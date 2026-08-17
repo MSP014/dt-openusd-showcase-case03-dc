@@ -7,7 +7,6 @@ import contextlib
 import re
 import sys
 import time
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -30,17 +29,6 @@ COMPACT_TEXT_LENGTH = 44
 # validation logs. They make shared Flow state observable without changing
 # production lifecycle ownership or suppressing errors.
 STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = False
-
-# Phase 3.3 has passed. Its guided Flow scenario is retained for regression
-# coverage but must not compete with the active Streamlines acceptance flow.
-PHASE33_MANUAL_ACCEPTANCE_ENABLED = False
-
-# Phase 3.5 is closed. Its profile/cache/sanity actions remain callable backend
-# operations but are no longer part of the normal UI surface.
-PHASE35_MANUAL_ACCEPTANCE_ENABLED = False
-
-# Retained only by hidden Phase 3.5 backend helpers and their focused tests.
-PRODUCTION_CACHE_SANITY_ACTION = "Run Production Cache Sanity Check"
 
 
 def _compact_text(value: str, max_length: int = COMPACT_TEXT_LENGTH) -> str:
@@ -93,22 +81,27 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._load_task = None
         self._reload_task = None
         self._airflow_task = None
+        self._visualization_task = None
+        self._scheduled_visualization_mode = None
         self._airflow_transition_task = None
         self._airflow_detach_requested = False
-        self._phase33_airflow_acceptance = None
-        self._phase35_terminal_emitted = False
         self._airflow_cache_selector_label = None
         self._streamlines_status_label = None
         self._streamlines_cache_build_button = None
         self._streamlines_cache_load_button = None
-        self._streamlines_profile_preview_button = None
-        self._streamlines_profile_accept_button = None
-        self._streamlines_cache_set_button = None
-        self._streamlines_cache_sanity_button = None
-        self._streamlines_cadence_characterization_button = None
-        self._streamlines_fast_cadence_check_button = None
-        self._streamlines_200ms_wrap_recheck_button = None
         self._airflow_background_validation_task = None
+        self._streamlines_cache_validation_task = None
+        self._streamlines_cache_validation_workload = None
+        self._streamlines_receipt_sweep_task = None
+        self._validation_receipt_summary_task = None
+        self._validation_receipt_acceptance_task = None
+        self._validation_receipt_acceptance = None
+        self._validation_receipt_checkpoint = None
+        self._validation_receipt_acceptance_owns_actions = False
+        self._validation_receipt_acceptance_user_mode = None
+        self._reuse_vti_receipts_model = None
+        self._reuse_streamlines_receipts_model = None
+        self._validation_receipt_status_label = None
         self._view_task = None
         self._auxiliary_windows_task = None
         self._smoke_tuning_combos = {}
@@ -132,6 +125,11 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._chassis_visibility_models = {}
         self._normal_map_scale_model = None
         self._xray_target_models = {}
+        self._xray_target_checkboxes = {}
+        self._visualization_combo = None
+        self._visualization_readiness_labels = {}
+        self._updating_visualization_mode = False
+        self._visualization_acceptance = None
         self._face_panel_open_model = None
         self._face_panel_action_label = None
         self._face_panel_open_state = False
@@ -186,14 +184,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
         )
         self._build_controller()
-        from digital_twin_runtime_suite.app.airflow_acceptance import (
-            Phase33AcceptanceState,
+        self._validation_receipt_checkpoint = (
+            self._controller.load_validation_receipt_acceptance_checkpoint()
         )
-
-        self._phase33_airflow_acceptance = Phase33AcceptanceState()
-        if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
-            self._start_background_airflow_validation()
         self._build_window()
+        self._initialize_validation_receipt_acceptance()
+        if self._validation_receipt_checkpoint is None:
+            self._start_validation_receipt_background_work()
         asyncio.ensure_future(self._dock_left())
         self._auxiliary_windows_task = asyncio.ensure_future(
             self._hide_auxiliary_kit_windows()
@@ -207,13 +204,19 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     def on_shutdown(self) -> None:
         if self._controller:
             self._controller.stop_background_airflow_validation()
+            self._controller.cancel_visualization_transition()
         for task_name in (
             "_load_task",
             "_reload_task",
             "_lighting_task",
             "_airflow_task",
+            "_visualization_task",
             "_airflow_transition_task",
             "_airflow_background_validation_task",
+            "_streamlines_cache_validation_task",
+            "_streamlines_receipt_sweep_task",
+            "_validation_receipt_summary_task",
+            "_validation_receipt_acceptance_task",
             "_view_task",
             "_auxiliary_windows_task",
         ):
@@ -246,7 +249,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._controller.clear_flow_validation_cache()
         if self._motion_controller:
             self._motion_controller.reset()
-            self._motion_controller = None
+        self._motion_controller = None
         self._telemetry_provider = None
         self._telemetry_latch = None
         self._controller = None
@@ -288,6 +291,526 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     f"DTRS AIRFLOW BACKGROUND VALIDATION | ABORTED | {error}"
                 )
             )
+
+    def _schedule_current_streamlines_cache_validation(self) -> None:
+        """Request one owner-managed cache receipt when workload identity changes."""
+
+        if not self._controller or not self._telemetry_provider:
+            return
+        workload = self._telemetry_provider.mode
+        task = self._streamlines_cache_validation_task
+        if (
+            workload == self._streamlines_cache_validation_workload
+            and task is not None
+            and not task.done()
+        ):
+            return
+        self._streamlines_cache_validation_workload = workload
+        self._streamlines_cache_validation_task = asyncio.ensure_future(
+            self._run_current_streamlines_cache_validation()
+        )
+
+    async def _run_current_streamlines_cache_validation(self) -> None:
+        """Publish one background receipt without blocking Kit or the UI loop."""
+
+        try:
+            ensure_validation = getattr(
+                self._controller,
+                "ensure_current_streamlines_cache_validation_in_background",
+            )
+            await ensure_validation()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            carb.log_warn(
+                _with_dtrs_local_timestamp(
+                    "DTRS STREAMLINES | CACHE_VALIDATION | FAILED " f"| {error}"
+                )
+            )
+
+    def _start_validation_receipt_background_work(self) -> None:
+        """Start bounded validation work; never create a permanent polling loop."""
+
+        if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
+            task = self._airflow_background_validation_task
+            if task is None or task.done():
+                self._start_background_airflow_validation()
+        preferences = self._controller.config.validation_receipts
+        if preferences.reuse_verified_streamlines_cache_receipts:
+            task = self._streamlines_receipt_sweep_task
+            if task is None or task.done():
+                self._streamlines_receipt_sweep_task = asyncio.ensure_future(
+                    self._run_streamlines_receipt_sweep()
+                )
+        else:
+            self._schedule_current_streamlines_cache_validation()
+        summary = self._validation_receipt_summary_task
+        if summary is None or summary.done():
+            self._validation_receipt_summary_task = asyncio.ensure_future(
+                self._report_validation_receipt_startup_summary()
+            )
+
+    async def _run_streamlines_receipt_sweep(self):
+        """Validate or reuse all configured caches through the existing owner."""
+
+        def status(message: str) -> None:
+            carb.log_warn(
+                _with_dtrs_local_timestamp(
+                    "DTRS VALIDATION RECEIPTS | PROGRESS | " + message
+                )
+            )
+
+        try:
+            ensure_validations = getattr(
+                self._controller,
+                "ensure_configured_streamlines_cache_validations_in_background",
+            )
+            return await ensure_validations(status_callback=status)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            carb.log_error(
+                _with_dtrs_local_timestamp(
+                    "DTRS VALIDATION RECEIPTS | STREAMLINES | FAIL | " f"reason={error}"
+                )
+            )
+            return ()
+
+    async def _report_validation_receipt_startup_summary(self) -> None:
+        """Emit one compact source summary after bounded startup work settles."""
+
+        tasks = tuple(
+            task
+            for task in (
+                self._airflow_background_validation_task,
+                self._streamlines_receipt_sweep_task,
+                self._streamlines_cache_validation_task,
+            )
+            if task is not None
+        )
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        metrics = self._controller.validation_receipt_metrics_snapshot()
+        message = "\n".join(
+            (
+                "DTRS VALIDATION RECEIPTS | STARTUP SUMMARY",
+                "VTI:",
+                f"  persisted_reused={metrics.vti.persisted_reused}",
+                f"  session_reused={metrics.vti.session_reused}",
+                f"  fresh_validated={metrics.vti.fresh_validated}",
+                f"  invalidated={metrics.vti.invalidated}",
+                "Streamlines:",
+                "  persisted_reused=" f"{metrics.streamlines.persisted_reused}",
+                f"  session_reused={metrics.streamlines.session_reused}",
+                f"  fresh_validated={metrics.streamlines.fresh_validated}",
+                f"  invalidated={metrics.streamlines.invalidated}",
+            )
+        )
+        carb.log_warn(_with_dtrs_local_timestamp(message))
+
+    def _initialize_validation_receipt_acceptance(self) -> None:
+        """Start the appropriate generic guided session after UI construction."""
+
+        if self._validation_receipt_checkpoint is not None:
+            self._validation_receipt_acceptance_owns_actions = True
+            self._validation_receipt_acceptance_task = asyncio.ensure_future(
+                self._run_validation_receipt_acceptance_session2()
+            )
+            return
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            GuidedAcceptanceSession,
+        )
+
+        self._validation_receipt_acceptance = GuidedAcceptanceSession(("SESSION_1",))
+        self._validation_receipt_acceptance.begin()
+        preferences = self._controller.config.validation_receipts
+        if (
+            preferences.reuse_verified_vti_receipts
+            and preferences.reuse_verified_streamlines_cache_receipts
+        ):
+            return
+        self._validation_receipt_acceptance_owns_actions = True
+        self._report_validation_receipt_acceptance(
+            "READY",
+            "View validation-reuse settings are available.",
+            next_action=(
+                'Enable "Reuse verified VTI receipts" and '
+                '"Reuse verified Streamlines cache receipts".'
+            ),
+        )
+
+    def _begin_validation_receipt_acceptance_session1(self) -> None:
+        """Establish all persisted evidence after both settings are saved."""
+
+        task = self._validation_receipt_acceptance_task
+        if task is not None and not task.done():
+            return
+        self._validation_receipt_acceptance_owns_actions = True
+        self._report_validation_receipt_acceptance(
+            "START",
+            "Establishing persisted validation receipts for VTI datasets and "
+            "Streamlines caches.",
+        )
+        self._start_validation_receipt_background_work()
+        self._validation_receipt_acceptance_task = asyncio.ensure_future(
+            self._run_validation_receipt_acceptance_session1()
+        )
+
+    async def _run_validation_receipt_acceptance_session1(self) -> None:
+        """Persist four VTI and four Streamlines receipts, then request restart."""
+
+        if not await self._wait_for_validation_receipt_tasks("SESSION_1"):
+            return
+        try:
+            identities = await asyncio.to_thread(
+                self._controller.validation_receipt_identity_snapshot
+            )
+            coverage = self._controller.validation_receipt_coverage_snapshot(identities)
+        except Exception as error:
+            self._fail_validation_receipt_acceptance(str(error))
+            return
+        preferences = self._controller.config.validation_receipts
+        if not (
+            preferences.reuse_verified_vti_receipts
+            and preferences.reuse_verified_streamlines_cache_receipts
+        ):
+            self._fail_validation_receipt_acceptance(
+                "Receipt reuse settings were not persisted."
+            )
+            return
+        if coverage["vti_total"] != 4 or coverage["vti_valid"] != 4:
+            self._fail_validation_receipt_acceptance(
+                "Not all configured VTI preflight receipts were persisted."
+            )
+            return
+        if coverage["streamlines_total"] != 4 or coverage["streamlines_valid"] != 4:
+            self._fail_validation_receipt_acceptance(
+                "Not all configured Streamlines VALID receipts were persisted."
+            )
+            return
+        self._controller.write_validation_receipt_acceptance_checkpoint(
+            {
+                "phase": "AWAITING_RESTART",
+                "baseline_identities": identities,
+            }
+        )
+        session = getattr(self, "_validation_receipt_acceptance", None)
+        if session is None or not session.record("SESSION_1"):
+            return
+        self._report_validation_receipt_acceptance(
+            "COMPLETE",
+            "Persisted validation baseline established. "
+            f"VTI persisted_receipts={coverage['vti_valid']}/"
+            f"{coverage['vti_total']}; Streamlines persisted_receipts="
+            f"{coverage['streamlines_valid']}/{coverage['streamlines_total']}; "
+            "settings_persisted=True.",
+            next_action=(
+                "Restart DTRS without changing VTI datasets, Streamlines caches, "
+                "or validation settings."
+            ),
+        )
+
+    async def _run_validation_receipt_acceptance_session2(self) -> None:
+        """Prove cheap reuse, then wait for explicit production UI actions."""
+
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            GuidedAcceptanceSession,
+        )
+
+        self._validation_receipt_acceptance = GuidedAcceptanceSession(
+            ("RESTORED", "Smoke", "Normal")
+        )
+        self._validation_receipt_acceptance.begin()
+        try:
+            identities = await asyncio.to_thread(
+                self._controller.validation_receipt_identity_snapshot
+            )
+        except Exception as error:
+            self._fail_validation_receipt_acceptance(str(error))
+            return
+        baseline = self._validation_receipt_checkpoint.get("baseline_identities")
+        if identities != baseline:
+            self._fail_validation_receipt_acceptance(
+                "Acceptance input changed between sessions; persisted-reuse "
+                "proof is no longer a controlled comparison."
+            )
+            return
+        preferences = self._controller.config.validation_receipts
+        if not (
+            preferences.reuse_verified_vti_receipts
+            and preferences.reuse_verified_streamlines_cache_receipts
+        ):
+            self._fail_validation_receipt_acceptance(
+                "Receipt reuse settings did not survive restart."
+            )
+            return
+        coverage_before = self._controller.validation_receipt_coverage_snapshot(
+            identities
+        )
+        if (
+            coverage_before["vti_total"] != 4
+            or coverage_before["vti_valid"] != 4
+            or coverage_before["streamlines_total"] != 4
+            or coverage_before["streamlines_valid"] != 4
+        ):
+            self._fail_validation_receipt_acceptance(
+                "Persisted receipt store does not cover the four controlled VTI "
+                "datasets and Streamlines caches."
+            )
+            return
+        startup_failures = self._validation_receipt_normal_failures()
+        if startup_failures:
+            self._fail_validation_receipt_acceptance(
+                "Session 2 did not start in clean Normal state: "
+                + "; ".join(startup_failures)
+                + "."
+            )
+            return
+        self._report_validation_receipt_acceptance(
+            "READY",
+            "Persisted receipt store and controlled resource identities match.",
+            next_action="Wait for persisted receipt reuse verification.",
+        )
+        self._report_validation_receipt_acceptance(
+            "START",
+            "Verifying persisted receipt reuse without expensive validators.",
+        )
+        self._start_validation_receipt_background_work()
+        if not await self._wait_for_validation_receipt_tasks("SESSION_2"):
+            return
+        coverage = self._controller.validation_receipt_coverage_snapshot(identities)
+        metrics = self._controller.validation_receipt_metrics_snapshot()
+        failures = []
+        if coverage["vti_valid"] != 4 or metrics.vti.persisted_reused != 4:
+            failures.append("VTI persisted reuse was not 4/4")
+        if metrics.vti.fresh_validated or metrics.vti.expensive_validation_calls:
+            failures.append("an expensive VTI preflight ran unexpectedly")
+        if (
+            coverage["streamlines_valid"] != 4
+            or metrics.streamlines.persisted_reused != 4
+        ):
+            failures.append("Streamlines persisted reuse was not 4/4")
+        if (
+            metrics.streamlines.fresh_validated
+            or metrics.streamlines.expensive_validation_calls
+            or metrics.streamlines.geometry_sha256_recomputed
+        ):
+            failures.append("Streamlines strong validation ran unexpectedly")
+        if metrics.vti.invalidated or metrics.streamlines.invalidated:
+            failures.append("a controlled resource identity was invalidated")
+        if failures:
+            self._fail_validation_receipt_acceptance("; ".join(failures) + ".")
+            return
+        session = self._validation_receipt_acceptance
+        if session is None or not session.record("RESTORED"):
+            return
+        self._report_validation_receipt_acceptance(
+            "COMPLETE",
+            "Persisted receipts restored through the cheap path. "
+            "VTI persisted_reused=4/4; "
+            "fresh_validated=0; invalidated=0; expensive_preflight_calls=0; "
+            "Streamlines persisted_reused=4/4; fresh_validated=0; "
+            "invalidated=0; geometry_sha256_recomputed=0; "
+            "strong_validation_calls=0.",
+            next_action=(
+                'Select "Smoke" in "Visualization" to verify the persisted VTI '
+                "receipt through the production Flow consumer."
+            ),
+        )
+
+    def _begin_validation_receipt_consumer_action(self, mode) -> None:
+        """Observe only explicit Visualization selector actions in Session 2."""
+
+        session = getattr(self, "_validation_receipt_acceptance", None)
+        if (
+            session is None
+            or session.failed
+            or session.terminal_emitted
+            or session.expected_milestone not in {"Smoke", "Normal"}
+        ):
+            return
+        if session.expected_milestone != mode.value:
+            self._fail_validation_receipt_acceptance(
+                "Unexpected Visualization selection: expected "
+                f"{session.expected_milestone}, got {mode.value}."
+            )
+            return
+        self._validation_receipt_acceptance_user_mode = mode
+        status = (
+            "Verifying persisted VTI receipt through the production Flow consumer."
+            if mode.value == "Smoke"
+            else "Verifying return to clean Normal visualization state."
+        )
+        self._report_validation_receipt_acceptance("START", status)
+
+    def _complete_validation_receipt_consumer_action(self, mode, result) -> None:
+        """Validate one explicitly selected Session 2 production transition."""
+
+        if self._validation_receipt_acceptance_user_mode is not mode:
+            return
+        self._validation_receipt_acceptance_user_mode = None
+        session = self._validation_receipt_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        if mode.value == "Smoke":
+            failures = self._validation_receipt_smoke_failures(result)
+            completion = (
+                "Persisted VTI receipt accepted by the production Flow consumer. "
+                "persisted_receipt_consumer_check=PASS; KitCAE_grid_contract=PASS."
+            )
+            next_action = 'Select "Normal" in "Visualization".'
+        else:
+            failures = self._validation_receipt_normal_failures(result)
+            completion = (
+                "Production visualization returned to Normal; Flow and "
+                "Streamlines are clean."
+            )
+            next_action = None
+        if failures:
+            self._fail_validation_receipt_acceptance("; ".join(failures) + ".")
+            return
+        if not session.record(mode.value):
+            self._fail_validation_receipt_acceptance(
+                "Receipt acceptance action could not be recorded in order."
+            )
+            return
+        self._report_validation_receipt_acceptance(
+            "COMPLETE",
+            completion,
+            next_action=next_action,
+        )
+        if next_action is not None or not session.complete():
+            return
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            format_manual_acceptance_test_complete,
+        )
+
+        carb.log_warn(
+            _with_dtrs_local_timestamp(
+                format_manual_acceptance_test_complete(
+                    "Persisted VTI and Streamlines validation receipt reuse passed."
+                )
+            )
+        )
+        self._controller.clear_validation_receipt_acceptance_checkpoint()
+        self._validation_receipt_checkpoint = None
+        self._validation_receipt_acceptance_owns_actions = False
+
+    def _validation_receipt_smoke_failures(self, result) -> list[str]:
+        """Return exact production-consumer failures without rerunning preflight."""
+
+        consumer = self._controller.vti_receipt_consumer_check_snapshot()
+        metrics = self._controller.validation_receipt_metrics_snapshot()
+        snapshot = self._controller.visualization_snapshot()
+        failures = []
+        if not result.success:
+            failures.append(f"real Smoke Attach failed: {result.message}")
+        if snapshot.committed.value != "Smoke" or snapshot.pending is not None:
+            failures.append("Smoke was not committed cleanly")
+        if consumer.receipt_source != "PERSISTED":
+            failures.append("Nominal Flow consumer did not use PERSISTED evidence")
+        if consumer.selector != "server/load_normal":
+            failures.append("consumer check did not attach the Nominal VTI dataset")
+        if not consumer.kit_cae_grid_contract_passed:
+            failures.append("Kit-CAE imported grid contract failed")
+        if not consumer.flow_initial_readiness_passed:
+            failures.append("Flow initial readiness failed")
+        if metrics.vti.expensive_validation_calls:
+            failures.append("consumer check unexpectedly ran expensive VTI preflight")
+        return failures
+
+    def _validation_receipt_normal_failures(self, result=None) -> list[str]:
+        """Verify that acceptance leaves the ordinary startup presentation state."""
+
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
+        )
+
+        snapshot = self._controller.visualization_snapshot()
+        presentation = (
+            self._controller.primary_visualization_presentation_snapshot_in_kit()
+        )
+        xray = self._controller.xray_target_snapshot()
+        combo_model = self._combo_index_model(self._visualization_combo)
+        combo_is_normal = combo_model is not None and self._model_int(combo_model) == 0
+        failures = []
+        if result is not None and not result.success:
+            failures.append(f"Normal transition failed: {result.message}")
+        if snapshot.committed is not VisualizationMode.NORMAL or snapshot.pending:
+            failures.append("Normal was not committed cleanly")
+        if self._controller._flow_lifecycle_state != "DETACHED":
+            failures.append("Flow lifecycle is not detached")
+        if presentation.flow_source_prepared:
+            failures.append("Flow source remains prepared")
+        if presentation.smoke_presentation_visible:
+            failures.append("Smoke renderer remains active")
+        if presentation.streamlines_presentation_visible:
+            failures.append("Streamlines presentation remains active")
+        if presentation.streamlines_scheduler_tasks:
+            failures.append("Streamlines scheduler remains active")
+        if xray.override_owner is not None:
+            failures.append("a visualization-owned X-Ray override remains active")
+        if not combo_is_normal:
+            failures.append("Visualization ComboBox does not display Normal")
+        return failures
+
+    async def _wait_for_validation_receipt_tasks(self, session_name: str) -> bool:
+        """Wait with bounded five-second diagnostics only during active work."""
+
+        started_at = time.monotonic()
+        next_waiting_at = started_at + 5.0
+        while True:
+            tasks = tuple(
+                task
+                for task in (
+                    self._airflow_background_validation_task,
+                    self._streamlines_receipt_sweep_task,
+                )
+                if task is not None and not task.done()
+            )
+            if not tasks:
+                return True
+            now = time.monotonic()
+            if now >= next_waiting_at:
+                self._report_validation_receipt_acceptance(
+                    "WAITING",
+                    f"{session_name} validation remains active; "
+                    f"elapsed_s={now - started_at:.1f}.",
+                )
+                next_waiting_at = now + 5.0
+            await asyncio.sleep(0.1)
+
+    def _fail_validation_receipt_acceptance(self, reason: str) -> None:
+        """Stop the current guided session with one exact failure reason."""
+
+        session = self._validation_receipt_acceptance
+        if session is not None:
+            session.mark_failed()
+        self._report_validation_receipt_acceptance("FAIL", reason)
+        self._validation_receipt_acceptance_owns_actions = False
+
+    @staticmethod
+    def _report_validation_receipt_acceptance(
+        event: str,
+        status: str,
+        next_action: str | None = None,
+    ) -> None:
+        """Use the generic manual-acceptance formatter for receipt verification."""
+
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            format_manual_acceptance_event,
+        )
+
+        carb.log_warn(
+            _with_dtrs_local_timestamp(
+                format_manual_acceptance_event(
+                    area="VALIDATION RECEIPTS | ACCEPTANCE",
+                    event=event,
+                    status=status,
+                    next_action=next_action,
+                )
+            )
+        )
 
     def _build_controller(self) -> None:
         source_root_setting = self._settings.get_as_string(
@@ -400,6 +923,19 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         self._grid_step_model = ui.SimpleFloatModel(config.grid.step)
         self._grid_width_model = ui.SimpleFloatModel(config.grid.width)
+        receipt_preferences = config.validation_receipts
+        self._reuse_vti_receipts_model = ui.SimpleBoolModel(
+            receipt_preferences.reuse_verified_vti_receipts
+        )
+        self._reuse_streamlines_receipts_model = ui.SimpleBoolModel(
+            receipt_preferences.reuse_verified_streamlines_cache_receipts
+        )
+        self._reuse_vti_receipts_model.add_value_changed_fn(
+            self._on_validation_receipt_reuse_changed
+        )
+        self._reuse_streamlines_receipts_model.add_value_changed_fn(
+            self._on_validation_receipt_reuse_changed
+        )
         self._camera_position_x_model = ui.SimpleFloatModel(0.0)
         self._camera_position_y_model = ui.SimpleFloatModel(0.0)
         self._camera_position_z_model = ui.SimpleFloatModel(0.0)
@@ -510,6 +1046,15 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     ),
                 )
                 self._build_config_section(
+                    "Visualization",
+                    self._build_visualization_controls,
+                )
+                self._build_config_section(
+                    "Development validation",
+                    self._build_validation_receipt_controls,
+                    collapsed=True,
+                )
+                self._build_config_section(
                     "Airflow cache",
                     self._build_airflow_cache_controls,
                 )
@@ -524,6 +1069,59 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 "Materials",
                 lambda: self._build_material_controls(presentation),
             )
+
+    def _build_validation_receipt_controls(self) -> None:
+        """Expose independent persisted-evidence preferences in the View tab."""
+
+        with ui.VStack(spacing=6, content_clipping=True):
+            with ui.HStack(height=24, spacing=6, content_clipping=True):
+                ui.Label(
+                    "Reuse verified VTI receipts",
+                    width=ui.Fraction(1),
+                )
+                ui.CheckBox(model=self._reuse_vti_receipts_model, width=24)
+            with ui.HStack(height=24, spacing=6, content_clipping=True):
+                ui.Label(
+                    "Reuse verified Streamlines cache receipts",
+                    width=ui.Fraction(1),
+                )
+                ui.CheckBox(
+                    model=self._reuse_streamlines_receipts_model,
+                    width=24,
+                )
+            self._validation_receipt_status_label = ui.Label(
+                "Receipt reuse is opt-in and identity checked.",
+                height=32,
+                word_wrap=True,
+            )
+
+    def _on_validation_receipt_reuse_changed(self, _model) -> None:
+        """Persist preferences immediately; validation remains background-owned."""
+
+        if not self._controller:
+            return
+        reuse_vti = bool(self._reuse_vti_receipts_model.as_bool)
+        reuse_streamlines = bool(self._reuse_streamlines_receipts_model.as_bool)
+        try:
+            path = self._controller.save_validation_receipt_reuse_override(
+                reuse_verified_vti_receipts=reuse_vti,
+                reuse_verified_streamlines_cache_receipts=reuse_streamlines,
+            )
+        except Exception as error:
+            message = f"Validation receipt settings were not saved: {error}"
+            if self._validation_receipt_status_label:
+                self._validation_receipt_status_label.text = _compact_text(message)
+                self._validation_receipt_status_label.tooltip = message
+            carb.log_error(_with_dtrs_local_timestamp(message))
+            return
+        message = f"Receipt reuse settings saved to {path.name}."
+        if self._validation_receipt_status_label:
+            self._validation_receipt_status_label.text = _compact_text(message)
+            self._validation_receipt_status_label.tooltip = message
+        if reuse_vti and reuse_streamlines:
+            self._begin_validation_receipt_acceptance_session1()
+        elif reuse_streamlines:
+            self._start_validation_receipt_background_work()
 
     def _build_material_controls(self, presentation) -> None:
         materials = presentation.materials
@@ -559,7 +1157,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     elided_text=True,
                     tooltip="Apply or release the production Fresnel material.",
                 )
-                ui.CheckBox(model=model)
+                self._xray_target_checkboxes[group.group_id] = ui.CheckBox(model=model)
         self._build_xray_fresnel_controls(presentation.materials.xray)
         ui.Button(
             "Apply",
@@ -1550,6 +2148,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             workload_mode = self._workload_modes[index]
             self._telemetry_provider.set_mode(workload_mode)
             self._log_workload_cache_mapping(workload_mode)
+            self._schedule_current_streamlines_cache_validation()
             self._refresh_airflow_cache_selector_label()
             self._schedule_attached_workload_transition(workload_mode)
             self._next_telemetry_ui_update = 0.0
@@ -1661,6 +2260,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 if now >= self._next_telemetry_ui_update:
                     self._update_telemetry_labels(displayed)
                     self._update_airflow_temporal_validation_status()
+                    self._update_visualization_controls()
                     if self._controller:
                         self._controller.apply_qled_display_snapshot_in_kit(displayed)
                     self._next_telemetry_ui_update = now + latest.refresh_interval_s
@@ -1697,6 +2297,353 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                         label.style = {
                             "color": (0xFF5C5CE6 if bool(metric.value) else 0xFF72B88A)
                         }
+
+    def _update_visualization_controls(self) -> None:
+        """Refresh mode/readiness labels from controller-owned read-only state."""
+
+        if not self._controller:
+            return
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
+        )
+
+        try:
+            readiness = self._controller.visualization_readiness()
+        except Exception as error:
+            readiness = None
+            message = f"Current workload readiness unavailable: {error}"
+        if readiness is not None:
+            for entry in readiness.entries:
+                label = self._visualization_readiness_labels.get(entry.mode)
+                if label:
+                    text = f"{entry.state}: {entry.message}"
+                    label.text = _compact_text(text)
+                    label.tooltip = text
+            self._announce_visualization_acceptance_when_ready(readiness)
+        else:
+            for label in self._visualization_readiness_labels.values():
+                label.text = _compact_text(message)
+                label.tooltip = message
+        snapshot = self._controller.visualization_snapshot()
+        combo_model = self._combo_index_model(self._visualization_combo)
+        if combo_model:
+            self._updating_visualization_mode = True
+            try:
+                combo_model.set_value(
+                    tuple(VisualizationMode).index(snapshot.committed)
+                )
+            finally:
+                self._updating_visualization_mode = False
+        self._sync_xray_target_controls()
+
+    def _sync_xray_target_controls(self) -> None:
+        """Reflect X-Ray's effective target owner without simulating UI callbacks."""
+
+        if not self._controller:
+            return
+        from digital_twin_runtime_suite.app.view_controls import bool_model_value
+
+        snapshot = self._controller.xray_target_snapshot()
+        effective = snapshot.effective_target_ids
+        override_active = snapshot.override_owner is not None
+        for group_id, model in self._xray_target_models.items():
+            expected = group_id in effective
+            if bool_model_value(model) != expected:
+                model.set_value(expected)
+            checkbox = self._xray_target_checkboxes.get(group_id)
+            if checkbox:
+                checkbox.enabled = not override_active
+
+    def _announce_visualization_acceptance_when_ready(self, readiness) -> None:
+        """Offer the real selector only when the first manual action is valid."""
+
+        if getattr(self, "_validation_receipt_acceptance_owns_actions", False):
+            return
+        if self._visualization_acceptance is not None:
+            return
+        snapshot = self._controller.visualization_snapshot()
+        smoke = next(
+            entry for entry in readiness.entries if entry.mode.value == "Smoke"
+        )
+        streamlines = next(
+            entry for entry in readiness.entries if entry.mode.value == "Streamlines"
+        )
+        if (
+            snapshot.committed.value != "Normal"
+            or snapshot.pending
+            or smoke.state != "READY"
+            or streamlines.state != "VALID"
+        ):
+            return
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            GuidedAcceptanceSession,
+            format_manual_acceptance_event,
+        )
+
+        self._visualization_acceptance = GuidedAcceptanceSession(
+            ("Smoke", "Streamlines", "Smoke", "Streamlines", "Smoke", "Normal")
+        )
+        self._visualization_acceptance.begin()
+        carb.log_warn(
+            _with_dtrs_local_timestamp(
+                format_manual_acceptance_event(
+                    area="VISUALIZATION | PHASE_4_2",
+                    event="READY",
+                    status=(
+                        "Current workload Smoke readiness and Streamlines cache "
+                        "are valid; committed=Normal."
+                    ),
+                    next_action='Select "Smoke" in "Visualization".',
+                )
+            )
+        )
+
+    def _report_visualization_acceptance_start(self, mode) -> None:
+        """Record a Phase 4.2 selection only after its action becomes valid."""
+
+        try:
+            self._announce_visualization_acceptance_when_ready(
+                self._controller.visualization_readiness()
+            )
+        except Exception:
+            # Manual guidance must never block a production mode request.
+            return
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        if session.expected_milestone != mode.value:
+            session.mark_failed()
+            self._report_visualization_acceptance_event(
+                "FAIL",
+                "Unexpected selector action: "
+                f"expected {session.expected_milestone}, got {mode.value}.",
+            )
+            return
+        self._report_visualization_acceptance_event(
+            "START",
+            f"Requested production visualization mode: {mode.value}.",
+        )
+        self._report_visualization_acceptance_event(
+            "PROGRESS",
+            f"Preparing production visualization mode: {mode.value}.",
+        )
+
+    def _report_visualization_acceptance_waiting_once(
+        self,
+        mode,
+        elapsed_seconds: int,
+    ) -> None:
+        """Emit one waiting record when a manual transition remains active."""
+
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        if session.expected_milestone != mode.value:
+            return
+        self._report_visualization_acceptance_event(
+            "WAITING",
+            "Production visualization transition remains active: "
+            f"{mode.value}; elapsed={elapsed_seconds} s.",
+        )
+
+    def _report_visualization_acceptance_result(self, mode, result) -> None:
+        """Advance Phase 4.2 evidence only after real mode postconditions."""
+
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        reason = self._visualization_acceptance_failure_reason(mode, result)
+        if reason is not None:
+            session.mark_failed()
+            self._report_visualization_acceptance_event("FAIL", reason)
+            return
+        if not session.record(mode.value):
+            session.mark_failed()
+            self._report_visualization_acceptance_event(
+                "FAIL",
+                "Manual acceptance transition could not be recorded in order.",
+            )
+            return
+        next_mode = session.expected_milestone
+        evidence = self._visualization_acceptance_evidence(mode)
+        completion = f"Committed={mode.value}; {result.message}; {evidence}"
+        if next_mode is None:
+            self._report_visualization_acceptance_event(
+                "COMPLETE",
+                completion,
+            )
+            if session.complete():
+                from digital_twin_runtime_suite.app.manual_acceptance import (
+                    format_manual_acceptance_test_complete,
+                )
+
+                carb.log_warn(
+                    _with_dtrs_local_timestamp(
+                        format_manual_acceptance_test_complete(
+                            "Phase 4.2 transactional Smoke/Streamlines transitions "
+                            "passed."
+                        )
+                    )
+                )
+            return
+        self._report_visualization_acceptance_event(
+            "COMPLETE",
+            completion,
+            next_action=f'Select "{next_mode}" in "Visualization".',
+        )
+
+    def _visualization_acceptance_evidence(self, mode) -> str:
+        """Format backend liveness facts already required before COMPLETE."""
+
+        presentation = (
+            self._controller.primary_visualization_presentation_snapshot_in_kit()
+        )
+        if mode.value == "Streamlines":
+            proof = self._controller.streamlines_cached_playback_advance_proof_in_kit()
+            return (
+                f"smoke_renderer_visible={presentation.smoke_presentation_visible}; "
+                "streamlines_visible="
+                f"{presentation.streamlines_presentation_visible}; "
+                f"scheduler_tasks={presentation.streamlines_scheduler_tasks}; "
+                f"initial_sample={proof.initial_sample_identity}; "
+                f"advanced_sample={proof.advanced_sample_identity}; "
+                f"sample_advanced={proof.sample_advanced}"
+            )
+        flow_is_attached = self._controller._flow_lifecycle_state == "ATTACHED"
+        if mode.value == "Smoke" and flow_is_attached:
+            proof = self._controller.smoke_resume_advance_proof_in_kit()
+            if proof is not None:
+                return (
+                    "streamlines_scheduler_tasks="
+                    f"{presentation.streamlines_scheduler_tasks}; "
+                    "timeline_playing="
+                    f"{self._controller.flow_timeline_is_playing_in_kit()}; "
+                    f"flow_source_0={proof.source_0}; "
+                    f"flow_source_1={proof.source_1}; "
+                    f"flow_source_2={proof.source_2}; "
+                    "sustained_flow_playback="
+                    f"{proof.sustained_flow_playback}; "
+                    "smoke_renderer_visible="
+                    f"{presentation.smoke_presentation_visible}; "
+                    "streamlines_visible="
+                    f"{presentation.streamlines_presentation_visible}"
+                )
+        return (
+            "smoke_renderer_visible="
+            f"{presentation.smoke_presentation_visible}; "
+            "streamlines_visible="
+            f"{presentation.streamlines_presentation_visible}; "
+            f"scheduler_tasks={presentation.streamlines_scheduler_tasks}"
+        )
+
+    def _visualization_acceptance_failure_reason(self, mode, result) -> str | None:
+        """Verify only the Phase 4.2 production postconditions for one selection."""
+
+        if not result.success:
+            return result.message
+        proof = self._controller.temporal_proof_progress()
+        if proof.state.value == "FAILED":
+            return (
+                "Flow temporal proof failed unexpectedly: "
+                f"{proof.failure_reason or 'inspect Flow temporal diagnostics'}."
+            )
+        snapshot = self._controller.visualization_snapshot()
+        if snapshot.committed is not mode or snapshot.pending is not None:
+            return "Visualization transaction did not commit the requested mode."
+        presentation = (
+            self._controller.primary_visualization_presentation_snapshot_in_kit()
+        )
+        xray = self._controller.xray_target_snapshot()
+        if (
+            mode.value == "Smoke"
+            and self._controller._flow_lifecycle_state != "ATTACHED"
+        ):
+            return "Smoke committed without an attached Flow presentation."
+        if mode.value == "Heatmap":
+            configured = frozenset(
+                group.group_id
+                for group in (
+                    self._controller.config.chassis_presentation.xray_target_groups
+                )
+            )
+            if (
+                self._controller._flow_lifecycle_state != "DETACHED"
+                or xray.effective_target_ids != configured
+                or xray.override_owner != "heatmap_preview"
+            ):
+                return "Heatmap preview did not retain the expected X-Ray override."
+        if mode.value == "Streamlines":
+            streamlines_proof = (
+                self._controller.streamlines_cached_playback_advance_proof_in_kit()
+            )
+            if (
+                self._controller._flow_lifecycle_state != "ATTACHED"
+                or presentation.streamlines_scheduler_tasks != 1
+                or not presentation.streamlines_presentation_visible
+                or presentation.smoke_presentation_visible
+                or not self._controller.streamlines_cached_playback_advanced_in_kit()
+                or streamlines_proof is None
+                or not streamlines_proof.sample_advanced
+            ):
+                return "Streamlines committed without its exclusive prepared playback."
+        if mode.value == "Smoke" and "reused=" in result.message:
+            smoke_proof = self._controller.smoke_resume_advance_proof_in_kit()
+            if (
+                not presentation.smoke_presentation_visible
+                or presentation.streamlines_presentation_visible
+                or presentation.streamlines_scheduler_tasks != 0
+                or self._controller.streamlines_controls_timeline_in_kit()
+                or not self._controller.smoke_resume_source_advanced_in_kit()
+                or not self._controller.flow_timeline_is_playing_in_kit()
+                or smoke_proof is None
+                or not smoke_proof.timeline_playing
+                or not smoke_proof.sustained_flow_playback
+            ):
+                return (
+                    "Smoke committed without sustained post-Streamlines Flow "
+                    "playback proof."
+                )
+        if mode.value == "Normal" and (
+            self._controller._flow_lifecycle_state != "DETACHED"
+            or xray.override_owner is not None
+            or presentation.flow_source_prepared
+            or presentation.smoke_presentation_visible
+            or presentation.streamlines_scheduler_tasks != 0
+            or presentation.streamlines_presentation_visible
+        ):
+            return (
+                "Normal committed with a primary presentation still active: "
+                f"flow_source_prepared={presentation.flow_source_prepared}; "
+                f"smoke_visible={presentation.smoke_presentation_visible}; "
+                "streamlines_visible="
+                f"{presentation.streamlines_presentation_visible}; "
+                "streamlines_scheduler_tasks="
+                f"{presentation.streamlines_scheduler_tasks}."
+            )
+        return None
+
+    def _report_visualization_acceptance_event(
+        self,
+        event: str,
+        status: str,
+        next_action: str | None = None,
+    ) -> None:
+        """Use the generic formatter without creating a Phase-4-specific framework."""
+
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            format_manual_acceptance_event,
+        )
+
+        carb.log_warn(
+            _with_dtrs_local_timestamp(
+                format_manual_acceptance_event(
+                    area="VISUALIZATION | PHASE_4_2",
+                    event=event,
+                    status=status,
+                    next_action=next_action,
+                )
+            )
+        )
 
     @staticmethod
     def _health_colour(health: str) -> int:
@@ -1903,65 +2850,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             payload={"progress": progress},
         )
 
-    @staticmethod
-    def _report_airflow_acceptance(
-        event: str,
-        status: str,
-        *,
-        next_action: str | None = None,
-    ) -> None:
-        """Emit manual acceptance state without adding UI-owned workflow state."""
-
-        if not PHASE33_MANUAL_ACCEPTANCE_ENABLED:
-            return
-
-        DigitalTwinRuntimeSuiteExtension._report_manual_acceptance(
-            area="AIRFLOW | SHARED_STATE",
-            event=event,
-            status=status,
-            next_action=next_action,
-        )
-
-    @staticmethod
-    def _report_manual_acceptance(
-        *,
-        area: str,
-        event: str,
-        status: str,
-        next_action: str | None = None,
-    ) -> None:
-        """Emit one reusable manual-acceptance event through the Kit logger."""
-
-        from digital_twin_runtime_suite.app.manual_acceptance import (
-            format_manual_acceptance_event,
-        )
-
-        message = format_manual_acceptance_event(
-            area=area,
-            event=event,
-            status=status,
-            next_action=next_action,
-        )
-        carb.log_warn(_with_dtrs_local_timestamp(message))
-
-    async def _report_airflow_waiting(
-        self,
-        *,
-        operation: str,
-        started_at: float,
-        stage_source: Callable[[], str],
-    ) -> None:
-        """Report a bounded heartbeat without per-frame acceptance logging."""
-
-        while True:
-            await asyncio.sleep(5.0)
-            elapsed_seconds = time.monotonic() - started_at
-            self._report_airflow_acceptance(
-                "WAITING",
-                f"operation={operation}; stage={stage_source()}; "
-                f"elapsed_s={elapsed_seconds:.1f}",
-            )
-
     def _set_streamlines_status(self, message: str) -> None:
         """Publish the independent static-source state in its collapsed UI section."""
 
@@ -1977,47 +2865,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._streamlines_cache_build_button.enabled = enabled
         if self._streamlines_cache_load_button:
             self._streamlines_cache_load_button.enabled = enabled
-
-    def _set_streamlines_profile_buttons_enabled(
-        self,
-        *,
-        preview: bool | None = None,
-        accept: bool | None = None,
-        cache_set: bool | None = None,
-        cache_sanity: bool | None = None,
-    ) -> None:
-        """Gate the active profile sequence without reviving old debug controls."""
-
-        controls = (
-            (self._streamlines_profile_preview_button, preview),
-            (self._streamlines_profile_accept_button, accept),
-            (self._streamlines_cache_set_button, cache_set),
-            (getattr(self, "_streamlines_cache_sanity_button", None), cache_sanity),
-        )
-        for button, enabled in controls:
-            if button is not None and enabled is not None:
-                button.enabled = enabled
-
-    def _set_streamlines_cadence_button_enabled(self, enabled: bool) -> None:
-        """Enable characterization only after an attached cache is validated."""
-
-        if self._streamlines_cadence_characterization_button:
-            self._streamlines_cadence_characterization_button.enabled = enabled
-
-    def _set_streamlines_fast_cadence_button_enabled(self, enabled: bool) -> None:
-        """Enable the continuation only after its 500 ms baseline is loaded."""
-
-        if self._streamlines_fast_cadence_check_button:
-            self._streamlines_fast_cadence_check_button.enabled = enabled
-
-    def _set_streamlines_200ms_wrap_recheck_button_enabled(
-        self,
-        enabled: bool,
-    ) -> None:
-        """Enable the wrap-only recheck only after its 250 ms fallback is loaded."""
-
-        if self._streamlines_200ms_wrap_recheck_button:
-            self._streamlines_200ms_wrap_recheck_button.enabled = enabled
 
     @staticmethod
     def _asset_loaded_status(message: str) -> str:
@@ -2040,12 +2887,85 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._lighting_task = asyncio.ensure_future(self._apply_lighting())
 
     def _schedule_attach_airflow(self) -> None:
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_airflow_status("Airflow operation is already in progress.")
+        """Keep the legacy Attach control on the primary Smoke request path."""
+
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
+        )
+
+        self._schedule_visualization_mode_request(VisualizationMode.SMOKE)
+
+    def _schedule_visualization_mode_request(self, mode) -> None:
+        """Own one task per pending presentation request from the selector."""
+
+        task = self._visualization_task
+        pending = (
+            self._controller.visualization_snapshot().pending
+            if self._controller
+            else None
+        )
+        scheduled_mode = getattr(self, "_scheduled_visualization_mode", None)
+        if (
+            task
+            and not task.done()
+            and (scheduled_mode is mode or (pending and pending.target is mode))
+        ):
             return
-        self._phase33_airflow_acceptance.begin_session()
-        self._report_airflow_acceptance("START", 'Attach requested by "Attach".')
-        self._airflow_task = asyncio.ensure_future(self._attach_airflow())
+
+        self._scheduled_visualization_mode = mode
+        self._visualization_task = asyncio.ensure_future(
+            self._request_visualization_mode(mode)
+        )
+
+    async def _request_visualization_mode(self, mode) -> None:
+        """Contain one production mode transition at the OmniUI task boundary."""
+
+        self._report_visualization_acceptance_start(mode)
+        waiting_task = self._start_visualization_acceptance_waiting(mode)
+        try:
+            result = await self._controller.request_visualization_mode_in_kit(
+                mode,
+                status_callback=self._report_visualization_mode_progress,
+            )
+        finally:
+            if waiting_task is not None:
+                waiting_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await waiting_task
+            if self._scheduled_visualization_mode is mode:
+                self._scheduled_visualization_mode = None
+        self._refresh_airflow_cache_selector_label()
+        self._set_airflow_status(result.message)
+        self._update_visualization_controls()
+        self._complete_validation_receipt_consumer_action(mode, result)
+        self._report_visualization_acceptance_result(mode, result)
+
+    def _report_visualization_mode_progress(self, message: str) -> None:
+        """Mirror bounded runtime milestones into the active generic scenario."""
+
+        self._set_airflow_status(message)
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        self._report_visualization_acceptance_event("PROGRESS", message)
+
+    def _start_visualization_acceptance_waiting(self, mode):
+        """Emit sparse waiting evidence only for an active manual scenario."""
+
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return None
+        return asyncio.ensure_future(
+            self._report_visualization_acceptance_waiting(mode, time.monotonic())
+        )
+
+    async def _report_visualization_acceptance_waiting(self, mode, started_at: float):
+        """Report genuine long transitions at a human-readable five-second rate."""
+
+        while True:
+            await asyncio.sleep(5.0)
+            elapsed_seconds = int(time.monotonic() - started_at)
+            self._report_visualization_acceptance_waiting_once(mode, elapsed_seconds)
 
     def _schedule_build_streamlines_cache(self) -> None:
         """Build a persistent cache while no other airflow operation is active."""
@@ -2055,59 +2975,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._set_streamlines_cache_buttons_enabled(False)
         self._airflow_task = asyncio.ensure_future(self._build_streamlines_cache())
-
-    def _schedule_preview_streamlines_profile(self) -> None:
-        """Start only the bounded representative profile preview stage."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        self._set_streamlines_profile_buttons_enabled(
-            preview=False,
-            accept=False,
-            cache_set=False,
-        )
-        self._airflow_task = asyncio.ensure_future(self._preview_streamlines_profile())
-
-    def _schedule_accept_streamlines_profile(self) -> None:
-        """Freeze only a profile that completed representative preview evidence."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        self._set_streamlines_profile_buttons_enabled(
-            preview=False,
-            accept=False,
-            cache_set=False,
-        )
-        self._airflow_task = asyncio.ensure_future(self._accept_streamlines_profile())
-
-    def _schedule_build_production_cache_set(self) -> None:
-        """Start the all-or-stop four-workload cache operation after profile freeze."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        self._set_streamlines_profile_buttons_enabled(
-            preview=False,
-            accept=False,
-            cache_set=False,
-        )
-        self._airflow_task = asyncio.ensure_future(self._build_production_cache_set())
-
-    def _schedule_run_production_cache_sanity(self) -> None:
-        """Run one short, bounded cached-playback check after cache validation."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        self._set_streamlines_profile_buttons_enabled(
-            preview=False,
-            accept=False,
-            cache_set=False,
-            cache_sanity=False,
-        )
-        self._airflow_task = asyncio.ensure_future(self._run_production_cache_sanity())
 
     def _schedule_load_streamlines_cache(self) -> None:
         """Load a cache only when no task or attached Flow can contend for time."""
@@ -2125,85 +2992,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         self._set_streamlines_status("Loading Streamlines cache: preparing load task.")
         self._set_streamlines_cache_buttons_enabled(False)
-        self._set_streamlines_cadence_button_enabled(False)
-        self._set_streamlines_fast_cadence_button_enabled(False)
-        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
         self._airflow_task = asyncio.ensure_future(self._load_streamlines_cache())
-
-    def _schedule_streamlines_cadence_characterization(self) -> None:
-        """Run the four bounded candidates only from a loaded detached cache."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        if (
-            not self._controller
-            or not self._controller.is_streamlines_cadence_characterization_ready()
-        ):
-            self._set_streamlines_status(
-                "Load Streamlines Cache before cadence characterization."
-            )
-            return
-        self._set_streamlines_status(
-            "Cadence characterization: preparing four bounded candidates."
-        )
-        self._set_streamlines_cache_buttons_enabled(False)
-        self._set_streamlines_cadence_button_enabled(False)
-        self._set_streamlines_fast_cadence_button_enabled(False)
-        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
-        self._airflow_task = asyncio.ensure_future(
-            self._run_streamlines_cadence_characterization()
-        )
-
-    def _schedule_streamlines_fast_cadence_check(self) -> None:
-        """Run only 250 and 200 ms after the accepted 500 ms baseline."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        if (
-            not self._controller
-            or not self._controller.is_streamlines_fast_cadence_check_ready()
-        ):
-            self._set_streamlines_status(
-                "Run Cadence Characterization before the fast cadence check."
-            )
-            return
-        self._set_streamlines_status(
-            "Fast cadence check: preparing 250 ms and 200 ms candidates."
-        )
-        self._set_streamlines_cache_buttons_enabled(False)
-        self._set_streamlines_cadence_button_enabled(False)
-        self._set_streamlines_fast_cadence_button_enabled(False)
-        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
-        self._airflow_task = asyncio.ensure_future(
-            self._run_streamlines_fast_cadence_check()
-        )
-
-    def _schedule_streamlines_200ms_wrap_recheck(self) -> None:
-        """Recheck one 200 ms candidate against the accepted 250 ms fallback."""
-
-        if self._airflow_task and not self._airflow_task.done():
-            self._set_streamlines_status("Airflow operation is already in progress.")
-            return
-        if (
-            not self._controller
-            or not self._controller.is_streamlines_200ms_wrap_recheck_ready()
-        ):
-            self._set_streamlines_status(
-                "A confirmed 250 ms Streamlines period is required for recheck."
-            )
-            return
-        self._set_streamlines_status(
-            "200 ms wrap recheck: preparing one 20 s observation window."
-        )
-        self._set_streamlines_cache_buttons_enabled(False)
-        self._set_streamlines_cadence_button_enabled(False)
-        self._set_streamlines_fast_cadence_button_enabled(False)
-        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
-        self._airflow_task = asyncio.ensure_future(
-            self._run_streamlines_200ms_wrap_recheck()
-        )
 
     def _schedule_attached_workload_transition(self, workload_mode: str) -> None:
         """Forward a semantic workload change without owning Flow arbitration."""
@@ -2223,56 +3012,80 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
 
     async def _run_attached_workload_transition(self, workload_mode: str) -> None:
-        self._report_airflow_acceptance(
-            "START",
-            f"Workload transition requested: {workload_mode}.",
-        )
-        transition_stage = {"value": "target validation"}
-        started_at = time.monotonic()
-        waiting_task = asyncio.ensure_future(
-            self._report_airflow_waiting(
-                operation="Workload transition",
-                started_at=started_at,
-                stage_source=lambda: transition_stage["value"],
-            )
-        )
-        self._report_airflow_acceptance(
-            "PROGRESS",
-            "stage=target validation",
-        )
-
         def report_progress(message: str) -> None:
-            transition_stage["value"] = message
             self._set_airflow_status(message)
-            self._report_airflow_acceptance("PROGRESS", message)
 
-        try:
-            result = await self._controller.request_attached_workload_transition_in_kit(
-                workload_mode,
-                status_callback=report_progress,
+        await self._controller.request_attached_workload_transition_in_kit(
+            workload_mode,
+            status_callback=report_progress,
+        )
+
+    def _build_visualization_controls(self) -> None:
+        """Build the one primary-presentation selector and read-only readiness."""
+
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
+        )
+
+        modes = tuple(VisualizationMode)
+        snapshot = self._controller.visualization_snapshot()
+        active_index = modes.index(snapshot.committed)
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label("Mode", width=SERVER_VIEW_LABEL_WIDTH)
+            self._visualization_combo = ui.ComboBox(
+                active_index,
+                *(mode.value for mode in modes),
+                width=ui.Fraction(1),
             )
-        finally:
-            waiting_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await waiting_task
-        self._refresh_airflow_cache_selector_label()
-        if not result.success:
-            self._set_airflow_status(result.message)
-            self._phase33_airflow_acceptance.mark_failed()
-            self._report_airflow_acceptance("FAIL", result.message)
+        for mode in modes:
+            with ui.HStack(height=22, spacing=6, content_clipping=True):
+                ui.Label(mode.value, width=SERVER_VIEW_LABEL_WIDTH, elided_text=True)
+                self._visualization_readiness_labels[mode] = ui.Label(
+                    "Checking current workload readiness…",
+                    width=ui.Fraction(1),
+                    elided_text=True,
+                )
+        model = self._combo_index_model(self._visualization_combo)
+        if model:
+            model.add_value_changed_fn(self._on_visualization_mode_changed)
+        self._update_visualization_controls()
+
+    def _on_visualization_mode_changed(self, model) -> None:
+        """Route the selector through RuntimeController's single mode request path."""
+
+        if self._updating_visualization_mode:
             return
-        from digital_twin_runtime_suite.app.airflow_acceptance import (
-            next_phase33_airflow_action,
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
         )
 
-        self._phase33_airflow_acceptance.mark_transition_complete(workload_mode)
-        self._report_airflow_acceptance(
-            "COMPLETE",
-            result.message,
-            next_action=next_phase33_airflow_action(workload_mode),
-        )
+        index = self._model_int(model)
+        modes = tuple(VisualizationMode)
+        if 0 <= index < len(modes):
+            mode = modes[index]
+            readiness = self._controller.visualization_readiness().for_mode(mode)
+            if not readiness.activation_available:
+                self._set_airflow_status(
+                    f"{mode.value} unavailable: {readiness.message}"
+                )
+                self._update_visualization_controls()
+                return
+            self._begin_validation_receipt_consumer_action(mode)
+            self._schedule_visualization_mode_request(mode)
 
     def _schedule_detach_airflow(self) -> None:
+        """Keep the legacy Detach control on the primary Normal request path."""
+
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
+        )
+
+        self._schedule_visualization_mode_request(VisualizationMode.NORMAL)
+        return
+
+    def _schedule_legacy_detach_airflow(self) -> None:
+        """Retain the established cancellation implementation for internal callers."""
+
         transition_task = self._airflow_transition_task
         if transition_task and not transition_task.done():
             transition_task.cancel()
@@ -2362,7 +3175,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         except ValueError as error:
             self._set_status(f"X-Ray settings are invalid: {error}")
             return
-        result = self._controller.apply_xray_material_in_kit(
+        result = self._controller.apply_manual_xray_material_in_kit(
             xray, self._selected_xray_target_ids()
         )
         try:
@@ -2373,6 +3186,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         if not result.success:
             self._set_status(result.message)
             return
+        self._sync_xray_target_controls()
         self._set_status(f"{result.message} Saved to local config.")
 
     def _xray_config_from_controls(self):
@@ -2726,49 +3540,18 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         if result.success:
             self._set_lighting_status(self._lighting_status_from_load(result.message))
-            self._report_airflow_acceptance(
-                "READY",
-                "Flow is detached and Attach is available.",
-                next_action='Press "Attach".',
-            )
         return result
 
     async def _attach_airflow(self) -> None:
         def update_status(message: str) -> None:
-            attach_stage["value"] = message
             self._refresh_airflow_cache_selector_label()
             self._set_airflow_status(message)
-            self._report_airflow_acceptance("PROGRESS", message)
 
-        attach_stage = {"value": "foreground validation"}
-        started_at = time.monotonic()
-        waiting_task = asyncio.ensure_future(
-            self._report_airflow_waiting(
-                operation="Attach",
-                started_at=started_at,
-                stage_source=lambda: attach_stage["value"],
-            )
+        result = await self._controller.attach_simulation_cache_in_kit(
+            status_callback=update_status,
         )
-        try:
-            result = await self._controller.attach_simulation_cache_in_kit(
-                status_callback=update_status,
-            )
-        finally:
-            waiting_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await waiting_task
         self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
-        if result.success:
-            self._phase33_airflow_acceptance.mark_attach_complete()
-            self._report_airflow_acceptance(
-                "COMPLETE",
-                result.message,
-                next_action='Select "Critical" in the "Workload" control.',
-            )
-            return
-        self._report_airflow_acceptance("FAIL", result.message)
-        self._phase33_airflow_acceptance.mark_failed()
 
     async def _build_streamlines_cache(self) -> None:
         """Contain production cache-build failures at the OmniUI task boundary."""
@@ -2797,254 +3580,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         finally:
             self._set_streamlines_cache_buttons_enabled(True)
 
-    async def _preview_streamlines_profile(self) -> None:
-        """Run the visible candidate preview before any production cache exists."""
-
-        start = "Preparing representative Idle and Critical profile previews."
-        self._report_manual_acceptance(
-            area="STREAMLINES | PRODUCTION_PROFILE",
-            event="START",
-            status=start,
-        )
-        self._set_streamlines_status(start)
-        try:
-            preview = self._controller.preview_streamlines_production_profile_in_kit
-            results = await preview(status_callback=self._set_streamlines_status)
-            summary = "; ".join(
-                (
-                    f"{result.workload}: curves={result.curve_count}; "
-                    f"points={result.point_count}; "
-                    f"generation_ms={result.generation_ms:.0f}"
-                )
-                for result in results
-            )
-            complete = (
-                "Representative previews complete; 200 ms cached-playback "
-                f"contract retained. {summary}"
-            )
-            self._set_streamlines_status(complete)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_PROFILE",
-                event="COMPLETE",
-                status=complete,
-                next_action=(
-                    'Inspect the viewport and press "Accept Production Profile".'
-                ),
-            )
-            self._set_streamlines_profile_buttons_enabled(accept=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            status = f"Production profile preview failed: {error}"
-            self._set_streamlines_status(status)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_PROFILE",
-                event="FAIL",
-                status=status,
-            )
-            self._set_streamlines_profile_buttons_enabled(preview=True)
-
-    async def _accept_streamlines_profile(self) -> None:
-        """Freeze the candidate profile only after the operator reviewed it."""
-
-        self._report_manual_acceptance(
-            area="STREAMLINES | PRODUCTION_PROFILE",
-            event="START",
-            status="Accepting the reviewed production Streamlines profile.",
-        )
-        try:
-            profile = self._controller.accept_streamlines_production_profile()
-            status = (
-                f"profile={profile.name}; state=FROZEN; "
-                f"settings_signature={profile.settings_signature}; "
-                f"settings={profile.to_dict()}"
-            )
-            self._set_streamlines_status(status)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_PROFILE",
-                event="COMPLETE",
-                status=status,
-                next_action='Press "Build / Validate Production Cache Set".',
-            )
-            self._set_streamlines_profile_buttons_enabled(cache_set=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            status = f"Production profile acceptance failed: {error}"
-            self._set_streamlines_status(status)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_PROFILE",
-                event="FAIL",
-                status=status,
-            )
-            self._set_streamlines_profile_buttons_enabled(preview=True)
-
-    async def _build_production_cache_set(self) -> None:
-        """Build or validate all independent workload caches and close Phase 3.5."""
-
-        start = "Building or validating Idle, Nominal, Surge, and Critical caches."
-        self._report_manual_acceptance(
-            area="STREAMLINES | PRODUCTION_CACHE_SET",
-            event="START",
-            status=start,
-        )
-        self._set_streamlines_status(start)
-        try:
-            result = await self._controller.build_validate_production_cache_set_in_kit(
-                status_callback=self._set_streamlines_status,
-            )
-            for workload in result.results:
-                metadata = workload.metadata
-                status = (
-                    f"workload={workload.workload}; "
-                    f"dataset={workload.dataset_identity}; "
-                    f"validation=VALID; reused={workload.reused}; "
-                    f"cached/source={len(metadata.states)}/{metadata.sample_count}; "
-                    f"failed_samples=0; cache_size_bytes={workload.cache_size_bytes}; "
-                    f"source_signature={metadata.source_signature}; "
-                    f"settings_signature={metadata.settings_signature}."
-                )
-                self._report_manual_acceptance(
-                    area="STREAMLINES | PRODUCTION_CACHE_SET",
-                    event="PROGRESS",
-                    status=status,
-                )
-            if not result.success:
-                raise RuntimeError(
-                    f"workload={result.failed_workload}; {result.message}"
-                )
-            complete = (
-                "profile=FROZEN; Idle/Nominal/Surge/Critical=VALID; "
-                "omitted=0; synthetic=0; failed=0; "
-                "sample contracts are workload-specific."
-            )
-            self._set_streamlines_status(complete)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_CACHE_SET",
-                event="COMPLETE",
-                status=complete,
-                next_action=f'Press "{PRODUCTION_CACHE_SANITY_ACTION}".',
-            )
-            self._set_streamlines_profile_buttons_enabled(cache_sanity=True)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            status = f"Production cache set failed: {error}"
-            self._set_streamlines_status(status)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_CACHE_SET",
-                event="FAIL",
-                status=status,
-            )
-            self._set_streamlines_profile_buttons_enabled(cache_set=True)
-
-    async def _run_production_cache_sanity(self) -> None:
-        """Close Phase 3.5 only after one short 200 ms persisted-cache proof."""
-
-        start = "Running 200 ms sanity against the validated persisted cache."
-        self._report_manual_acceptance(
-            area="STREAMLINES | PRODUCTION_CACHE_SANITY",
-            event="START",
-            status=start,
-        )
-        self._set_streamlines_status(start)
-        try:
-            await self._wait_for_background_validation_before_cache_sanity()
-            run_sanity = self._controller.run_streamlines_production_cache_sanity_in_kit
-            result = await run_sanity(status_callback=self._set_streamlines_status)
-            scheduler = result.scheduler
-            complete = (
-                "Production cache sanity complete: "
-                "cache_source=persisted_production_only; period_ms=200; "
-                f"measured_window_s={result.duration_seconds:.1f}; "
-                f"ticks={scheduler.tick_count}; switches={scheduler.switch_count}; "
-                f"no_ops={scheduler.no_op_count}; "
-                f"median_switch_ms="
-                f"{scheduler.median_switch_latency_seconds * 1000.0:.1f}; "
-                f"max_switch_ms="
-                f"{scheduler.maximum_switch_latency_seconds * 1000.0:.1f}; "
-                f"missed_deadlines={scheduler.missed_deadlines}; "
-                f"backlog={scheduler.backlog_count}; "
-                f"max_deadline_lateness_ms="
-                f"{scheduler.maximum_drift_seconds * 1000.0:.1f}; "
-                f"max_active_playback_tasks="
-                f"{result.maximum_active_playback_task_count}; "
-                f"active_playback_tasks_after_stop="
-                f"{result.active_playback_task_count_after_stop}; "
-                "kit_cae_executions=0; runtime_preview_rebuilds=0; "
-                "playback_vti_imports=0; runtime_error=none; clean_stop=PASS."
-            )
-            self._set_streamlines_status(complete)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_CACHE_SANITY",
-                event="COMPLETE",
-                status=complete,
-            )
-            from digital_twin_runtime_suite.app.manual_acceptance import (
-                format_manual_acceptance_test_complete,
-            )
-
-            if not self._phase35_terminal_emitted:
-                carb.log_warn(
-                    _with_dtrs_local_timestamp(
-                        format_manual_acceptance_test_complete(
-                            "Phase 3.5 production Streamlines cache set passed."
-                        )
-                    )
-                )
-                self._phase35_terminal_emitted = True
-                self._set_streamlines_profile_buttons_enabled(cache_sanity=False)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            status = f"Production cache sanity failed: {error}"
-            self._set_streamlines_status(status)
-            self._report_manual_acceptance(
-                area="STREAMLINES | PRODUCTION_CACHE_SANITY",
-                event="FAIL",
-                status=status,
-            )
-            self._set_streamlines_profile_buttons_enabled(cache_sanity=True)
-
-    async def _wait_for_background_validation_before_cache_sanity(self) -> None:
-        """Keep the bounded playback window clear of startup VTI validation.
-
-        The extension owns the background task, so waiting here neither changes
-        its coordinator policy nor makes its outcome part of cache sanity.
-        """
-
-        task = getattr(self, "_airflow_background_validation_task", None)
-        if task is None or task.done():
-            return
-        started_at = time.monotonic()
-        next_waiting_at = started_at + 5.0
-        status = (
-            "Waiting for active airflow background validation to finish before "
-            "timed cached playback."
-        )
-        self._set_streamlines_status(status)
-        self._report_manual_acceptance(
-            area="STREAMLINES | PRODUCTION_CACHE_SANITY",
-            event="PROGRESS",
-            status=status,
-        )
-        while not task.done():
-            now = time.monotonic()
-            if now >= next_waiting_at:
-                elapsed_seconds = now - started_at
-                waiting = (
-                    "stage=background validation idle wait; "
-                    f"elapsed_s={elapsed_seconds:.1f}."
-                )
-                self._set_streamlines_status(waiting)
-                self._report_manual_acceptance(
-                    area="STREAMLINES | PRODUCTION_CACHE_SANITY",
-                    event="WAITING",
-                    status=waiting,
-                )
-                next_waiting_at = now + 5.0
-            await asyncio.sleep(0.1)
-
     async def _load_streamlines_cache(self) -> None:
         """Contain production cache-load failures at the OmniUI task boundary."""
 
@@ -3056,22 +3591,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 "Streamlines cache loaded: exact manifest state "
                 f"{result.active_sample_index + 1}/{result.metadata.sample_count}."
             )
-            if self._controller.is_streamlines_200ms_wrap_recheck_ready():
-                self._set_streamlines_200ms_wrap_recheck_button_enabled(True)
-                self._set_streamlines_status(
-                    self._controller.announce_streamlines_200ms_wrap_recheck_ready()
-                )
-            elif self._controller.is_streamlines_fast_cadence_check_ready():
-                self._set_streamlines_fast_cadence_button_enabled(True)
-                self._set_streamlines_status(
-                    self._controller.announce_streamlines_fast_cadence_check_ready()
-                )
-            else:
-                self._set_streamlines_cadence_button_enabled(True)
-                announce_ready = (
-                    self._controller.announce_streamlines_cadence_characterization_ready
-                )
-                self._set_streamlines_status(announce_ready())
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -3091,146 +3610,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         finally:
             self._set_streamlines_cache_buttons_enabled(True)
 
-    async def _run_streamlines_cadence_characterization(self) -> None:
-        """Contain bounded cadence failures at the OmniUI task boundary."""
-
-        try:
-            result = (
-                await (
-                    self._controller.run_streamlines_cadence_characterization_in_kit(
-                        status_callback=self._set_streamlines_status,
-                    )
-                )
-            )
-            if result.selected is None:
-                self._set_streamlines_status(
-                    "No cadence candidate was accepted; inspect the structured log."
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            import carb
-
-            from digital_twin_runtime_suite.app.streamlines.runtime import (
-                report_streamlines_task_failure,
-            )
-
-            report_streamlines_task_failure(
-                error,
-                area="CADENCE_CHARACTERIZATION",
-                display_name="Streamlines cadence characterization",
-                status_callback=self._set_streamlines_status,
-                error_logger=carb.log_error,
-            )
-        finally:
-            self._set_streamlines_cache_buttons_enabled(True)
-            self._set_streamlines_cadence_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_cadence_characterization_ready()
-                )
-            )
-            self._set_streamlines_fast_cadence_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_fast_cadence_check_ready()
-                )
-            )
-            self._set_streamlines_200ms_wrap_recheck_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_200ms_wrap_recheck_ready()
-                )
-            )
-
-    async def _run_streamlines_fast_cadence_check(self) -> None:
-        """Contain fast-check failures at the OmniUI task boundary."""
-
-        try:
-            await self._controller.run_streamlines_fast_cadence_check_in_kit(
-                status_callback=self._set_streamlines_status,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            import carb
-
-            from digital_twin_runtime_suite.app.streamlines.runtime import (
-                report_streamlines_task_failure,
-            )
-
-            report_streamlines_task_failure(
-                error,
-                area="CADENCE_CHARACTERIZATION",
-                display_name="Streamlines fast cadence check",
-                status_callback=self._set_streamlines_status,
-                error_logger=carb.log_error,
-            )
-        finally:
-            self._set_streamlines_cache_buttons_enabled(True)
-            self._set_streamlines_cadence_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_cadence_characterization_ready()
-                )
-            )
-            self._set_streamlines_fast_cadence_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_fast_cadence_check_ready()
-                )
-            )
-            self._set_streamlines_200ms_wrap_recheck_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_200ms_wrap_recheck_ready()
-                )
-            )
-
-    async def _run_streamlines_200ms_wrap_recheck(self) -> None:
-        """Contain one-candidate wrap recheck failures at the OmniUI boundary."""
-
-        try:
-            await self._controller.run_streamlines_200ms_wrap_recheck_in_kit(
-                status_callback=self._set_streamlines_status,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            import carb
-
-            from digital_twin_runtime_suite.app.streamlines.runtime import (
-                report_streamlines_task_failure,
-            )
-
-            report_streamlines_task_failure(
-                error,
-                area="CADENCE_CHARACTERIZATION",
-                display_name="Streamlines 200 ms wrap recheck",
-                status_callback=self._set_streamlines_status,
-                error_logger=carb.log_error,
-            )
-        finally:
-            self._set_streamlines_cache_buttons_enabled(True)
-            self._set_streamlines_cadence_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_cadence_characterization_ready()
-                )
-            )
-            self._set_streamlines_fast_cadence_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_fast_cadence_check_ready()
-                )
-            )
-            self._set_streamlines_200ms_wrap_recheck_button_enabled(
-                bool(
-                    self._controller
-                    and self._controller.is_streamlines_200ms_wrap_recheck_ready()
-                )
-            )
-
     async def _cancel_attach_then_detach(self, attach_task) -> None:
         """Serialize Detach behind the cooperative preflight cancellation result."""
 
@@ -3247,15 +3626,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         await self._detach_airflow()
 
     async def _detach_airflow(self) -> None:
-        self._report_airflow_acceptance("START", 'Detach requested by "Detach".')
-        started_at = time.monotonic()
-        waiting_task = asyncio.ensure_future(
-            self._report_airflow_waiting(
-                operation="Detach",
-                started_at=started_at,
-                stage_source=lambda: "runtime teardown",
-            )
-        )
         try:
             result = await self._controller.detach_simulation_cache_in_kit()
         except asyncio.CancelledError:
@@ -3263,34 +3633,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         except Exception as error:  # noqa: BLE001
             carb.log_error(f"DTRS airflow detach task failed: {error}")
             self._set_airflow_status(f"Airflow cache detach failed: {error}")
-            self._phase33_airflow_acceptance.mark_failed()
-            self._report_airflow_acceptance("FAIL", str(error))
             return
-        finally:
-            waiting_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await waiting_task
         self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
-        if result.success:
-            self._report_airflow_acceptance(
-                "COMPLETE",
-                result.message,
-            )
-            if (
-                PHASE33_MANUAL_ACCEPTANCE_ENABLED
-                and self._phase33_airflow_acceptance.complete_after_detach()
-            ):
-                from digital_twin_runtime_suite.app.airflow_acceptance import (
-                    format_phase33_airflow_test_complete,
-                )
-
-                carb.log_warn(
-                    _with_dtrs_local_timestamp(format_phase33_airflow_test_complete())
-                )
-            return
-        self._phase33_airflow_acceptance.mark_failed()
-        self._report_airflow_acceptance("FAIL", result.message)
 
     async def _apply_smoke_tuning(self) -> None:
         from digital_twin_runtime_suite.app.view_controls import (

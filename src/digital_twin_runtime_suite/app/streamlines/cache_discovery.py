@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from digital_twin_runtime_suite.app.streamlines.cache import (
     CACHE_SCHEMA_VERSION,
@@ -28,12 +29,52 @@ class StreamlinesCacheInspection:
     classification: str
     message: str
     metadata: StreamlinesCacheMetadata | None = None
+    geometry_sha256_recomputed: bool = False
 
     @property
     def valid(self) -> bool:
         """Return whether the persisted cache matches its full expected contract."""
 
         return self.classification == "VALID"
+
+
+@dataclass(frozen=True)
+class StreamlinesCacheValidationReceipt:
+    """One strongly validated cache result reusable for unchanged resources."""
+
+    inspection: StreamlinesCacheInspection
+    resource_fingerprint: tuple[str, str]
+    compatibility_identity: tuple[int, str, str]
+    source: TemporalVelocitySourceDescriptor | None = None
+    dependency_identity: tuple[str, str] = ("", "")
+    receipt_source: str = "FRESH"
+    cache_location: str = "SESSION"
+    validation_executed: bool = True
+    geometry_sha256_recomputed: bool = True
+
+
+def streamlines_cache_resource_fingerprint(
+    paths: StreamlinesCachePaths,
+) -> tuple[str, str]:
+    """Describe cache artifacts for receipt invalidation, never for validity."""
+
+    return (
+        _resource_fingerprint(paths.metadata_path),
+        _resource_fingerprint(paths.geometry_path),
+    )
+
+
+def _resource_fingerprint(path: Path) -> str:
+    """Return a lightweight invalidation key for one cache resource."""
+
+    try:
+        stats = path.stat()
+    except OSError:
+        return f"{path.resolve().as_posix()}|missing"
+    return (
+        f"{path.resolve().as_posix()}|size={stats.st_size}|"
+        f"mtime_ns={stats.st_mtime_ns}"
+    )
 
 
 def inspect_streamlines_cache(
@@ -98,6 +139,7 @@ def inspect_streamlines_cache(
         classification=classification,
         message=validation.message,
         metadata=metadata,
+        geometry_sha256_recomputed=validation.geometry_sha256_recomputed,
     )
 
 

@@ -359,14 +359,11 @@ class AttachedWorkloadTransitionMixin:
             if committed is None:
                 raise ValueError("Shared airflow state has no committed dataset.")
             active_dataset = committed.dataset
-            phase_now = self._airflow_state.phase_seconds()
-            active_resolution = self._airflow_state.resolve_phase(
-                active_dataset,
-                now=phase_now,
-            )
-            target_resolution = self._airflow_state.resolve_phase(
-                target_dataset,
-                now=phase_now,
+            active_resolution, target_resolution = (
+                self._airflow_state.resolve_transition_phase_pair(
+                    active_dataset,
+                    target_dataset,
+                )
             )
         except ValueError as error:
             return SimulationCacheResult(
