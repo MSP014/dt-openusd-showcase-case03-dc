@@ -389,6 +389,28 @@ def test_local_simulation_cache_override_wins_over_base_config(tmp_path):
     assert base_config.simulation_cache.enabled is False
 
 
+def test_local_streamlines_presentation_period_is_persisted_separately(
+    tmp_path,
+):
+    config_path = _write_runtime_config(tmp_path)
+    local_path = RuntimeConfig.local_config_path_for(config_path)
+    local_path.write_text(
+        "\n".join(
+            [
+                "[simulation_cache]",
+                "streamlines_presentation_period_seconds = 0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.load(config_path)
+    base_config = RuntimeConfig.load(config_path, apply_local_overrides=False)
+
+    assert config.simulation_cache.streamlines_presentation_period_seconds == 0.5
+    assert base_config.simulation_cache.streamlines_presentation_period_seconds is None
+
+
 def test_local_smoke_tuning_override_wins_per_field(tmp_path):
     config_path = _write_runtime_config(tmp_path)
     local_path = RuntimeConfig.local_config_path_for(config_path)
@@ -692,6 +714,33 @@ def test_runtime_controller_saves_and_clears_lighting_override(tmp_path):
     assert not local_path.exists()
     assert config.lighting.hdri_path == "hdri/base.exr"
     assert config.lighting.intensity == 10.0
+
+
+def test_runtime_controller_persists_200ms_streamlines_presentation_period(
+    tmp_path,
+):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+
+    local_path = controller.save_streamlines_presentation_period(0.2)
+    reloaded = RuntimeConfig.load(config_path)
+    base_config = RuntimeConfig.load(config_path, apply_local_overrides=False)
+
+    assert local_path.exists()
+    local_override = local_path.read_text(encoding="utf-8")
+    assert (
+        "[simulation_cache]\n" "streamlines_presentation_period_seconds = 0.2\n"
+    ) in local_override
+    assert "runtime_mode" not in local_override
+    assert "airflow_dataset" not in local_override
+    assert "velocity_field_name" not in local_override
+    assert "streamlines_presentation_period_seconds" in local_override
+    assert reloaded.simulation_cache.streamlines_presentation_period_seconds == 0.2
+    assert base_config.simulation_cache.streamlines_presentation_period_seconds is None
+    assert (
+        controller.config.simulation_cache.streamlines_presentation_period_seconds
+        == 0.2
+    )
 
 
 def test_runtime_controller_saves_camera_override(tmp_path):

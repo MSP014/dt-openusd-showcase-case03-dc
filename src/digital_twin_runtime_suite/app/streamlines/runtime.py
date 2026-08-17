@@ -23,6 +23,12 @@ from digital_twin_runtime_suite.app.streamlines.operator_runtime import (
     StreamlinesOperatorExecutionReceipt,
     StreamlinesOperatorRuntimeMixin,
 )
+from digital_twin_runtime_suite.app.streamlines.playback_runtime import (
+    StreamlinesPlaybackRuntimeMixin,
+)
+from digital_twin_runtime_suite.app.streamlines.profile import (
+    ProductionStreamlinesProfileState,
+)
 from digital_twin_runtime_suite.app.streamlines.proof import (
     clear_streamlines_operator_from_stage,
 )
@@ -89,6 +95,7 @@ def report_streamlines_task_failure(
 
 
 class StreamlinesRuntimeMixin(
+    StreamlinesPlaybackRuntimeMixin,
     StreamlinesCacheRuntimeMixin,
     StreamlinesRecomputeRuntimeMixin,
     StreamlinesSourceRuntimeMixin,
@@ -117,11 +124,14 @@ class StreamlinesRuntimeMixin(
     ) -> StreamlinesCleanupReceipt:
         """Remove all DTRS-owned Streamlines artifacts from the open stage."""
 
+        self.cancel_streamlines_cached_playback()
         self._stop_kit_cae_operator_tracking()
         self._streamlines_static_source_descriptor = None
         self._streamlines_static_source_diagnostics_failure = None
         self._streamlines_temporal_source_descriptor = None
         self._streamlines_loaded_cache_metadata = None
+        self._streamlines_loaded_cache_paths = None
+        self._streamlines_cache_playback_contract = None
         self._streamlines_cache_active_sample_index = None
         self._streamlines_recompute_active_sample_index = None
         pending_tasks = self._streamlines_pending_runtime_task_count()
@@ -162,13 +172,19 @@ class StreamlinesRuntimeMixin(
     def reset_streamlines_runtime_state(self) -> None:
         """Reset transient Streamlines ownership on startup or config reload."""
 
+        self.cancel_streamlines_cached_playback()
         self._streamlines_static_source_descriptor = None
         self._streamlines_static_source_diagnostics_failure = None
         self._streamlines_temporal_source_descriptor = None
         self._streamlines_cache_build_active_sample_index = None
         self._streamlines_loaded_cache_metadata = None
+        self._streamlines_loaded_cache_paths = None
+        self._streamlines_cache_playback_contract = None
         self._streamlines_cache_active_sample_index = None
         self._streamlines_recompute_active_sample_index = None
+        self._streamlines_cached_playback_scheduler = None
+        self._streamlines_cached_playback_started_at = None
+        self._streamlines_profile_state = ProductionStreamlinesProfileState()
 
     def _streamlines_pending_runtime_task_count(self) -> int:
         """Count DTRS-owned CAE subscriptions and active operators after teardown."""

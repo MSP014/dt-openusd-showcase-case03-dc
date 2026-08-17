@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+import carb
 import carb.settings
 import carb.tokens
 import carb.windowing
@@ -23,11 +26,21 @@ SERVER_VIEW_LABEL_WIDTH = 150
 TELEMETRY_VALUE_RIGHT_PADDING = 8
 COMPACT_TEXT_LENGTH = 44
 
-# Suppress only these noisy Airflow diagnostics:
-# the successful dataset-registry report, workload-to-cache mapping reports,
-# and the background-validation startup task/logs. Keep all error reporting
-# active. Set this to False as an explicit Stage 09 closure requirement.
-STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = True
+# Stage 09 closure restores the registry, workload-mapping, and background
+# validation logs. They make shared Flow state observable without changing
+# production lifecycle ownership or suppressing errors.
+STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = False
+
+# Phase 3.3 has passed. Its guided Flow scenario is retained for regression
+# coverage but must not compete with the active Streamlines acceptance flow.
+PHASE33_MANUAL_ACCEPTANCE_ENABLED = False
+
+# Phase 3.5 is closed. Its profile/cache/sanity actions remain callable backend
+# operations but are no longer part of the normal UI surface.
+PHASE35_MANUAL_ACCEPTANCE_ENABLED = False
+
+# Retained only by hidden Phase 3.5 backend helpers and their focused tests.
+PRODUCTION_CACHE_SANITY_ACTION = "Run Production Cache Sanity Check"
 
 
 def _compact_text(value: str, max_length: int = COMPACT_TEXT_LENGTH) -> str:
@@ -82,10 +95,19 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._airflow_task = None
         self._airflow_transition_task = None
         self._airflow_detach_requested = False
+        self._phase33_airflow_acceptance = None
+        self._phase35_terminal_emitted = False
         self._airflow_cache_selector_label = None
         self._streamlines_status_label = None
         self._streamlines_cache_build_button = None
         self._streamlines_cache_load_button = None
+        self._streamlines_profile_preview_button = None
+        self._streamlines_profile_accept_button = None
+        self._streamlines_cache_set_button = None
+        self._streamlines_cache_sanity_button = None
+        self._streamlines_cadence_characterization_button = None
+        self._streamlines_fast_cadence_check_button = None
+        self._streamlines_200ms_wrap_recheck_button = None
         self._airflow_background_validation_task = None
         self._view_task = None
         self._auxiliary_windows_task = None
@@ -164,6 +186,11 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
         )
         self._build_controller()
+        from digital_twin_runtime_suite.app.airflow_acceptance import (
+            Phase33AcceptanceState,
+        )
+
+        self._phase33_airflow_acceptance = Phase33AcceptanceState()
         if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
             self._start_background_airflow_validation()
         self._build_window()
@@ -289,7 +316,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         from digital_twin_runtime_suite.app.commands import RuntimeController
         from digital_twin_runtime_suite.app.airflow_dataset import (
             AirflowDatasetError,
-            discover_airflow_dataset_registry,
             format_airflow_dataset_registry,
         )
         from digital_twin_runtime_suite.app.motion import (
@@ -305,9 +331,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
 
         self._controller = RuntimeController(config_path)
         try:
-            registry = discover_airflow_dataset_registry(
-                self._controller.config.asset_root,
-                self._controller.config.simulation_cache.airflow_dataset.root,
+            registry_log = format_airflow_dataset_registry(
+                self._controller.airflow_dataset_registry()
             )
         except AirflowDatasetError as error:
             carb.log_error(
@@ -316,7 +341,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 )
             )
         else:
-            registry_log = format_airflow_dataset_registry(registry)
             if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
                 carb.log_warn(_with_dtrs_local_timestamp(registry_log))
         self._set_application_title_version(self._controller.config)
@@ -484,10 +508,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     lambda: self._build_server_appearance_controls(
                         config.chassis_presentation
                     ),
-                )
-                self._build_config_section(
-                    "Streamlines",
-                    self._build_streamlines_controls,
                 )
                 self._build_config_section(
                     "Airflow cache",
@@ -1037,36 +1057,6 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             height=26,
             width=ui.Percent(100),
         )
-
-    def _build_streamlines_controls(self) -> None:
-        """Build production controls for persistent cache build and load."""
-
-        with ui.VStack(spacing=6, content_clipping=True):
-            self._streamlines_cache_build_button = ui.Button(
-                "Build Streamlines Cache",
-                clicked_fn=self._schedule_build_streamlines_cache,
-                height=26,
-                width=ui.Percent(100),
-            )
-            self._streamlines_cache_load_button = ui.Button(
-                "Load Streamlines Cache",
-                clicked_fn=self._schedule_load_streamlines_cache,
-                height=26,
-                width=ui.Percent(100),
-            )
-            self._streamlines_status_label = ui.Label("Status: Ready", height=18)
-            if self._controller:
-                self._set_streamlines_cache_buttons_enabled(True)
-                cache_validation = self._controller.inspect_existing_streamlines_cache()
-                if cache_validation.valid:
-                    self._set_streamlines_status(
-                        "Existing valid Streamlines cache discovered. "
-                        "Load Streamlines Cache to inspect it."
-                    )
-                else:
-                    self._set_streamlines_status(
-                        self._controller.announce_streamlines_cache_build_ready()
-                    )
 
     def _build_lighting_config_controls(self, config) -> None:
         self._lighting_status_label = ui.Label(
@@ -1862,22 +1852,22 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             return
         if state == "RUNNING":
             message = (
-                "Airflow active · Validation "
-                f"{progress.validated_sample_count}/{progress.total_sample_count} · "
+                "Airflow active: validation "
+                f"{progress.validated_sample_count}/{progress.total_sample_count}; "
                 f"{progress.percentage or 0}%"
             )
         elif state == "CHECKING_LOOP_CLOSURE":
-            message = "Airflow active · Checking loop"
+            message = "Airflow active: checking loop"
         elif state == "PASSED":
             message = (
-                "Airflow active · Validation reused"
+                "Airflow active: validation reused"
                 if progress.result_source.value == "SESSION_CACHE"
-                else "Airflow active · Validation passed"
+                else "Airflow active: validation passed"
             )
         elif state == "CANCELLED":
             message = "Airflow detached"
         else:
-            message = "Airflow active · Validation failed"
+            message = "Airflow active: validation failed"
         detail = (
             "Background temporal validation: "
             f"{progress.validated_sample_count} of {progress.total_sample_count} "
@@ -1913,6 +1903,65 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             payload={"progress": progress},
         )
 
+    @staticmethod
+    def _report_airflow_acceptance(
+        event: str,
+        status: str,
+        *,
+        next_action: str | None = None,
+    ) -> None:
+        """Emit manual acceptance state without adding UI-owned workflow state."""
+
+        if not PHASE33_MANUAL_ACCEPTANCE_ENABLED:
+            return
+
+        DigitalTwinRuntimeSuiteExtension._report_manual_acceptance(
+            area="AIRFLOW | SHARED_STATE",
+            event=event,
+            status=status,
+            next_action=next_action,
+        )
+
+    @staticmethod
+    def _report_manual_acceptance(
+        *,
+        area: str,
+        event: str,
+        status: str,
+        next_action: str | None = None,
+    ) -> None:
+        """Emit one reusable manual-acceptance event through the Kit logger."""
+
+        from digital_twin_runtime_suite.app.manual_acceptance import (
+            format_manual_acceptance_event,
+        )
+
+        message = format_manual_acceptance_event(
+            area=area,
+            event=event,
+            status=status,
+            next_action=next_action,
+        )
+        carb.log_warn(_with_dtrs_local_timestamp(message))
+
+    async def _report_airflow_waiting(
+        self,
+        *,
+        operation: str,
+        started_at: float,
+        stage_source: Callable[[], str],
+    ) -> None:
+        """Report a bounded heartbeat without per-frame acceptance logging."""
+
+        while True:
+            await asyncio.sleep(5.0)
+            elapsed_seconds = time.monotonic() - started_at
+            self._report_airflow_acceptance(
+                "WAITING",
+                f"operation={operation}; stage={stage_source()}; "
+                f"elapsed_s={elapsed_seconds:.1f}",
+            )
+
     def _set_streamlines_status(self, message: str) -> None:
         """Publish the independent static-source state in its collapsed UI section."""
 
@@ -1928,6 +1977,47 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._streamlines_cache_build_button.enabled = enabled
         if self._streamlines_cache_load_button:
             self._streamlines_cache_load_button.enabled = enabled
+
+    def _set_streamlines_profile_buttons_enabled(
+        self,
+        *,
+        preview: bool | None = None,
+        accept: bool | None = None,
+        cache_set: bool | None = None,
+        cache_sanity: bool | None = None,
+    ) -> None:
+        """Gate the active profile sequence without reviving old debug controls."""
+
+        controls = (
+            (self._streamlines_profile_preview_button, preview),
+            (self._streamlines_profile_accept_button, accept),
+            (self._streamlines_cache_set_button, cache_set),
+            (getattr(self, "_streamlines_cache_sanity_button", None), cache_sanity),
+        )
+        for button, enabled in controls:
+            if button is not None and enabled is not None:
+                button.enabled = enabled
+
+    def _set_streamlines_cadence_button_enabled(self, enabled: bool) -> None:
+        """Enable characterization only after an attached cache is validated."""
+
+        if self._streamlines_cadence_characterization_button:
+            self._streamlines_cadence_characterization_button.enabled = enabled
+
+    def _set_streamlines_fast_cadence_button_enabled(self, enabled: bool) -> None:
+        """Enable the continuation only after its 500 ms baseline is loaded."""
+
+        if self._streamlines_fast_cadence_check_button:
+            self._streamlines_fast_cadence_check_button.enabled = enabled
+
+    def _set_streamlines_200ms_wrap_recheck_button_enabled(
+        self,
+        enabled: bool,
+    ) -> None:
+        """Enable the wrap-only recheck only after its 250 ms fallback is loaded."""
+
+        if self._streamlines_200ms_wrap_recheck_button:
+            self._streamlines_200ms_wrap_recheck_button.enabled = enabled
 
     @staticmethod
     def _asset_loaded_status(message: str) -> str:
@@ -1953,6 +2043,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         if self._airflow_task and not self._airflow_task.done():
             self._set_airflow_status("Airflow operation is already in progress.")
             return
+        self._phase33_airflow_acceptance.begin_session()
+        self._report_airflow_acceptance("START", 'Attach requested by "Attach".')
         self._airflow_task = asyncio.ensure_future(self._attach_airflow())
 
     def _schedule_build_streamlines_cache(self) -> None:
@@ -1964,14 +2056,154 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_streamlines_cache_buttons_enabled(False)
         self._airflow_task = asyncio.ensure_future(self._build_streamlines_cache())
 
-    def _schedule_load_streamlines_cache(self) -> None:
-        """Load a validated persistent cache while no airflow task is active."""
+    def _schedule_preview_streamlines_profile(self) -> None:
+        """Start only the bounded representative profile preview stage."""
 
         if self._airflow_task and not self._airflow_task.done():
             self._set_streamlines_status("Airflow operation is already in progress.")
             return
+        self._set_streamlines_profile_buttons_enabled(
+            preview=False,
+            accept=False,
+            cache_set=False,
+        )
+        self._airflow_task = asyncio.ensure_future(self._preview_streamlines_profile())
+
+    def _schedule_accept_streamlines_profile(self) -> None:
+        """Freeze only a profile that completed representative preview evidence."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_profile_buttons_enabled(
+            preview=False,
+            accept=False,
+            cache_set=False,
+        )
+        self._airflow_task = asyncio.ensure_future(self._accept_streamlines_profile())
+
+    def _schedule_build_production_cache_set(self) -> None:
+        """Start the all-or-stop four-workload cache operation after profile freeze."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_profile_buttons_enabled(
+            preview=False,
+            accept=False,
+            cache_set=False,
+        )
+        self._airflow_task = asyncio.ensure_future(self._build_production_cache_set())
+
+    def _schedule_run_production_cache_sanity(self) -> None:
+        """Run one short, bounded cached-playback check after cache validation."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_profile_buttons_enabled(
+            preview=False,
+            accept=False,
+            cache_set=False,
+            cache_sanity=False,
+        )
+        self._airflow_task = asyncio.ensure_future(self._run_production_cache_sanity())
+
+    def _schedule_load_streamlines_cache(self) -> None:
+        """Load a cache only when no task or attached Flow can contend for time."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if (
+            not self._controller
+            or not self._controller.is_streamlines_cache_load_allowed()
+        ):
+            self._set_streamlines_status(
+                "Load Streamlines Cache requires Flow DETACHED."
+            )
+            return
+        self._set_streamlines_status("Loading Streamlines cache: preparing load task.")
         self._set_streamlines_cache_buttons_enabled(False)
+        self._set_streamlines_cadence_button_enabled(False)
+        self._set_streamlines_fast_cadence_button_enabled(False)
+        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
         self._airflow_task = asyncio.ensure_future(self._load_streamlines_cache())
+
+    def _schedule_streamlines_cadence_characterization(self) -> None:
+        """Run the four bounded candidates only from a loaded detached cache."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if (
+            not self._controller
+            or not self._controller.is_streamlines_cadence_characterization_ready()
+        ):
+            self._set_streamlines_status(
+                "Load Streamlines Cache before cadence characterization."
+            )
+            return
+        self._set_streamlines_status(
+            "Cadence characterization: preparing four bounded candidates."
+        )
+        self._set_streamlines_cache_buttons_enabled(False)
+        self._set_streamlines_cadence_button_enabled(False)
+        self._set_streamlines_fast_cadence_button_enabled(False)
+        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_cadence_characterization()
+        )
+
+    def _schedule_streamlines_fast_cadence_check(self) -> None:
+        """Run only 250 and 200 ms after the accepted 500 ms baseline."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if (
+            not self._controller
+            or not self._controller.is_streamlines_fast_cadence_check_ready()
+        ):
+            self._set_streamlines_status(
+                "Run Cadence Characterization before the fast cadence check."
+            )
+            return
+        self._set_streamlines_status(
+            "Fast cadence check: preparing 250 ms and 200 ms candidates."
+        )
+        self._set_streamlines_cache_buttons_enabled(False)
+        self._set_streamlines_cadence_button_enabled(False)
+        self._set_streamlines_fast_cadence_button_enabled(False)
+        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_fast_cadence_check()
+        )
+
+    def _schedule_streamlines_200ms_wrap_recheck(self) -> None:
+        """Recheck one 200 ms candidate against the accepted 250 ms fallback."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        if (
+            not self._controller
+            or not self._controller.is_streamlines_200ms_wrap_recheck_ready()
+        ):
+            self._set_streamlines_status(
+                "A confirmed 250 ms Streamlines period is required for recheck."
+            )
+            return
+        self._set_streamlines_status(
+            "200 ms wrap recheck: preparing one 20 s observation window."
+        )
+        self._set_streamlines_cache_buttons_enabled(False)
+        self._set_streamlines_cadence_button_enabled(False)
+        self._set_streamlines_fast_cadence_button_enabled(False)
+        self._set_streamlines_200ms_wrap_recheck_button_enabled(False)
+        self._airflow_task = asyncio.ensure_future(
+            self._run_streamlines_200ms_wrap_recheck()
+        )
 
     def _schedule_attached_workload_transition(self, workload_mode: str) -> None:
         """Forward a semantic workload change without owning Flow arbitration."""
@@ -1991,13 +2223,54 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
 
     async def _run_attached_workload_transition(self, workload_mode: str) -> None:
-        result = await self._controller.request_attached_workload_transition_in_kit(
-            workload_mode,
-            status_callback=self._set_airflow_status,
+        self._report_airflow_acceptance(
+            "START",
+            f"Workload transition requested: {workload_mode}.",
         )
+        transition_stage = {"value": "target validation"}
+        started_at = time.monotonic()
+        waiting_task = asyncio.ensure_future(
+            self._report_airflow_waiting(
+                operation="Workload transition",
+                started_at=started_at,
+                stage_source=lambda: transition_stage["value"],
+            )
+        )
+        self._report_airflow_acceptance(
+            "PROGRESS",
+            "stage=target validation",
+        )
+
+        def report_progress(message: str) -> None:
+            transition_stage["value"] = message
+            self._set_airflow_status(message)
+            self._report_airflow_acceptance("PROGRESS", message)
+
+        try:
+            result = await self._controller.request_attached_workload_transition_in_kit(
+                workload_mode,
+                status_callback=report_progress,
+            )
+        finally:
+            waiting_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiting_task
         self._refresh_airflow_cache_selector_label()
         if not result.success:
             self._set_airflow_status(result.message)
+            self._phase33_airflow_acceptance.mark_failed()
+            self._report_airflow_acceptance("FAIL", result.message)
+            return
+        from digital_twin_runtime_suite.app.airflow_acceptance import (
+            next_phase33_airflow_action,
+        )
+
+        self._phase33_airflow_acceptance.mark_transition_complete(workload_mode)
+        self._report_airflow_acceptance(
+            "COMPLETE",
+            result.message,
+            next_action=next_phase33_airflow_action(workload_mode),
+        )
 
     def _schedule_detach_airflow(self) -> None:
         transition_task = self._airflow_transition_task
@@ -2453,19 +2726,49 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         if result.success:
             self._set_lighting_status(self._lighting_status_from_load(result.message))
+            self._report_airflow_acceptance(
+                "READY",
+                "Flow is detached and Attach is available.",
+                next_action='Press "Attach".',
+            )
         return result
 
     async def _attach_airflow(self) -> None:
-
         def update_status(message: str) -> None:
+            attach_stage["value"] = message
             self._refresh_airflow_cache_selector_label()
             self._set_airflow_status(message)
+            self._report_airflow_acceptance("PROGRESS", message)
 
-        result = await self._controller.attach_simulation_cache_in_kit(
-            status_callback=update_status,
+        attach_stage = {"value": "foreground validation"}
+        started_at = time.monotonic()
+        waiting_task = asyncio.ensure_future(
+            self._report_airflow_waiting(
+                operation="Attach",
+                started_at=started_at,
+                stage_source=lambda: attach_stage["value"],
+            )
         )
+        try:
+            result = await self._controller.attach_simulation_cache_in_kit(
+                status_callback=update_status,
+            )
+        finally:
+            waiting_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiting_task
         self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
+        if result.success:
+            self._phase33_airflow_acceptance.mark_attach_complete()
+            self._report_airflow_acceptance(
+                "COMPLETE",
+                result.message,
+                next_action='Select "Critical" in the "Workload" control.',
+            )
+            return
+        self._report_airflow_acceptance("FAIL", result.message)
+        self._phase33_airflow_acceptance.mark_failed()
 
     async def _build_streamlines_cache(self) -> None:
         """Contain production cache-build failures at the OmniUI task boundary."""
@@ -2494,6 +2797,254 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         finally:
             self._set_streamlines_cache_buttons_enabled(True)
 
+    async def _preview_streamlines_profile(self) -> None:
+        """Run the visible candidate preview before any production cache exists."""
+
+        start = "Preparing representative Idle and Critical profile previews."
+        self._report_manual_acceptance(
+            area="STREAMLINES | PRODUCTION_PROFILE",
+            event="START",
+            status=start,
+        )
+        self._set_streamlines_status(start)
+        try:
+            preview = self._controller.preview_streamlines_production_profile_in_kit
+            results = await preview(status_callback=self._set_streamlines_status)
+            summary = "; ".join(
+                (
+                    f"{result.workload}: curves={result.curve_count}; "
+                    f"points={result.point_count}; "
+                    f"generation_ms={result.generation_ms:.0f}"
+                )
+                for result in results
+            )
+            complete = (
+                "Representative previews complete; 200 ms cached-playback "
+                f"contract retained. {summary}"
+            )
+            self._set_streamlines_status(complete)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_PROFILE",
+                event="COMPLETE",
+                status=complete,
+                next_action=(
+                    'Inspect the viewport and press "Accept Production Profile".'
+                ),
+            )
+            self._set_streamlines_profile_buttons_enabled(accept=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            status = f"Production profile preview failed: {error}"
+            self._set_streamlines_status(status)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_PROFILE",
+                event="FAIL",
+                status=status,
+            )
+            self._set_streamlines_profile_buttons_enabled(preview=True)
+
+    async def _accept_streamlines_profile(self) -> None:
+        """Freeze the candidate profile only after the operator reviewed it."""
+
+        self._report_manual_acceptance(
+            area="STREAMLINES | PRODUCTION_PROFILE",
+            event="START",
+            status="Accepting the reviewed production Streamlines profile.",
+        )
+        try:
+            profile = self._controller.accept_streamlines_production_profile()
+            status = (
+                f"profile={profile.name}; state=FROZEN; "
+                f"settings_signature={profile.settings_signature}; "
+                f"settings={profile.to_dict()}"
+            )
+            self._set_streamlines_status(status)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_PROFILE",
+                event="COMPLETE",
+                status=status,
+                next_action='Press "Build / Validate Production Cache Set".',
+            )
+            self._set_streamlines_profile_buttons_enabled(cache_set=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            status = f"Production profile acceptance failed: {error}"
+            self._set_streamlines_status(status)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_PROFILE",
+                event="FAIL",
+                status=status,
+            )
+            self._set_streamlines_profile_buttons_enabled(preview=True)
+
+    async def _build_production_cache_set(self) -> None:
+        """Build or validate all independent workload caches and close Phase 3.5."""
+
+        start = "Building or validating Idle, Nominal, Surge, and Critical caches."
+        self._report_manual_acceptance(
+            area="STREAMLINES | PRODUCTION_CACHE_SET",
+            event="START",
+            status=start,
+        )
+        self._set_streamlines_status(start)
+        try:
+            result = await self._controller.build_validate_production_cache_set_in_kit(
+                status_callback=self._set_streamlines_status,
+            )
+            for workload in result.results:
+                metadata = workload.metadata
+                status = (
+                    f"workload={workload.workload}; "
+                    f"dataset={workload.dataset_identity}; "
+                    f"validation=VALID; reused={workload.reused}; "
+                    f"cached/source={len(metadata.states)}/{metadata.sample_count}; "
+                    f"failed_samples=0; cache_size_bytes={workload.cache_size_bytes}; "
+                    f"source_signature={metadata.source_signature}; "
+                    f"settings_signature={metadata.settings_signature}."
+                )
+                self._report_manual_acceptance(
+                    area="STREAMLINES | PRODUCTION_CACHE_SET",
+                    event="PROGRESS",
+                    status=status,
+                )
+            if not result.success:
+                raise RuntimeError(
+                    f"workload={result.failed_workload}; {result.message}"
+                )
+            complete = (
+                "profile=FROZEN; Idle/Nominal/Surge/Critical=VALID; "
+                "omitted=0; synthetic=0; failed=0; "
+                "sample contracts are workload-specific."
+            )
+            self._set_streamlines_status(complete)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_CACHE_SET",
+                event="COMPLETE",
+                status=complete,
+                next_action=f'Press "{PRODUCTION_CACHE_SANITY_ACTION}".',
+            )
+            self._set_streamlines_profile_buttons_enabled(cache_sanity=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            status = f"Production cache set failed: {error}"
+            self._set_streamlines_status(status)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_CACHE_SET",
+                event="FAIL",
+                status=status,
+            )
+            self._set_streamlines_profile_buttons_enabled(cache_set=True)
+
+    async def _run_production_cache_sanity(self) -> None:
+        """Close Phase 3.5 only after one short 200 ms persisted-cache proof."""
+
+        start = "Running 200 ms sanity against the validated persisted cache."
+        self._report_manual_acceptance(
+            area="STREAMLINES | PRODUCTION_CACHE_SANITY",
+            event="START",
+            status=start,
+        )
+        self._set_streamlines_status(start)
+        try:
+            await self._wait_for_background_validation_before_cache_sanity()
+            run_sanity = self._controller.run_streamlines_production_cache_sanity_in_kit
+            result = await run_sanity(status_callback=self._set_streamlines_status)
+            scheduler = result.scheduler
+            complete = (
+                "Production cache sanity complete: "
+                "cache_source=persisted_production_only; period_ms=200; "
+                f"measured_window_s={result.duration_seconds:.1f}; "
+                f"ticks={scheduler.tick_count}; switches={scheduler.switch_count}; "
+                f"no_ops={scheduler.no_op_count}; "
+                f"median_switch_ms="
+                f"{scheduler.median_switch_latency_seconds * 1000.0:.1f}; "
+                f"max_switch_ms="
+                f"{scheduler.maximum_switch_latency_seconds * 1000.0:.1f}; "
+                f"missed_deadlines={scheduler.missed_deadlines}; "
+                f"backlog={scheduler.backlog_count}; "
+                f"max_deadline_lateness_ms="
+                f"{scheduler.maximum_drift_seconds * 1000.0:.1f}; "
+                f"max_active_playback_tasks="
+                f"{result.maximum_active_playback_task_count}; "
+                f"active_playback_tasks_after_stop="
+                f"{result.active_playback_task_count_after_stop}; "
+                "kit_cae_executions=0; runtime_preview_rebuilds=0; "
+                "playback_vti_imports=0; runtime_error=none; clean_stop=PASS."
+            )
+            self._set_streamlines_status(complete)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_CACHE_SANITY",
+                event="COMPLETE",
+                status=complete,
+            )
+            from digital_twin_runtime_suite.app.manual_acceptance import (
+                format_manual_acceptance_test_complete,
+            )
+
+            if not self._phase35_terminal_emitted:
+                carb.log_warn(
+                    _with_dtrs_local_timestamp(
+                        format_manual_acceptance_test_complete(
+                            "Phase 3.5 production Streamlines cache set passed."
+                        )
+                    )
+                )
+                self._phase35_terminal_emitted = True
+                self._set_streamlines_profile_buttons_enabled(cache_sanity=False)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            status = f"Production cache sanity failed: {error}"
+            self._set_streamlines_status(status)
+            self._report_manual_acceptance(
+                area="STREAMLINES | PRODUCTION_CACHE_SANITY",
+                event="FAIL",
+                status=status,
+            )
+            self._set_streamlines_profile_buttons_enabled(cache_sanity=True)
+
+    async def _wait_for_background_validation_before_cache_sanity(self) -> None:
+        """Keep the bounded playback window clear of startup VTI validation.
+
+        The extension owns the background task, so waiting here neither changes
+        its coordinator policy nor makes its outcome part of cache sanity.
+        """
+
+        task = getattr(self, "_airflow_background_validation_task", None)
+        if task is None or task.done():
+            return
+        started_at = time.monotonic()
+        next_waiting_at = started_at + 5.0
+        status = (
+            "Waiting for active airflow background validation to finish before "
+            "timed cached playback."
+        )
+        self._set_streamlines_status(status)
+        self._report_manual_acceptance(
+            area="STREAMLINES | PRODUCTION_CACHE_SANITY",
+            event="PROGRESS",
+            status=status,
+        )
+        while not task.done():
+            now = time.monotonic()
+            if now >= next_waiting_at:
+                elapsed_seconds = now - started_at
+                waiting = (
+                    "stage=background validation idle wait; "
+                    f"elapsed_s={elapsed_seconds:.1f}."
+                )
+                self._set_streamlines_status(waiting)
+                self._report_manual_acceptance(
+                    area="STREAMLINES | PRODUCTION_CACHE_SANITY",
+                    event="WAITING",
+                    status=waiting,
+                )
+                next_waiting_at = now + 5.0
+            await asyncio.sleep(0.1)
+
     async def _load_streamlines_cache(self) -> None:
         """Contain production cache-load failures at the OmniUI task boundary."""
 
@@ -2505,6 +3056,22 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 "Streamlines cache loaded: exact manifest state "
                 f"{result.active_sample_index + 1}/{result.metadata.sample_count}."
             )
+            if self._controller.is_streamlines_200ms_wrap_recheck_ready():
+                self._set_streamlines_200ms_wrap_recheck_button_enabled(True)
+                self._set_streamlines_status(
+                    self._controller.announce_streamlines_200ms_wrap_recheck_ready()
+                )
+            elif self._controller.is_streamlines_fast_cadence_check_ready():
+                self._set_streamlines_fast_cadence_button_enabled(True)
+                self._set_streamlines_status(
+                    self._controller.announce_streamlines_fast_cadence_check_ready()
+                )
+            else:
+                self._set_streamlines_cadence_button_enabled(True)
+                announce_ready = (
+                    self._controller.announce_streamlines_cadence_characterization_ready
+                )
+                self._set_streamlines_status(announce_ready())
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -2524,6 +3091,146 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         finally:
             self._set_streamlines_cache_buttons_enabled(True)
 
+    async def _run_streamlines_cadence_characterization(self) -> None:
+        """Contain bounded cadence failures at the OmniUI task boundary."""
+
+        try:
+            result = (
+                await (
+                    self._controller.run_streamlines_cadence_characterization_in_kit(
+                        status_callback=self._set_streamlines_status,
+                    )
+                )
+            )
+            if result.selected is None:
+                self._set_streamlines_status(
+                    "No cadence candidate was accepted; inspect the structured log."
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="CADENCE_CHARACTERIZATION",
+                display_name="Streamlines cadence characterization",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
+            self._set_streamlines_cadence_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_cadence_characterization_ready()
+                )
+            )
+            self._set_streamlines_fast_cadence_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_fast_cadence_check_ready()
+                )
+            )
+            self._set_streamlines_200ms_wrap_recheck_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_200ms_wrap_recheck_ready()
+                )
+            )
+
+    async def _run_streamlines_fast_cadence_check(self) -> None:
+        """Contain fast-check failures at the OmniUI task boundary."""
+
+        try:
+            await self._controller.run_streamlines_fast_cadence_check_in_kit(
+                status_callback=self._set_streamlines_status,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="CADENCE_CHARACTERIZATION",
+                display_name="Streamlines fast cadence check",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
+            self._set_streamlines_cadence_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_cadence_characterization_ready()
+                )
+            )
+            self._set_streamlines_fast_cadence_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_fast_cadence_check_ready()
+                )
+            )
+            self._set_streamlines_200ms_wrap_recheck_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_200ms_wrap_recheck_ready()
+                )
+            )
+
+    async def _run_streamlines_200ms_wrap_recheck(self) -> None:
+        """Contain one-candidate wrap recheck failures at the OmniUI boundary."""
+
+        try:
+            await self._controller.run_streamlines_200ms_wrap_recheck_in_kit(
+                status_callback=self._set_streamlines_status,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            import carb
+
+            from digital_twin_runtime_suite.app.streamlines.runtime import (
+                report_streamlines_task_failure,
+            )
+
+            report_streamlines_task_failure(
+                error,
+                area="CADENCE_CHARACTERIZATION",
+                display_name="Streamlines 200 ms wrap recheck",
+                status_callback=self._set_streamlines_status,
+                error_logger=carb.log_error,
+            )
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
+            self._set_streamlines_cadence_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_cadence_characterization_ready()
+                )
+            )
+            self._set_streamlines_fast_cadence_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_fast_cadence_check_ready()
+                )
+            )
+            self._set_streamlines_200ms_wrap_recheck_button_enabled(
+                bool(
+                    self._controller
+                    and self._controller.is_streamlines_200ms_wrap_recheck_ready()
+                )
+            )
+
     async def _cancel_attach_then_detach(self, attach_task) -> None:
         """Serialize Detach behind the cooperative preflight cancellation result."""
 
@@ -2540,18 +3247,50 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         await self._detach_airflow()
 
     async def _detach_airflow(self) -> None:
+        self._report_airflow_acceptance("START", 'Detach requested by "Detach".')
+        started_at = time.monotonic()
+        waiting_task = asyncio.ensure_future(
+            self._report_airflow_waiting(
+                operation="Detach",
+                started_at=started_at,
+                stage_source=lambda: "runtime teardown",
+            )
+        )
         try:
             result = await self._controller.detach_simulation_cache_in_kit()
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001
-            import carb
-
             carb.log_error(f"DTRS airflow detach task failed: {error}")
             self._set_airflow_status(f"Airflow cache detach failed: {error}")
+            self._phase33_airflow_acceptance.mark_failed()
+            self._report_airflow_acceptance("FAIL", str(error))
             return
+        finally:
+            waiting_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiting_task
         self._refresh_airflow_cache_selector_label()
         self._set_airflow_status(result.message)
+        if result.success:
+            self._report_airflow_acceptance(
+                "COMPLETE",
+                result.message,
+            )
+            if (
+                PHASE33_MANUAL_ACCEPTANCE_ENABLED
+                and self._phase33_airflow_acceptance.complete_after_detach()
+            ):
+                from digital_twin_runtime_suite.app.airflow_acceptance import (
+                    format_phase33_airflow_test_complete,
+                )
+
+                carb.log_warn(
+                    _with_dtrs_local_timestamp(format_phase33_airflow_test_complete())
+                )
+            return
+        self._phase33_airflow_acceptance.mark_failed()
+        self._report_airflow_acceptance("FAIL", result.message)
 
     async def _apply_smoke_tuning(self) -> None:
         from digital_twin_runtime_suite.app.view_controls import (

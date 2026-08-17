@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,20 +21,50 @@ from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalVelocitySourceDescriptor,
 )
 
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 CACHE_DIRECTORY_NAME = "streamlines"
 CACHE_PLAYBACK_ROOT_PATH = STREAMLINES_CACHE_PLAYBACK_ROOT
 CACHE_PLAYBACK_CURVES_PATH = f"{CACHE_PLAYBACK_ROOT_PATH}/Geometry"
 CACHE_BUILD_OPERATOR_PATH = "/DTRS_KitCAE/Streamlines/CacheBuilder"
 CACHE_BUILD_SEED_PATH = "/DTRS_KitCAE/StreamlineSeeds/CacheBuildSphere"
-UNIT_SPHERE_DEFAULT_AZIMUTH_SAMPLES = 16
-UNIT_SPHERE_DEFAULT_POLAR_SAMPLES = 16
+
+
+@dataclass(frozen=True)
+class StreamlinesCacheOwnership:
+    """Stable workload and dataset identity for one derived cache artifact."""
+
+    workload: str
+    dataset_identity: str
+
+    def __post_init__(self) -> None:
+        """Reject a cache path that cannot identify its authoritative owner."""
+
+        if not self.workload.strip() or not self.dataset_identity.strip():
+            raise ValueError(
+                "Streamlines cache ownership requires workload and dataset."
+            )
+
+    @property
+    def identity(self) -> str:
+        """Return the human-readable ownership key persisted in metadata."""
+
+        return f"{self.workload}|{self.dataset_identity}"
+
+    @property
+    def path_components(self) -> tuple[str, str]:
+        """Return filesystem-safe components derived only from ownership."""
+
+        return (
+            _cache_path_component(self.workload),
+            _cache_path_component(self.dataset_identity),
+        )
 
 
 @dataclass(frozen=True)
 class StreamlinesCachePaths:
-    """Canonical on-disk locations for one derived Streamlines cache."""
+    """Canonical on-disk locations for one ownership-specific cache."""
 
+    ownership: StreamlinesCacheOwnership
     directory: Path
     metadata_path: Path
     geometry_path: Path
@@ -58,6 +89,10 @@ class StreamlinesCacheSettings:
     max_step_size: float
     max_steps: int
     width: float
+    seed_resolution: int
+    profile_name: str
+    profile_signature: str
+    persisted_attributes: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
         """Return the portable, deterministic payload covered by the signature."""
@@ -74,6 +109,10 @@ class StreamlinesCacheSettings:
             "max_step_size": self.max_step_size,
             "max_steps": self.max_steps,
             "width": self.width,
+            "seed_resolution": self.seed_resolution,
+            "profile_name": self.profile_name,
+            "profile_signature": self.profile_signature,
+            "persisted_attributes": list(self.persisted_attributes),
         }
 
     @classmethod
@@ -97,6 +136,12 @@ class StreamlinesCacheSettings:
             max_step_size=_normalise_float(data["max_step_size"]),
             max_steps=int(data["max_steps"]),
             width=_normalise_float(data["width"]),
+            seed_resolution=int(data["seed_resolution"]),
+            profile_name=_normalise_token(data["profile_name"]),
+            profile_signature=_normalise_token(data["profile_signature"]),
+            persisted_attributes=_normalise_persisted_attributes(
+                data["persisted_attributes"]
+            ),
         )
 
 
@@ -243,12 +288,21 @@ class StreamlinesCacheValidation:
 
 def streamlines_cache_paths(
     repo_root: Path,
+    ownership: StreamlinesCacheOwnership,
 ) -> StreamlinesCachePaths:
-    """Return the ignored project-local cache paths without creating them."""
+    """Return one stable ownership-derived cache path without creating it."""
 
-    directory = repo_root / "cache" / CACHE_DIRECTORY_NAME
-    stem = "nominal_streamlines_cache"
+    workload_component, dataset_component = ownership.path_components
+    directory = (
+        repo_root
+        / "cache"
+        / CACHE_DIRECTORY_NAME
+        / workload_component
+        / dataset_component
+    )
+    stem = "streamlines_cache"
     return StreamlinesCachePaths(
+        ownership=ownership,
         directory=directory,
         metadata_path=directory / f"{stem}.json",
         geometry_path=directory / f"{stem}.usdc",
@@ -314,8 +368,8 @@ def streamlines_cache_settings(
     return StreamlinesCacheSettings(
         operator_type=_normalise_token(request.operator_type),
         direction=_normalise_token(request.direction),
-        seed_azimuth_samples=UNIT_SPHERE_DEFAULT_AZIMUTH_SAMPLES,
-        seed_polar_samples=UNIT_SPHERE_DEFAULT_POLAR_SAMPLES,
+        seed_azimuth_samples=int(request.seed_resolution),
+        seed_polar_samples=int(request.seed_resolution),
         seed_center=tuple(_normalise_float(value) for value in request.seed_center),
         seed_radius=_normalise_float(request.seed_radius),
         min_step_size=_normalise_float(request.min_step_size),
@@ -323,6 +377,12 @@ def streamlines_cache_settings(
         max_step_size=_normalise_float(request.max_step_size),
         max_steps=int(request.max_steps),
         width=_normalise_float(request.width),
+        seed_resolution=int(request.seed_resolution),
+        profile_name=_normalise_token(request.profile_name),
+        profile_signature=_normalise_token(request.profile_signature),
+        persisted_attributes=_normalise_persisted_attributes(
+            request.persisted_attributes
+        ),
     )
 
 
@@ -332,6 +392,12 @@ def streamlines_settings_signature(
     """Hash the canonical geometry settings, never transient runtime paths."""
 
     return _signature(streamlines_cache_settings(request).to_dict())
+
+
+def cache_settings_payload_signature(settings: StreamlinesCacheSettings) -> str:
+    """Return the signature covered by one persisted settings payload."""
+
+    return _signature(settings.to_dict())
 
 
 def build_streamlines_cache_metadata(
@@ -370,22 +436,22 @@ def build_streamlines_cache_metadata(
 def validate_streamlines_cache(
     metadata: StreamlinesCacheMetadata,
     *,
-    source_signature: str,
+    source: TemporalVelocitySourceDescriptor,
     settings_signature: str,
-    workload: str,
-    dataset_identity: str,
-    sample_count: int,
     geometry_path: Path,
 ) -> StreamlinesCacheValidation:
-    """Reject stale, partial, or malformed cache metadata before playback."""
+    """Reject a cache that diverges from the same resolved source contract."""
 
     if metadata.schema_version != CACHE_SCHEMA_VERSION:
         return StreamlinesCacheValidation(False, "Cache schema version is stale.")
     if not metadata.valid:
         return StreamlinesCacheValidation(False, "Cache is not marked VALID.")
-    if metadata.workload != workload or metadata.dataset_identity != dataset_identity:
+    if (
+        metadata.workload != source.workload
+        or metadata.dataset_identity != source.dataset_identity
+    ):
         return StreamlinesCacheValidation(False, "Cache workload or dataset differs.")
-    if metadata.source_signature != source_signature:
+    if metadata.source_signature != source_signature_from_temporal_source(source):
         return StreamlinesCacheValidation(False, "Cache source manifest is stale.")
     if metadata.settings is None:
         return StreamlinesCacheValidation(
@@ -400,19 +466,25 @@ def validate_streamlines_cache(
         )
     if metadata.settings_signature != settings_signature:
         return StreamlinesCacheValidation(False, "Cache settings or seed are stale.")
-    if metadata.sample_count != sample_count or len(metadata.states) != sample_count:
+    if (
+        metadata.sample_count != source.sample_count
+        or len(metadata.states) != source.sample_count
+    ):
         return StreamlinesCacheValidation(False, "Cache state count is incomplete.")
+    if metadata.sample_interval_seconds != source.sample_interval_seconds:
+        return StreamlinesCacheValidation(False, "Cache sample timing is stale.")
+    if metadata.time_codes_per_second != source.time_codes_per_second:
+        return StreamlinesCacheValidation(False, "Cache time-code rate is stale.")
     if geometry_path.name != metadata.geometry_file_name:
         return StreamlinesCacheValidation(False, "Cache geometry path is unexpected.")
     if not geometry_path.is_file():
         return StreamlinesCacheValidation(False, "Cache geometry file is missing.")
     if file_sha256(geometry_path) != metadata.geometry_sha256:
         return StreamlinesCacheValidation(False, "Cache geometry file is stale.")
-    indices = tuple(state.sample_index for state in metadata.states)
-    if indices != tuple(range(sample_count)):
-        return StreamlinesCacheValidation(
-            False, "Cache states are missing or duplicate."
-        )
+    try:
+        _validate_complete_state_sequence(source, metadata.states)
+    except ValueError as error:
+        return StreamlinesCacheValidation(False, str(error))
     if any(
         state.curve_count <= 0 or state.point_count <= 0 for state in metadata.states
     ):
@@ -570,12 +642,23 @@ def _validate_complete_state_sequence(
             raise ValueError("Cache states must have contiguous manifest indices.")
         if state.source_vti != expected_path:
             raise ValueError("Cache state VTI does not match the manifest.")
+        if state.source_vti_identity != vti_file_identity(source.velocity_paths[index]):
+            raise ValueError("Cache state VTI identity does not match the manifest.")
         if state.time_code != expected_time_code:
             raise ValueError("Cache state time code does not match the manifest.")
         if state.source_time_seconds != (
             expected_time_code / source.time_codes_per_second
         ):
             raise ValueError("Cache state source time does not match the manifest.")
+
+
+def _cache_path_component(value: str) -> str:
+    """Make an ownership component portable without consulting cache contents."""
+
+    normalised = re.sub(r"[^a-z0-9._-]+", "_", value.strip().lower())
+    if not normalised:
+        raise ValueError("Streamlines cache path component is empty.")
+    return normalised
 
 
 def _normalise_bounds(
@@ -608,6 +691,17 @@ def _normalise_float(value: object) -> float:
     if not math.isfinite(number):
         raise ValueError("Cache numeric setting must be finite.")
     return 0.0 if number == 0.0 else number
+
+
+def _normalise_persisted_attributes(value: object) -> tuple[str, ...]:
+    """Keep one deterministic non-empty list of persisted cache attributes."""
+
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError("Cache persisted attributes must be a non-empty list.")
+    attributes = tuple(_normalise_token(item) for item in value)
+    if len(set(attributes)) != len(attributes):
+        raise ValueError("Cache persisted attributes must be unique.")
+    return attributes
 
 
 def _signature(value: object) -> str:

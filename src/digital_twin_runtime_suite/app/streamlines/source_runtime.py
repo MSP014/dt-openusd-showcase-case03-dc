@@ -5,14 +5,14 @@ from __future__ import annotations
 import time
 from typing import Callable
 
-from digital_twin_runtime_suite.app.airflow_dataset import discover_airflow_dataset
+from digital_twin_runtime_suite.app.airflow_dataset import AirflowDataset
 from digital_twin_runtime_suite.app.diagnostics import with_dtrs_yerevan_timestamp
 from digital_twin_runtime_suite.app.flow import temporal as flow_temporal
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
     clear_static_velocity_source_from_stage,
     describe_imported_static_velocity_source,
-    resolve_static_velocity_sample,
+    resolve_static_velocity_sample_from_airflow_dataset,
 )
 from digital_twin_runtime_suite.app.streamlines.diagnostics import (
     format_static_source_acceptance,
@@ -22,6 +22,10 @@ from digital_twin_runtime_suite.app.streamlines.diagnostics import (
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalSourceSample,
     TemporalVelocitySourceDescriptor,
+    temporal_source_from_airflow_dataset,
+)
+from digital_twin_runtime_suite.app.workload_binding.runtime import (
+    WorkloadAirflowBinding,
 )
 
 StatusCallback = Callable[[str], None]
@@ -34,6 +38,8 @@ class StreamlinesSourceRuntimeMixin:
         self,
         *,
         status_callback: StatusCallback | None = None,
+        binding: WorkloadAirflowBinding | None = None,
+        airflow_dataset: AirflowDataset | None = None,
     ) -> TemporalVelocitySourceDescriptor:
         """Author the shared ``vel.fileNames`` time-sample source for Streamlines.
 
@@ -42,14 +48,16 @@ class StreamlinesSourceRuntimeMixin:
         imported ``vel`` field, matching the accepted DTRS temporal mechanism.
         """
 
-        binding = self.resolve_current_workload_airflow_binding()
-        airflow_dataset = discover_airflow_dataset(
-            self.config.asset_root,
-            binding.dataset,
-        )
+        if binding is None:
+            binding, resolved_dataset = self.resolve_current_airflow_dataset()
+            airflow_dataset = airflow_dataset or resolved_dataset
+        if airflow_dataset is None:
+            airflow_dataset = self.resolve_airflow_dataset_for_binding(binding)
         descriptor = await self.prepare_static_velocity_sample_in_kit(
             sample_index=0,
             status_callback=status_callback,
+            binding=binding,
+            airflow_dataset=airflow_dataset,
         )
         if (
             descriptor.workload != binding.workload_mode
@@ -60,14 +68,6 @@ class StreamlinesSourceRuntimeMixin:
                 "being prepared; retry from a stable workload."
             )
         velocity_paths = airflow_dataset.velocity_vti_sequence_paths
-        if (
-            not velocity_paths
-            or descriptor.vti_path.resolve() != velocity_paths[0].resolve()
-        ):
-            raise RuntimeError(
-                "Temporal Streamlines source does not begin with the accepted "
-                "manifest sample zero."
-            )
 
         import omni.kit.app
         import omni.usd
@@ -85,7 +85,7 @@ class StreamlinesSourceRuntimeMixin:
             )
         if status_callback:
             status_callback(
-                f"Authoring temporal source В· {len(velocity_paths)} manifest samples"
+                f"Authoring temporal source: {len(velocity_paths)} manifest samples"
             )
         previous_target = stage.GetEditTarget()
         try:
@@ -109,13 +109,17 @@ class StreamlinesSourceRuntimeMixin:
         finally:
             stage.SetEditTarget(previous_target)
         await app.next_update_async()
-        source = TemporalVelocitySourceDescriptor(
+        expected_source = temporal_source_from_airflow_dataset(
+            airflow_dataset,
+            workload=binding.workload_mode,
             static_descriptor=descriptor,
-            velocity_paths=velocity_paths,
-            sample_time_codes=time_codes,
             time_codes_per_second=float(stage.GetTimeCodesPerSecond()),
-            sample_interval_seconds=airflow_dataset.sample_interval_seconds,
         )
+        if time_codes != expected_source.sample_time_codes:
+            raise RuntimeError(
+                "Kit temporal source time codes do not match the active manifest."
+            )
+        source = expected_source
         if (
             len(
                 flow_temporal.kit_cae_file_names_time_samples(
@@ -170,6 +174,8 @@ class StreamlinesSourceRuntimeMixin:
         status_callback: StatusCallback | None = None,
         *,
         force_failure_after_import: bool = False,
+        binding: WorkloadAirflowBinding | None = None,
+        airflow_dataset: AirflowDataset | None = None,
     ) -> StaticVelocitySourceDescriptor:
         """Resolve, import, and spatially validate one manifest-backed VTI sample.
 
@@ -178,17 +184,21 @@ class StreamlinesSourceRuntimeMixin:
         importer does not retain the Houdini ImageData origin by itself.
         """
 
-        binding = self.resolve_current_workload_airflow_binding()
+        if binding is None:
+            binding, resolved_dataset = self.resolve_current_airflow_dataset()
+            airflow_dataset = airflow_dataset or resolved_dataset
+        if airflow_dataset is None:
+            airflow_dataset = self.resolve_airflow_dataset_for_binding(binding)
         cache = self.config.simulation_cache
-        sample = resolve_static_velocity_sample(
-            self.config.asset_root,
+        sample = resolve_static_velocity_sample_from_airflow_dataset(
+            airflow_dataset,
             binding,
             cache.velocity_field_name,
             sample_index,
         )
         if status_callback:
             status_callback(
-                f"Preparing Streamlines source В· {sample.dataset_identity} В· "
+                f"Preparing Streamlines source: {sample.dataset_identity}; "
                 f"VTI {sample.sample_index}"
             )
 
@@ -330,7 +340,7 @@ class StreamlinesSourceRuntimeMixin:
 
         if status_callback:
             status_callback(
-                f"Static source ready В· {descriptor.dataset_identity} В· "
+                f"Static source ready: {descriptor.dataset_identity}; "
                 f"VTI {descriptor.sample_index}"
             )
         return descriptor

@@ -13,7 +13,6 @@ from typing import Callable
 
 from digital_twin_runtime_suite.app.airflow_dataset import (
     AirflowDatasetError,
-    discover_airflow_dataset,
     validate_airflow_dataset_grid,
 )
 from digital_twin_runtime_suite.app.airflow_validation import family as airflow_family
@@ -297,7 +296,7 @@ class FlowRuntimeMixin(
                         failure_reason=str(error),
                     )
                     if status_callback:
-                        status_callback("Airflow active · Validation failed")
+                        status_callback("Airflow active: validation failed")
                 return
             finally:
                 if generation == self._flow_temporal_proof_generation:
@@ -339,7 +338,7 @@ class FlowRuntimeMixin(
             )
             if status_callback:
                 status_callback(
-                    "Airflow active · Validation " + ("passed" if passed else "failed")
+                    "Airflow active: validation " + ("passed" if passed else "failed")
                 )
 
         self._flow_temporal_proof_task = asyncio.ensure_future(monitor())
@@ -347,11 +346,7 @@ class FlowRuntimeMixin(
     def _resolve_kit_cae_attach_airflow_dataset(self):
         """Resolve current workload to the manifest-backed dataset for Attach."""
 
-        binding = self.resolve_current_workload_airflow_binding()
-        return binding, discover_airflow_dataset(
-            self.config.asset_root,
-            binding.dataset,
-        )
+        return self.resolve_current_airflow_dataset()
 
     async def _attach_kit_cae_airflow_in_kit(
         self,
@@ -379,11 +374,7 @@ class FlowRuntimeMixin(
 
         binding = None
         try:
-            binding = self.resolve_current_workload_airflow_binding()
-            airflow_dataset = discover_airflow_dataset(
-                self.config.asset_root,
-                binding.dataset,
-            )
+            binding, airflow_dataset = self._resolve_kit_cae_attach_airflow_dataset()
         except (AirflowDatasetError, RuntimeError, ValueError) as error:
             return self._finalize_airflow_failure(
                 semantic_workload=(
@@ -402,6 +393,11 @@ class FlowRuntimeMixin(
                 status_callback=status_callback,
             )
         try:
+            transition = self._airflow_state.begin(
+                self._airflow_state.resolve_target(binding)
+            )
+            if transition is None:
+                raise RuntimeError("Attach target is already committed or pending.")
             validation_lease = await self.acquire_airflow_validation_for_attach(binding)
         except BackgroundValidationError as error:
             return self._finalize_airflow_failure(
@@ -419,8 +415,13 @@ class FlowRuntimeMixin(
                 status_callback,
             )
             if result.success:
-                self._flow_last_airflow_failure = None
-                return result
+                if self._airflow_state.commit(transition.transition_id):
+                    return result
+                return SimulationCacheResult(
+                    False,
+                    "Attached airflow proof completed after its request was "
+                    "superseded.",
+                )
             return self._finalize_airflow_failure(
                 semantic_workload=binding.workload_mode,
                 requested_binding=binding,
@@ -499,8 +500,6 @@ class FlowRuntimeMixin(
             return SimulationCacheResult(False, "Airflow cache skipped: no open stage.")
 
         self._flow_lifecycle_state = "ATTACHING"
-        self._flow_session_workload_binding = binding
-        self._flow_pending_workload_binding = None
         self._flow_attach_cancel_event = Event()
         self._start_kit_cae_operator_tracking()
         self._stop_flow_performance_sampler()
@@ -544,9 +543,9 @@ class FlowRuntimeMixin(
                 grid_match = validation_cache_lookup.preflight.grid_match
                 if status_callback:
                     status_callback(
-                        "Preparing airflow · Verified this session"
+                        "Preparing airflow: verified this session"
                         if validation_cache_lookup.temporal_proof
-                        else "Preparing airflow · Preflight reused"
+                        else "Preparing airflow: preflight reused"
                     )
                 preflight_started_at = time.monotonic()
                 self._log_kit_cae_attach_phase(
@@ -557,7 +556,7 @@ class FlowRuntimeMixin(
             else:
                 if status_callback:
                     status_callback(
-                        f"Preparing airflow · VTI 0/{len(velocity_paths)} · 0%"
+                        f"Preparing airflow: VTI 0/{len(velocity_paths)}; 0%"
                     )
                 preflight_started_at = time.monotonic()
                 preflight_updates = SimpleQueue()
@@ -580,7 +579,7 @@ class FlowRuntimeMixin(
                         completed, total, _asset_name = preflight_updates.get_nowait()
                         if status_callback:
                             status_callback(
-                                f"Preparing airflow · VTI {completed}/{total} · "
+                                f"Preparing airflow: VTI {completed}/{total}; "
                                 f"{round(100 * completed / total)}%"
                             )
                     except Empty:
@@ -591,7 +590,7 @@ class FlowRuntimeMixin(
                     completed, total, _asset_name = preflight_updates.get_nowait()
                     if status_callback:
                         status_callback(
-                            f"Preparing airflow · VTI {completed}/{total} · "
+                            f"Preparing airflow: VTI {completed}/{total}; "
                             f"{round(100 * completed / total)}%"
                         )
                 validate_airflow_dataset_grid(
@@ -636,9 +635,7 @@ class FlowRuntimeMixin(
             dataset_prim = stage.GetPrimAtPath(dataset_path)
             field_prim = stage.GetPrimAtPath(field_path)
             if status_callback:
-                status_callback(
-                    f"Activating airflow · USD 0/{len(velocity_paths)} · 0%"
-                )
+                status_callback(f"Activating airflow: USD 0/{len(velocity_paths)}; 0%")
             authoring_started_at = time.monotonic()
             self._flow_temporal_sample_time_codes = (
                 await flow_temporal.author_kit_cae_temporal_velocity_samples_in_batches(
@@ -654,8 +651,8 @@ class FlowRuntimeMixin(
                     (
                         lambda completed, total: (
                             status_callback(
-                                "Activating airflow · USD "
-                                f"{completed}/{total} · "
+                                "Activating airflow: USD "
+                                f"{completed}/{total}; "
                                 f"{round(100 * completed / total)}%"
                             )
                             if status_callback
@@ -698,7 +695,7 @@ class FlowRuntimeMixin(
             )
 
             if status_callback:
-                status_callback("Activating airflow · Waiting for Flow")
+                status_callback("Activating airflow: waiting for Flow")
             flow_readiness_started_at = time.monotonic()
             await execute_command(
                 "CreateCaeVizBoundingBox",
@@ -1021,8 +1018,6 @@ class FlowRuntimeMixin(
             self._flow_temporal_sample_time_codes = ()
             self._flow_temporal_records = []
             self._flow_temporal_failure = None
-            self._flow_session_workload_binding = None
-            self._flow_pending_workload_binding = None
             # The VTK importer authors into both the session and root layers.
             # Roll back both opinions so a failed attach cannot poison the next one.
             rollback_paths = (runtime_root, import_root)
@@ -1067,7 +1062,7 @@ class FlowRuntimeMixin(
                 loop_closure_state="PASSED",
             )
             if status_callback:
-                status_callback("Airflow active · Validation reused")
+                status_callback("Airflow active: validation reused")
             return SimulationCacheResult(
                 True,
                 "Kit-CAE Flow initial readiness passed; temporal validation "
@@ -1783,9 +1778,7 @@ class FlowRuntimeMixin(
         self._flow_vti_spacing = None
         self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
-        self._flow_session_workload_binding = None
-        self._flow_pending_workload_binding = None
-        self._flow_active_transition_id = None
+        self._airflow_state.reset()
         self._flow_attach_cancel_event = None
         self._flow_temporal_records = []
         self._flow_temporal_failure = None

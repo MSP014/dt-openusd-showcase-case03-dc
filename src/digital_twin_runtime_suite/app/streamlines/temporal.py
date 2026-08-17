@@ -8,10 +8,15 @@ selection rules, so the temporal behaviour can be tested without Kit.
 from __future__ import annotations
 
 import math
-from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
+from digital_twin_runtime_suite.app.airflow_dataset import AirflowDataset
+from digital_twin_runtime_suite.app.airflow_state.temporal import (
+    TemporalSampleResolution,
+    TemporalSourceSample,
+    resolve_manifest_sample,
+)
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
@@ -51,39 +56,69 @@ class TemporalVelocitySourceDescriptor:
         return len(self.velocity_paths)
 
     @property
+    def loop_duration_seconds(self) -> float:
+        """Return the exact logical loop duration declared by the manifest."""
+
+        return self.sample_count * self.sample_interval_seconds
+
+    @property
     def source_cadence_hz(self) -> float:
         """Return cadence computed from the manifest interval."""
 
         return 1.0 / self.sample_interval_seconds
 
 
-@dataclass(frozen=True)
-class TemporalSourceSample:
-    """One exact manifest source selection for cache generation or playback."""
+def temporal_source_from_airflow_dataset(
+    airflow_dataset: AirflowDataset,
+    *,
+    workload: str,
+    static_descriptor: StaticVelocitySourceDescriptor,
+    time_codes_per_second: float,
+) -> TemporalVelocitySourceDescriptor:
+    """Build exact Streamlines temporal truth from one resolved dataset.
 
-    ordinal: int
-    total: int
-    sample_index: int
-    source_vti: Path
-    source_time_seconds: float
-    time_code: float
+    This plain contract deliberately preserves every real VTI identity and the
+    registry's manifest clock. Presentation cadence has no input here.
+    """
 
-
-@dataclass(frozen=True)
-class TemporalSampleResolution:
-    """Exact manifest sample chosen for one looping presentation phase."""
-
-    phase_seconds: float
-    normalized_phase_seconds: float
-    loop_duration_seconds: float
-    sample: TemporalSourceSample
-    decision: str
-
-    @property
-    def is_no_op(self) -> bool:
-        """Return whether the active sample already matches this resolution."""
-
-        return self.decision == "NO_OP"
+    manifest = airflow_dataset.manifest
+    dataset_identity = f"{manifest.scope}/{manifest.state}"
+    if static_descriptor.workload != workload:
+        raise ValueError("Static Streamlines source workload changed during setup.")
+    if static_descriptor.dataset_identity != dataset_identity:
+        raise ValueError(
+            "Static Streamlines source dataset identity changed during setup."
+        )
+    velocity_paths = airflow_dataset.velocity_vti_sequence_paths
+    if len(velocity_paths) != manifest.sample_count:
+        raise ValueError("Resolved airflow dataset sample count is inconsistent.")
+    if (
+        not velocity_paths
+        or static_descriptor.vti_path.resolve() != velocity_paths[0].resolve()
+    ):
+        raise ValueError("Static Streamlines source must be manifest sample zero.")
+    if not math.isfinite(time_codes_per_second) or time_codes_per_second <= 0.0:
+        raise ValueError("Temporal source time codes per second must be positive.")
+    time_codes = tuple(
+        index * time_codes_per_second * airflow_dataset.sample_interval_seconds
+        for index in range(manifest.sample_count)
+    )
+    source = TemporalVelocitySourceDescriptor(
+        static_descriptor=static_descriptor,
+        velocity_paths=velocity_paths,
+        sample_time_codes=time_codes,
+        time_codes_per_second=time_codes_per_second,
+        sample_interval_seconds=airflow_dataset.sample_interval_seconds,
+    )
+    _validate_temporal_source(source)
+    if not math.isclose(
+        source.loop_duration_seconds,
+        airflow_dataset.loop_duration_seconds,
+        rel_tol=0.0,
+        abs_tol=1e-9,
+    ):
+        raise ValueError("Resolved airflow dataset loop duration is inconsistent.")
+    return source
 
 
 def manifest_samples(
@@ -127,50 +162,6 @@ def resolve_temporal_source_sample(
     )
 
 
-def resolve_manifest_sample(
-    samples: tuple[TemporalSourceSample, ...],
-    *,
-    sample_interval_seconds: float,
-    phase_seconds: float,
-    active_sample_index: int | None = None,
-) -> TemporalSampleResolution:
-    """Resolve exact cached or source manifest identities at a loop phase."""
-
-    if not samples:
-        raise ValueError("Temporal manifest requires at least one real sample.")
-    if not math.isfinite(sample_interval_seconds) or sample_interval_seconds <= 0.0:
-        raise ValueError("Temporal manifest sample interval must be positive.")
-    if not math.isfinite(phase_seconds):
-        raise ValueError("Temporal phase must be a finite number of seconds.")
-
-    loop_duration_seconds = len(samples) * sample_interval_seconds
-    normalized_phase_seconds = phase_seconds % loop_duration_seconds
-    if math.isclose(
-        normalized_phase_seconds,
-        loop_duration_seconds,
-        rel_tol=0.0,
-        abs_tol=1e-9,
-    ):
-        normalized_phase_seconds = 0.0
-    source_times = tuple(sample.source_time_seconds for sample in samples)
-    if source_times[0] != 0.0:
-        raise ValueError("Temporal manifest must include a sample at phase zero.")
-    if any(later <= earlier for earlier, later in zip(source_times, source_times[1:])):
-        raise ValueError("Temporal manifest source times must be strictly increasing.")
-    selected_index = bisect_right(source_times, normalized_phase_seconds) - 1
-    if selected_index < 0:
-        raise ValueError("Temporal manifest must include a sample at phase zero.")
-    sample = samples[selected_index]
-    decision = "NO_OP" if sample.sample_index == active_sample_index else "SELECT"
-    return TemporalSampleResolution(
-        phase_seconds=phase_seconds,
-        normalized_phase_seconds=normalized_phase_seconds,
-        loop_duration_seconds=loop_duration_seconds,
-        sample=sample,
-        decision=decision,
-    )
-
-
 def _validate_temporal_source(source: TemporalVelocitySourceDescriptor) -> None:
     """Reject temporal descriptors that cannot represent exact manifest time."""
 
@@ -196,3 +187,16 @@ def _validate_temporal_source(source: TemporalVelocitySourceDescriptor) -> None:
         raise ValueError("Temporal manifest must start at source time zero.")
     if any(later <= earlier for earlier, later in zip(source_times, source_times[1:])):
         raise ValueError("Temporal manifest source times must be strictly increasing.")
+    for index, time_code in enumerate(source.sample_time_codes):
+        expected_time_code = (
+            index * source.sample_interval_seconds * source.time_codes_per_second
+        )
+        if not math.isclose(
+            time_code,
+            expected_time_code,
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "Temporal manifest time codes must match its sample interval."
+            )

@@ -40,6 +40,7 @@ from digital_twin_runtime_suite.app.airflow_validation.cache import (
 from digital_twin_runtime_suite.app.airflow_validation.family import (
     AirflowDatasetFamilyCompatibilityError,
     validate_airflow_dataset_family,
+    validate_airflow_dataset_family_compatibility,
 )
 from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
 from digital_twin_runtime_suite.app.flow.runtime import (
@@ -64,9 +65,12 @@ from digital_twin_runtime_suite.app.workload_binding import (
     WorkloadBindingRuntime,
 )
 from digital_twin_runtime_suite.app.airflow_dataset import (
+    AirflowDataset,
     AirflowDatasetError,
     discover_airflow_dataset_registry,
 )
+from digital_twin_runtime_suite.app.airflow_state.model import AirflowTransitionFailure
+from digital_twin_runtime_suite.app.airflow_state.runtime import AirflowStateRuntime
 from digital_twin_runtime_suite.app.qled import (
     SEGMENTS,
     qled_state_from_temperature,
@@ -75,6 +79,7 @@ from digital_twin_runtime_suite.app.simulation_cache import (
     SimulationCacheContract,
     run_simulation_cache_preflight,
 )
+from digital_twin_runtime_suite.app.telemetry.model import WORKLOAD_MODES
 from digital_twin_runtime_suite.app.usd_preflight import run_usd_preflight
 
 # isort: on
@@ -178,11 +183,7 @@ class RuntimeController(
         self._xray_material_performance_samples: list[ViewportPerformanceSample] = []
         self.config = RuntimeConfig.load(self._config_path)
         self._workload_source: Callable[[], str] | None = None
-        self._flow_session_workload_binding: WorkloadAirflowBinding | None = None
-        self._flow_pending_workload_binding: WorkloadAirflowBinding | None = None
-        self._flow_last_airflow_failure: dict[str, str | None] | None = None
-        self._flow_transition_sequence = 0
-        self._flow_active_transition_id: str | None = None
+        self._airflow_state = self._create_airflow_state()
         self._flow_last_temporal_proof_selector: str | None = None
         self._airflow_validation_coordinator: (
             BackgroundAirflowValidationCoordinator | None
@@ -202,7 +203,6 @@ class RuntimeController(
         self._flow_voxel_max_resolution: int | None = None
         self._flow_lifecycle_state = "DETACHED"
         self.reset_streamlines_runtime_state()
-        self._flow_active_transition_id = None
         self._flow_attach_cancel_event: Event | None = None
         self._flow_kit_cae_operator_lock = Lock()
         self._flow_kit_cae_active_operator_paths: set[str] = set()
@@ -219,6 +219,7 @@ class RuntimeController(
         self._flow_temporal_asset_hashes: dict[Path, str] = {}
         self._flow_temporal_records: list[dict[str, object]] = []
         self._flow_temporal_failure: dict[str, str] | None = None
+        self._flow_runtime_mutation_context: dict[str, object] | None = None
         self._flow_temporal_end_time_code: float | None = None
         self._flow_temporal_sample_time_codes: tuple[float, ...] = ()
         self._flow_temporal_proof_task: asyncio.Task | None = None
@@ -249,6 +250,7 @@ class RuntimeController(
         self._airflow_dataset_family_compatible = None
         self._airflow_dataset_family_failure = None
         self.config = RuntimeConfig.load(self._config_path)
+        self._airflow_state = self._create_airflow_state()
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
@@ -260,15 +262,11 @@ class RuntimeController(
         self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
         self.reset_streamlines_runtime_state()
-        self._flow_session_workload_binding = None
-        self._flow_pending_workload_binding = None
-        self._flow_last_airflow_failure = None
-        self._flow_transition_sequence = 0
-        self._flow_active_transition_id = None
         self._flow_attach_cancel_event = None
         self._flow_temporal_asset_hashes = {}
         self._flow_temporal_records = []
         self._flow_temporal_failure = None
+        self._flow_runtime_mutation_context = None
         self._flow_temporal_end_time_code = None
         self._flow_temporal_sample_time_codes = ()
         self._flow_performance_attached_at = None
@@ -293,6 +291,7 @@ class RuntimeController(
         smoke_tuning: SmokeTuningConfig | None = None,
         emitter_layout: EmitterLayoutConfig | None = None,
         chassis_presentation: ChassisPresentationConfig | None = None,
+        streamlines_presentation_period_seconds: float | None = None,
     ) -> Path:
         """Persist local operator settings beside the base config."""
 
@@ -305,6 +304,11 @@ class RuntimeController(
         active_chassis_presentation = (
             chassis_presentation or self.config.chassis_presentation
         )
+        active_presentation_period = (
+            streamlines_presentation_period_seconds
+            if streamlines_presentation_period_seconds is not None
+            else self.config.simulation_cache.streamlines_presentation_period_seconds
+        )
         local_path = RuntimeConfig.local_config_path_for(self._config_path)
         temporary_path = local_path.with_name(f"{local_path.name}.tmp")
         temporary_path.write_text(
@@ -315,6 +319,7 @@ class RuntimeController(
                 active_smoke_tuning,
                 active_emitter_layout,
                 active_chassis_presentation,
+                active_presentation_period,
             ),
             encoding="utf-8",
         )
@@ -330,6 +335,21 @@ class RuntimeController(
             self.config.camera,
             self.config.grid,
             smoke_tuning,
+        )
+
+    def save_streamlines_presentation_period(self, period_seconds: float) -> Path:
+        """Persist an accepted cached-playback period without cache invalidation."""
+
+        if period_seconds <= 0.0:
+            raise ValueError("Streamlines presentation period must be positive.")
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            self.config.chassis_presentation,
+            period_seconds,
         )
 
     def save_emitter_layout_override(
@@ -429,6 +449,7 @@ class RuntimeController(
                 self.config.simulation_cache.smoke_tuning,
                 self.config.simulation_cache.emitter_layout,
                 self.config.chassis_presentation,
+                self.config.simulation_cache.streamlines_presentation_period_seconds,
             ),
             encoding="utf-8",
         )
@@ -470,44 +491,80 @@ class RuntimeController(
     ) -> WorkloadAirflowBinding:
         """Resolve airflow for Telemetry workload without changing Flow lifecycle."""
 
-        return self._workload_binding_runtime().resolve(workload_mode)
+        return self._airflow_state.resolve_binding(workload_mode)
+
+    def airflow_dataset_registry(self) -> tuple[AirflowDataset, ...]:
+        """Expose the application-owned manifest registry without rediscovery."""
+
+        self._require_airflow_dataset_registry()
+        return self._airflow_state.registry
 
     def set_workload_source(self, workload_source: Callable[[], str]) -> None:
         """Bind the semantic workload source without exposing it to Flow."""
 
         self._workload_source = workload_source
+        self._airflow_state.rebind_binding_runtime(self._workload_binding_runtime())
 
     def resolve_current_workload_airflow_binding(
         self,
     ) -> WorkloadAirflowBinding:
         """Resolve the workload current when a Flow Attach begins."""
 
-        return self._workload_binding_runtime().resolve_current()
+        return self._airflow_state.resolve_current().binding
+
+    def resolve_airflow_dataset_for_binding(
+        self,
+        binding: WorkloadAirflowBinding,
+    ) -> AirflowDataset:
+        """Resolve one workload binding through the authoritative registry only."""
+
+        self._require_airflow_dataset_registry()
+        return self._airflow_state.resolve_target(binding).dataset
+
+    def resolve_current_airflow_dataset(
+        self,
+    ) -> tuple[WorkloadAirflowBinding, AirflowDataset]:
+        """Return the current semantic binding and its resolved dataset together."""
+
+        self._require_airflow_dataset_registry()
+        target = self._airflow_state.resolve_current()
+        return target.binding, target.dataset
+
+    def resolve_configured_airflow_targets(self):
+        """Resolve every configured workload through the one shared registry."""
+
+        self._require_airflow_dataset_registry()
+        return tuple(
+            self._airflow_state.resolve_target(
+                self.resolve_workload_airflow_binding(workload_mode)
+            )
+            for workload_mode in WORKLOAD_MODES
+        )
 
     def airflow_cache_selector_identity(self) -> str:
         """Return the selector that is next or currently bound to Flow."""
 
-        binding = (
-            self._flow_session_workload_binding
-            or self.resolve_current_workload_airflow_binding()
-        )
+        binding = self._flow_session_workload_binding
+        if binding is None:
+            binding = self.resolve_current_workload_airflow_binding()
         return binding.dataset_identity
 
     def airflow_transition_state(self) -> dict[str, str | None]:
         """Expose semantic, active, and pending airflow state without UI ownership."""
 
+        snapshot = self._airflow_state.snapshot
         return {
             "semantic_workload": (
                 self._workload_source() if self._workload_source else None
             ),
             "active_airflow_selector": (
-                self._flow_session_workload_binding.dataset_identity
-                if self._flow_session_workload_binding
+                snapshot.committed.binding.dataset_identity
+                if snapshot.committed
                 else None
             ),
             "pending_airflow_selector": (
-                self._flow_pending_workload_binding.dataset_identity
-                if self._flow_pending_workload_binding
+                snapshot.pending.target.binding.dataset_identity
+                if snapshot.pending
                 else None
             ),
         }
@@ -515,7 +572,17 @@ class RuntimeController(
     def airflow_failure_state(self) -> dict[str, str | None] | None:
         """Return the last truthful airflow failure without changing workload state."""
 
-        return self._flow_last_airflow_failure
+        failure = self._airflow_state.failure
+        if failure is None:
+            return None
+        return {
+            "semantic_workload": failure.semantic_workload,
+            "requested_airflow_selector": failure.requested_airflow_selector,
+            "active_airflow_selector": failure.active_airflow_selector,
+            "reason": failure.reason,
+            "failure_stage": failure.failure_stage,
+            "action": failure.action,
+        }
 
     def _workload_binding_runtime(self) -> WorkloadBindingRuntime:
         """Build the binding coordinator from current runtime configuration."""
@@ -523,6 +590,104 @@ class RuntimeController(
         return WorkloadBindingRuntime(
             self.config.simulation_cache,
             self._workload_source,
+        )
+
+    def _create_airflow_state(self) -> AirflowStateRuntime:
+        """Compose one lifetime shared state from the sole discovered registry."""
+
+        cache = self.config.simulation_cache
+        try:
+            registry = discover_airflow_dataset_registry(
+                self.config.asset_root,
+                cache.airflow_dataset.root,
+            )
+        except AirflowDatasetError as error:
+            # Config-only commands remain usable without hydrated external
+            # assets. Airflow actions surface this same discovery error before
+            # they can author Kit state or substitute another source.
+            self._airflow_dataset_registry_error = error
+            registry = ()
+        else:
+            self._airflow_dataset_registry_error = None
+        return AirflowStateRuntime(self._workload_binding_runtime(), registry)
+
+    def _require_airflow_dataset_registry(self) -> None:
+        """Fail airflow work with the original registry error, never a fallback."""
+
+        if self._airflow_dataset_registry_error is not None:
+            raise self._airflow_dataset_registry_error
+
+    @property
+    def _flow_session_workload_binding(self) -> WorkloadAirflowBinding | None:
+        """Legacy test seam forwarding to shared committed airflow state."""
+
+        committed = self._airflow_state.committed
+        return committed.binding if committed else None
+
+    @_flow_session_workload_binding.setter
+    def _flow_session_workload_binding(
+        self, binding: WorkloadAirflowBinding | None
+    ) -> None:
+        self._airflow_state.replace_committed_binding(binding)
+
+    @property
+    def _flow_pending_workload_binding(self) -> WorkloadAirflowBinding | None:
+        """Legacy test seam forwarding to the shared pending generation."""
+
+        pending = self._airflow_state.pending
+        return pending.target.binding if pending else None
+
+    @_flow_pending_workload_binding.setter
+    def _flow_pending_workload_binding(
+        self, binding: WorkloadAirflowBinding | None
+    ) -> None:
+        self._airflow_state.replace_pending_binding(binding)
+
+    @property
+    def _flow_transition_sequence(self) -> int:
+        """Legacy diagnostic readout for the shared transition generation."""
+
+        return self._airflow_state.generation
+
+    @_flow_transition_sequence.setter
+    def _flow_transition_sequence(self, generation: int) -> None:
+        self._airflow_state.replace_generation(generation)
+
+    @property
+    def _flow_active_transition_id(self) -> str | None:
+        """Legacy diagnostic readout for the one shared pending transition."""
+
+        pending = self._airflow_state.pending
+        return pending.transition_id if pending else None
+
+    @_flow_active_transition_id.setter
+    def _flow_active_transition_id(self, transition_id: str | None) -> None:
+        self._airflow_state.replace_active_transition_id(transition_id)
+
+    @property
+    def _flow_last_airflow_failure(self) -> dict[str, str | None] | None:
+        """Legacy diagnostic readout forwarding to shared terminal failure state."""
+
+        return self.airflow_failure_state()
+
+    @_flow_last_airflow_failure.setter
+    def _flow_last_airflow_failure(self, value: dict[str, str | None] | None) -> None:
+        if value is None:
+            self._airflow_state.clear_failure()
+            return
+        self._airflow_state.replace_failure(
+            AirflowTransitionFailure(
+                semantic_workload=value.get("semantic_workload", "unavailable"),
+                requested_airflow_selector=value.get(
+                    "requested_airflow_selector", "unresolved"
+                ),
+                active_airflow_selector=value.get(
+                    "active_airflow_selector", "DETACHED"
+                ),
+                reason=value.get("reason", "unavailable"),
+                failure_stage=value.get("failure_stage", "unavailable"),
+                action=value.get("action", "remained_detached"),
+            )
         )
 
     def start_background_airflow_validation(
@@ -533,12 +698,10 @@ class RuntimeController(
         if self._airflow_validation_coordinator is not None:
             return self._airflow_validation_coordinator
 
+        self._require_airflow_dataset_registry()
         cache = self.config.simulation_cache
         self._airflow_validation_coordinator = BackgroundAirflowValidationCoordinator(
-            discover_airflow_dataset_registry(
-                self.config.asset_root,
-                cache.airflow_dataset.root,
-            ),
+            self._airflow_state.registry,
             self.resolve_current_workload_airflow_binding(),
             cache.velocity_field_name,
             self._flow_validation_cache,
@@ -592,10 +755,7 @@ class RuntimeController(
         try:
             cache = self.config.simulation_cache
             members = []
-            for dataset in discover_airflow_dataset_registry(
-                self.config.asset_root,
-                cache.airflow_dataset.root,
-            ):
+            for dataset in self._airflow_state.registry:
                 signature = build_dataset_validation_signature(
                     dataset,
                     cache.velocity_field_name,
@@ -622,6 +782,58 @@ class RuntimeController(
         self._airflow_dataset_family_compatible = verdict.family_compatible
         self._airflow_dataset_family_failure = None
         return verdict
+
+    def validate_attached_airflow_transition_pair(
+        self,
+        *,
+        target_dataset: AirflowDataset,
+        target_receipt,
+        target_signature,
+    ):
+        """Validate only committed-to-target compatibility for one live switch.
+
+        Background validation may still establish a whole-family readiness
+        verdict, but an attached Flow transition requires evidence only for the
+        source it is currently consuming and the target it is about to consume.
+        """
+
+        committed = self._airflow_state.committed
+        if committed is None:
+            raise AirflowDatasetFamilyCompatibilityError(
+                "Airflow transition compatibility requires a committed dataset."
+            )
+        cache = self.config.simulation_cache
+        active_signature = build_dataset_validation_signature(
+            committed.dataset,
+            cache.velocity_field_name,
+        )
+        active_receipt = self._flow_validation_cache.lookup(active_signature).preflight
+        if active_receipt is None:
+            raise AirflowDatasetFamilyCompatibilityError(
+                "Airflow family compatibility mismatch: "
+                f"dataset={active_signature.selector}; "
+                "property=preflight_receipt; expected=present; actual=missing."
+            )
+        if target_receipt is None:
+            raise AirflowDatasetFamilyCompatibilityError(
+                "Airflow family compatibility mismatch: "
+                f"dataset={target_signature.selector}; "
+                "property=preflight_receipt; expected=present; actual=missing."
+            )
+        if target_receipt.signature != target_signature:
+            raise AirflowDatasetFamilyCompatibilityError(
+                "Airflow family compatibility mismatch: "
+                f"dataset={target_signature.selector}; "
+                "property=preflight_receipt.signature; expected=current; "
+                "actual=stale."
+            )
+        return validate_airflow_dataset_family_compatibility(
+            committed.dataset,
+            active_receipt,
+            target_dataset,
+            target_receipt,
+            velocity_field_name=cache.velocity_field_name,
+        )
 
     def stop_background_airflow_validation(self) -> None:
         """Cooperatively stop the session validator during extension shutdown."""

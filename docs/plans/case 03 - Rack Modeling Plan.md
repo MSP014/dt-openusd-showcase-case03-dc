@@ -123,7 +123,7 @@ Block the rack as a measurable engineering volume.
 - [x] External cabinet envelope datum.
 - [x] Raised-floor top datum.
 - [x] Internal 42U mounting-envelope datum.
-- [ ] U1-U42 coordinate labels tied to the mounting-post core.
+- [x] U1-U42 coordinate labels tied to the mounting-post core.
 - [x] Internal depth zones:
   - [x] Glass door zone.
   - [x] Front cold plenum.

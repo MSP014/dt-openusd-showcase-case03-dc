@@ -66,6 +66,13 @@ SIMULATION_CACHE_OVERRIDE_KEYS = (
     "filter_mode",
     "airflow_dataset",
     "velocity_field_name",
+    "streamlines_presentation_period_seconds",
+)
+
+SIMULATION_CACHE_RUNTIME_OVERRIDE_KEYS = tuple(
+    key
+    for key in SIMULATION_CACHE_OVERRIDE_KEYS
+    if key != "streamlines_presentation_period_seconds"
 )
 
 
@@ -319,6 +326,7 @@ class SimulationCacheConfig:
     )
     velocity_field_name: str = "vel"
     temporal_debug_logging: bool = False
+    streamlines_presentation_period_seconds: float | None = None
     smoke_tuning: SmokeTuningConfig = SmokeTuningConfig()
     emitter_layout: EmitterLayoutConfig = EmitterLayoutConfig()
     intake_tracers: IntakeTracerConfig = IntakeTracerConfig()
@@ -526,6 +534,7 @@ def format_runtime_override(
     smoke_tuning: SmokeTuningConfig | None = None,
     emitter_layout: EmitterLayoutConfig | None = None,
     chassis_presentation: ChassisPresentationConfig | None = None,
+    streamlines_presentation_period_seconds: float | None = None,
 ) -> str:
     """Serialize local operator overrides as minimal TOML."""
 
@@ -545,6 +554,13 @@ def format_runtime_override(
         f"y = {lighting.rotation.y:.6g}\n"
         f"z = {lighting.rotation.z:.6g}\n"
     )
+    if streamlines_presentation_period_seconds is not None:
+        text += (
+            "\n"
+            "[simulation_cache]\n"
+            "streamlines_presentation_period_seconds = "
+            f"{streamlines_presentation_period_seconds:.6g}\n"
+        )
     if camera:
         text += (
             "\n"
@@ -783,7 +799,7 @@ def _merge_runtime_override(
             else {
                 "enabled": any(
                     key in local_simulation_cache
-                    for key in SIMULATION_CACHE_OVERRIDE_KEYS
+                    for key in SIMULATION_CACHE_RUNTIME_OVERRIDE_KEYS
                 )
             }
         )
@@ -1414,6 +1430,10 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
     )
     velocity_field_name = str(data.get("velocity_field_name", "vel")).strip()
     temporal_debug_logging = bool(data.get("temporal_debug_logging", False))
+    raw_presentation_period = data.get("streamlines_presentation_period_seconds")
+    presentation_period = (
+        None if raw_presentation_period is None else float(raw_presentation_period)
+    )
     smoke_tuning = _parse_smoke_tuning_config(data.get("smoke_tuning"))
     emitter_layout = _parse_emitter_layout_config(data.get("emitter_layout"))
     raw_intake_tracers = data.get("intake_tracers", {})
@@ -1478,6 +1498,13 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         raise ValueError("simulation_cache.field_name must not be empty.")
     if not velocity_field_name:
         raise ValueError("simulation_cache.velocity_field_name must not be empty.")
+    if presentation_period is not None and (
+        not math.isfinite(presentation_period) or presentation_period <= 0.0
+    ):
+        raise ValueError(
+            "simulation_cache.streamlines_presentation_period_seconds "
+            "must be positive."
+        )
     if intake_tracers.count != 7:
         raise ValueError("simulation_cache.intake_tracers.count must be 7.")
     if intake_tracers.radius <= 0:
@@ -1519,6 +1546,7 @@ def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:
         workload_dataset_mapping=workload_dataset_mapping,
         velocity_field_name=velocity_field_name,
         temporal_debug_logging=temporal_debug_logging,
+        streamlines_presentation_period_seconds=presentation_period,
         smoke_tuning=smoke_tuning,
         emitter_layout=emitter_layout,
         intake_tracers=intake_tracers,

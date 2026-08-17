@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from digital_twin_runtime_suite.app.airflow_dataset import (
+    AirflowDataset,
     AirflowDatasetError,
     discover_airflow_dataset,
     validate_airflow_dataset_grid,
@@ -71,6 +72,29 @@ def resolve_static_velocity_sample(
     """Resolve and preflight one deterministic VTI without creating USD or Flow."""
 
     airflow_dataset = discover_airflow_dataset(asset_root, binding.dataset)
+    return resolve_static_velocity_sample_from_airflow_dataset(
+        airflow_dataset,
+        binding,
+        velocity_field_name,
+        sample_index,
+    )
+
+
+def resolve_static_velocity_sample_from_airflow_dataset(
+    airflow_dataset: AirflowDataset,
+    binding: WorkloadAirflowBinding,
+    velocity_field_name: str,
+    sample_index: int = 0,
+) -> ResolvedStaticVelocitySample:
+    """Preflight one VTI from an already resolved authoritative dataset."""
+
+    if (
+        airflow_dataset.manifest.scope,
+        airflow_dataset.manifest.state,
+    ) != (binding.dataset.scope, binding.dataset.state):
+        raise AirflowDatasetError(
+            "Resolved airflow dataset does not match the requested workload binding."
+        )
     velocity_paths = airflow_dataset.velocity_vti_sequence_paths
     if not 0 <= sample_index < len(velocity_paths):
         raise AirflowDatasetError(

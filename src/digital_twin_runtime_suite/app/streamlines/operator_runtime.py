@@ -17,6 +17,9 @@ from digital_twin_runtime_suite.app.streamlines.proof import (
     StreamlinesOperatorRequest,
     validate_generated_streamlines_geometry,
 )
+from digital_twin_runtime_suite.app.streamlines.speed import (
+    speed_magnitudes_from_velocity_vectors,
+)
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ class _StreamlinesOperatorExecution:
     evidence: StreamlinesOperatorEvidence
     execution_receipt: StreamlinesOperatorExecutionReceipt
     preview_mirror_ms: float | None
+    speed_magnitudes: tuple[float, ...] | None
 
 
 def _author_usdrt_runtime_preview(
@@ -334,6 +338,8 @@ class StreamlinesOperatorRuntimeMixin:
         execute_command,
         preview_path: str | None,
         Sdf,
+        capture_speed_magnitudes: bool = False,
+        source_time_code: float | None = None,
     ) -> _StreamlinesOperatorExecution:
         """Run one clean operator lifetime and optionally author a preview.
 
@@ -373,6 +379,18 @@ class StreamlinesOperatorRuntimeMixin:
                     timeline=timeline,
                 )
             )
+            speed_magnitudes = None
+            if capture_speed_magnitudes:
+                if source_time_code is None:
+                    raise RuntimeError(
+                        "A source time code is required to persist raw speed."
+                    )
+                speed_magnitudes = await self._probe_streamline_speed_magnitudes_in_kit(
+                    operator_prim=prepared.operator_prim,
+                    point_positions=evidence.runtime_point_positions,
+                    source_time_code=source_time_code,
+                    wp=wp,
+                )
             preview_mirror_ms = None
             if preview_path is not None:
                 preview_started_at = time.monotonic()
@@ -393,6 +411,7 @@ class StreamlinesOperatorRuntimeMixin:
                 evidence=evidence,
                 execution_receipt=execution_receipt,
                 preview_mirror_ms=preview_mirror_ms,
+                speed_magnitudes=speed_magnitudes,
             )
         finally:
             if prepared is not None:
@@ -421,6 +440,67 @@ class StreamlinesOperatorRuntimeMixin:
         if execution is None:
             raise RuntimeError("Streamlines operator execution produced no result.")
         return execution
+
+    async def _probe_streamline_speed_magnitudes_in_kit(
+        self,
+        *,
+        operator_prim,
+        point_positions: tuple[tuple[float, float, float], ...],
+        source_time_code: float,
+        wp,
+    ) -> tuple[float, ...]:
+        """Sample the selected raw velocity field at accepted curve vertices.
+
+        Kit-CAE deliberately omits ``velocities`` from its Streamlines primvars.
+        Cache generation therefore performs this one explicit probe while the
+        disposable operator still binds the exact selected source sample.
+        """
+
+        import numpy as np
+        from dav.data_models.custom import point_cloud as dav_point_cloud
+        from dav.operators import probe as dav_probe
+        from omni.cae.viz import utils as cae_viz_utils
+        from pxr import Usd
+
+        point_count = len(point_positions)
+        if point_count == 0:
+            raise RuntimeError("Cannot persist speed for empty Streamlines geometry.")
+        source_dataset = await cae_viz_utils.get_input_dataset(
+            operator_prim,
+            "source",
+            timeCode=Usd.TimeCode(source_time_code),
+            device=str(wp.get_device()),
+            required_fields={"velocities"},
+        )
+        positions = wp.array(
+            list(point_positions),
+            dtype=wp.vec3f,
+            device=source_dataset.device,
+        )
+        curve_vertices = dav_point_cloud.create_dataset(positions)
+        probed = dav_probe.compute(
+            source_dataset,
+            "velocities",
+            curve_vertices,
+            output_mask_field_name="dtrs_speed_mask",
+        )
+        mask = np.asarray(
+            probed.get_field("dtrs_speed_mask").to_array().numpy()
+        ).reshape(-1)
+        if len(mask) != point_count or not np.all(mask != 0):
+            raise RuntimeError(
+                "Raw speed probe found Streamlines vertices outside the source field."
+            )
+        vectors = probed.get_field("probed_values").to_array().numpy()
+        try:
+            return speed_magnitudes_from_velocity_vectors(
+                vectors,
+                expected_point_count=point_count,
+            )
+        except ValueError as error:
+            raise RuntimeError(
+                f"Raw Streamlines speed probe failed: {error}"
+            ) from error
 
     async def _execute_streamlines_operator_in_kit(
         self,

@@ -9,6 +9,7 @@ from digital_twin_runtime_suite.app.streamlines.proof import (
     STREAMLINES_RUNTIME_PREVIEW_PATH,
     build_streamlines_operator_request,
     clear_streamlines_operator_from_stage,
+    clear_streamlines_seed_from_stage,
 )
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalSampleResolution,
@@ -21,7 +22,7 @@ StatusCallback = Callable[[str], None]
 
 @dataclass(frozen=True)
 class StreamlinesRecomputeResult:
-    """One explicit fallback resolution without a cadence scheduler."""
+    """One explicit fallback result with a surviving visible preview."""
 
     resolution: TemporalSampleResolution
     rebuild_ms: float | None
@@ -112,6 +113,7 @@ class StreamlinesRecomputeRuntimeMixin:
                 "CreateCaeVizMeshPrim",
                 prim_type="UnitSphere",
                 prim_path=request.seed_path,
+                resolution=request.seed_resolution,
             )
             await execute_command(
                 "TransformPrimSRT",
@@ -157,14 +159,16 @@ class StreamlinesRecomputeRuntimeMixin:
         finally:
             self._stop_kit_cae_operator_tracking()
             stage.SetEditTarget(previous_target)
-            cleanup = clear_streamlines_operator_from_stage(stage)
+            # The operator itself was removed by _run_fresh_streamlines...;
+            # only its seed remains disposable. Keep RuntimePreview visible.
+            cleanup_complete = clear_streamlines_seed_from_stage(stage)
             await app.next_update_async()
-            cleanup_complete = cleanup.success
             if execution is None or not cleanup_complete:
                 self._streamlines_recompute_active_sample_index = None
 
         if not cleanup_complete:
-            raise RuntimeError("Runtime recompute cleanup did not remove its preview.")
+            raise RuntimeError("Runtime recompute cleanup did not remove its seed.")
+        self._require_runtime_preview_after_recompute(stage)
         self._streamlines_recompute_active_sample_index = resolution.sample.sample_index
         if status_callback:
             status_callback(
@@ -177,3 +181,13 @@ class StreamlinesRecomputeRuntimeMixin:
             runtime_preview_path=STREAMLINES_RUNTIME_PREVIEW_PATH,
             cleanup_complete=True,
         )
+
+    @staticmethod
+    def _require_runtime_preview_after_recompute(stage) -> None:
+        """Require the accepted authored preview to survive disposable cleanup."""
+
+        preview = stage.GetPrimAtPath(STREAMLINES_RUNTIME_PREVIEW_PATH)
+        if not preview or not preview.IsValid():
+            raise RuntimeError(
+                "Runtime recompute removed its confirmed RuntimePreview."
+            )
