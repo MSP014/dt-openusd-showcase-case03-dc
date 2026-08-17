@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
+from types import SimpleNamespace
 from typing import Callable
 
+from digital_twin_runtime_suite.app.airflow_validation.cache import (
+    build_dataset_validation_signature,
+)
 from digital_twin_runtime_suite.app.diagnostics import with_dtrs_yerevan_timestamp
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
@@ -39,6 +44,7 @@ from digital_twin_runtime_suite.app.streamlines.cache import (
     load_streamlines_cache_metadata,
     replace_streamlines_cache_artifacts,
     serialise_streamlines_cache_metadata,
+    source_signature_from_temporal_source,
     streamlines_cache_build_mode,
     streamlines_cache_paths,
     streamlines_cache_settings,
@@ -53,7 +59,9 @@ from digital_twin_runtime_suite.app.streamlines.cache import (
 )
 from digital_twin_runtime_suite.app.streamlines.cache_discovery import (
     StreamlinesCacheInspection,
+    StreamlinesCacheValidationReceipt,
     inspect_streamlines_cache,
+    streamlines_cache_resource_fingerprint,
 )
 from digital_twin_runtime_suite.app.streamlines.lifecycle import (
     StreamlinesCleanupReceipt,
@@ -78,6 +86,38 @@ from digital_twin_runtime_suite.app.streamlines.temporal import (
 )
 
 StatusCallback = Callable[[str], None]
+STREAMLINES_VALIDATION_CONTRACT_VERSION = "streamlines-cache-validation-v1"
+
+
+def _float_tuple(values, count: int) -> tuple[float, ...]:
+    """Restore one fixed-size numeric tuple from JSON evidence."""
+
+    result = tuple(float(value) for value in values)
+    if len(result) != count:
+        raise ValueError(f"expected {count} numeric values")
+    return result
+
+
+def _int_tuple(values, count: int) -> tuple[int, ...]:
+    """Restore one fixed-size integer tuple from JSON evidence."""
+
+    result = tuple(int(value) for value in values)
+    if len(result) != count:
+        raise ValueError(f"expected {count} integer values")
+    return result
+
+
+def _float_tuple_pair(values) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Restore two three-dimensional bounds from JSON evidence."""
+
+    result = tuple(_float_tuple(item, 3) for item in values)
+    if len(result) != 2:
+        raise ValueError("expected minimum and maximum bounds")
+    return result
+
+
+class StreamlinesPresentationCancelled(RuntimeError):
+    """Stop a stale presentation candidate before it can attach or start work."""
 
 
 def _validate_persisted_speed_primvar(
@@ -180,6 +220,515 @@ class StreamlinesProfilePreviewResult:
 class StreamlinesCacheRuntimeMixin:
     """Own Kit cache materialisation; never own acceptance benchmarking."""
 
+    def reset_streamlines_cache_validation_receipts(self) -> None:
+        """Forget background cache receipts at an application lifecycle boundary."""
+
+        self._streamlines_cache_validation_receipts = {}
+        self._streamlines_cache_validation_tasks = {}
+
+    def streamlines_cache_readiness_snapshot(self) -> StreamlinesCacheInspection:
+        """Return the current receipt state without touching cache resources."""
+
+        binding, airflow_dataset = self.resolve_current_airflow_dataset()
+        return self._streamlines_cache_receipt_snapshot(binding, airflow_dataset)
+
+    async def ensure_current_streamlines_cache_validation_in_background(
+        self,
+    ) -> StreamlinesCacheValidationReceipt:
+        """Strongly validate the current cache once, outside the Kit/UI thread."""
+
+        binding, airflow_dataset = self.resolve_current_airflow_dataset()
+        return await self.ensure_streamlines_cache_validation_in_background(
+            binding,
+            airflow_dataset,
+        )
+
+    async def ensure_configured_streamlines_cache_validations_in_background(
+        self,
+        status_callback: StatusCallback | None = None,
+    ) -> tuple[StreamlinesCacheValidationReceipt, ...]:
+        """Validate or reuse each workload cache sequentially off the Kit thread."""
+
+        receipts = []
+        for target in self.resolve_configured_airflow_targets():
+            if status_callback:
+                status_callback(
+                    "Streamlines receipt: "
+                    f"workload={target.binding.workload_mode}; status=CHECKING"
+                )
+            receipt = await self.ensure_streamlines_cache_validation_in_background(
+                target.binding,
+                target.dataset,
+            )
+            receipts.append(receipt)
+            if status_callback:
+                status_callback(
+                    "Streamlines receipt: "
+                    f"workload={target.binding.workload_mode}; "
+                    f"status={receipt.inspection.classification}; "
+                    f"receipt_source={receipt.receipt_source}"
+                )
+        return tuple(receipts)
+
+    def streamlines_validation_identity_snapshot(self) -> dict[str, object]:
+        """Compute only small metadata/stat identities for restart acceptance."""
+
+        identities = {}
+        for target in self.resolve_configured_airflow_targets():
+            ownership = self._streamlines_cache_ownership(target.binding)
+            paths = streamlines_cache_paths(self.config.repo_root, ownership)
+            metadata = load_streamlines_cache_metadata(paths.metadata_path)
+            key = self._persisted_streamlines_receipt_key(target.binding)
+            identities[key] = {
+                "resource_fingerprint": list(
+                    streamlines_cache_resource_fingerprint(paths)
+                ),
+                "dependency_identity": list(
+                    self._streamlines_cache_dependency_identity(
+                        target.binding,
+                        target.dataset,
+                    )
+                ),
+                "classification": "VALID",
+                "metadata_geometry_sha256": metadata.geometry_sha256,
+            }
+        return identities
+
+    async def ensure_streamlines_cache_validation_in_background(
+        self,
+        binding,
+        airflow_dataset,
+    ) -> StreamlinesCacheValidationReceipt:
+        """Deduplicate one target's strong validation and publish its receipt."""
+
+        key = self._streamlines_cache_receipt_key(binding)
+        tasks = getattr(self, "_streamlines_cache_validation_tasks", None)
+        if tasks is None:
+            self.reset_streamlines_cache_validation_receipts()
+            tasks = self._streamlines_cache_validation_tasks
+        task = tasks.get(key)
+        if task is None or task.done():
+            previous = self._streamlines_cache_validation_receipts.get(key)
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    self._validate_streamlines_cache_receipt,
+                    binding,
+                    airflow_dataset,
+                    previous,
+                )
+            )
+            tasks[key] = task
+        try:
+            receipt = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if task.done() and tasks.get(key) is task:
+                tasks.pop(key, None)
+        self._streamlines_cache_validation_receipts[key] = receipt
+        self._log_streamlines_cache_validation_receipt(receipt)
+        return receipt
+
+    def _streamlines_cache_receipt_snapshot(
+        self,
+        binding,
+        airflow_dataset,
+    ) -> StreamlinesCacheInspection:
+        """Project one receipt as CHECKING until its async validation completes."""
+
+        del airflow_dataset
+        ownership = self._streamlines_cache_ownership(binding)
+        paths = streamlines_cache_paths(self.config.repo_root, ownership)
+        key = self._streamlines_cache_receipt_key(binding)
+        task = getattr(self, "_streamlines_cache_validation_tasks", {}).get(key)
+        if task is not None and not task.done():
+            return StreamlinesCacheInspection(
+                ownership=ownership,
+                paths=paths,
+                classification="CHECKING",
+                message="Cache provenance validation is running.",
+            )
+        receipt = getattr(
+            self,
+            "_streamlines_cache_validation_receipts",
+            {},
+        ).get(key)
+        if receipt is not None:
+            return receipt.inspection
+        return StreamlinesCacheInspection(
+            ownership=ownership,
+            paths=paths,
+            classification="CHECKING",
+            message="Cache provenance validation has not started.",
+        )
+
+    def _validate_streamlines_cache_receipt(
+        self,
+        binding,
+        airflow_dataset,
+        previous: StreamlinesCacheValidationReceipt | None,
+    ) -> StreamlinesCacheValidationReceipt:
+        """Perform source, metadata, and geometry validation in a worker thread."""
+
+        ownership = self._streamlines_cache_ownership(binding)
+        paths = streamlines_cache_paths(self.config.repo_root, ownership)
+        fingerprint = streamlines_cache_resource_fingerprint(paths)
+        try:
+            metadata = load_streamlines_cache_metadata(paths.metadata_path)
+            dependency = self._streamlines_cache_dependency_identity(
+                binding,
+                airflow_dataset,
+            )
+        except Exception:
+            metadata = None
+            dependency = ("unavailable", "unavailable")
+
+        if (
+            previous is not None
+            and previous.resource_fingerprint == fingerprint
+            and previous.dependency_identity == dependency
+        ):
+            store = getattr(self, "_validation_receipt_store", None)
+            if store:
+                store.record_reuse(
+                    "streamlines",
+                    previous.receipt_source,
+                    self._persisted_streamlines_receipt_key(binding),
+                )
+            return replace(
+                previous,
+                cache_location="SESSION",
+                validation_executed=False,
+                geometry_sha256_recomputed=False,
+            )
+
+        persisted = self._reuse_persisted_streamlines_receipt(
+            binding=binding,
+            airflow_dataset=airflow_dataset,
+            metadata=metadata,
+            paths=paths,
+            fingerprint=fingerprint,
+            dependency=dependency,
+        )
+        if persisted is not None:
+            return persisted
+
+        store = getattr(self, "_validation_receipt_store", None)
+        if store:
+            store.record_expensive_validation("streamlines")
+        try:
+            if metadata is None:
+                raise ValueError("Cache metadata is unavailable.")
+            expected = self._streamlines_cache_expected_contract(
+                binding=binding,
+                airflow_dataset=airflow_dataset,
+                stage_time_codes_per_second=metadata.time_codes_per_second,
+            )
+            source = expected["source"]
+            settings_signature = expected["settings_signature"]
+            compatibility = (
+                CACHE_SCHEMA_VERSION,
+                source_signature_from_temporal_source(source),
+                settings_signature,
+            )
+        except Exception:
+            source = None
+            compatibility = (CACHE_SCHEMA_VERSION, "unavailable", "unavailable")
+
+        if source is None:
+            try:
+                inspection = inspect_streamlines_cache(paths, ownership)
+            except ValueError as error:
+                inspection = StreamlinesCacheInspection(
+                    ownership=ownership,
+                    paths=paths,
+                    classification="INCOMPATIBLE",
+                    message=f"Expected cache contract is unavailable: {error}",
+                )
+        else:
+            inspection = inspect_streamlines_cache(
+                paths,
+                ownership,
+                source=source,
+                settings_signature=settings_signature,
+            )
+        receipt = StreamlinesCacheValidationReceipt(
+            inspection=inspection,
+            resource_fingerprint=fingerprint,
+            compatibility_identity=compatibility,
+            source=source,
+            dependency_identity=dependency,
+            receipt_source="FRESH",
+            validation_executed=True,
+            geometry_sha256_recomputed=(inspection.geometry_sha256_recomputed),
+        )
+        if store and inspection.geometry_sha256_recomputed:
+            store.record_geometry_sha256_recomputed()
+        if store:
+            store.record_reuse(
+                "streamlines",
+                "FRESH",
+                self._persisted_streamlines_receipt_key(binding),
+            )
+        if inspection.valid and self._reuse_streamlines_receipts_enabled():
+            self._persist_streamlines_cache_validation_receipt(binding, receipt)
+        return receipt
+
+    @staticmethod
+    def _streamlines_cache_receipt_key(binding) -> tuple[str, str]:
+        """Keep receipts isolated by their authoritative workload cache owner."""
+
+        return (binding.workload_mode, binding.dataset_identity)
+
+    @staticmethod
+    def _persisted_streamlines_receipt_key(binding) -> str:
+        """Format one JSON-safe workload and dataset cache owner."""
+
+        return f"{binding.workload_mode}|{binding.dataset_identity}"
+
+    def _streamlines_cache_dependency_identity(
+        self,
+        binding,
+        airflow_dataset,
+    ) -> tuple[str, str]:
+        """Fingerprint VTI inputs and profile without reading VTI payloads."""
+
+        try:
+            vti_signature = build_dataset_validation_signature(
+                airflow_dataset,
+                self.config.simulation_cache.velocity_field_name,
+            ).digest
+        except (AttributeError, OSError, TypeError, ValueError):
+            sources = getattr(self, "_sources", {})
+            source = sources.get(binding.workload_mode)
+            vti_signature = (
+                source_signature_from_temporal_source(source)
+                if source is not None
+                else "unavailable"
+            )
+        profile_state = getattr(self, "_streamlines_profile_state", None)
+        profile = getattr(profile_state, "profile", None)
+        profile_signature = getattr(
+            profile,
+            "settings_signature",
+            getattr(self, "settings_suffix", "unavailable"),
+        )
+        validation_identity = (
+            f"{STREAMLINES_VALIDATION_CONTRACT_VERSION}:{profile_signature}"
+        )
+        return (vti_signature, validation_identity)
+
+    def _reuse_streamlines_receipts_enabled(self) -> bool:
+        """Read the opt-in preference without performing receipt work."""
+
+        preferences = getattr(self.config, "validation_receipts", None)
+        return bool(
+            preferences and preferences.reuse_verified_streamlines_cache_receipts
+        )
+
+    def _reuse_persisted_streamlines_receipt(
+        self,
+        *,
+        binding,
+        airflow_dataset,
+        metadata: StreamlinesCacheMetadata | None,
+        paths: StreamlinesCachePaths,
+        fingerprint: tuple[str, str],
+        dependency: tuple[str, str],
+    ) -> StreamlinesCacheValidationReceipt | None:
+        """Restore VALID evidence after cheap resource and dependency checks."""
+
+        store = getattr(self, "_validation_receipt_store", None)
+        if not self._reuse_streamlines_receipts_enabled() or store is None:
+            return None
+        if metadata is None:
+            return None
+        key = self._persisted_streamlines_receipt_key(binding)
+        lookup = store.lookup_streamlines(
+            key=key,
+            resource_fingerprint=fingerprint,
+            dependency_identity=dependency,
+        )
+        if lookup.status != "HIT" or lookup.payload is None:
+            return None
+        try:
+            if (
+                lookup.payload.get("validation_contract_version")
+                != STREAMLINES_VALIDATION_CONTRACT_VERSION
+            ):
+                store.record_invalidation("streamlines", key)
+                return None
+            compatibility = tuple(lookup.payload["compatibility_identity"])
+            if compatibility != (
+                CACHE_SCHEMA_VERSION,
+                metadata.source_signature,
+                metadata.settings_signature,
+            ):
+                store.record_invalidation("streamlines", key)
+                return None
+            source = self._streamlines_source_from_persisted_payload(
+                binding,
+                airflow_dataset,
+                metadata,
+                lookup.payload,
+            )
+            if (
+                source_signature_from_temporal_source(source)
+                != metadata.source_signature
+            ):
+                store.record_invalidation("streamlines", key)
+                return None
+        except (KeyError, TypeError, ValueError) as error:
+            store.record_invalidation("streamlines", key)
+            carb = self._streamlines_carb_logger()
+            if carb:
+                carb.log_warn(
+                    "DTRS STREAMLINES CACHE VALIDATION | "
+                    f"persisted receipt rejected | reason={error}"
+                )
+            return None
+        store.record_reuse("streamlines", "PERSISTED", key)
+        return StreamlinesCacheValidationReceipt(
+            inspection=StreamlinesCacheInspection(
+                ownership=self._streamlines_cache_ownership(binding),
+                paths=paths,
+                classification="VALID",
+                message="Persisted strong validation receipt matches resources.",
+                metadata=metadata,
+            ),
+            resource_fingerprint=fingerprint,
+            compatibility_identity=(
+                int(compatibility[0]),
+                str(compatibility[1]),
+                str(compatibility[2]),
+            ),
+            source=source,
+            dependency_identity=dependency,
+            receipt_source="PERSISTED",
+            validation_executed=False,
+            geometry_sha256_recomputed=False,
+        )
+
+    def _streamlines_source_from_persisted_payload(
+        self,
+        binding,
+        airflow_dataset,
+        metadata: StreamlinesCacheMetadata,
+        payload: dict[str, object],
+    ) -> TemporalVelocitySourceDescriptor:
+        """Rebuild plain temporal identity from prior spatial preflight facts."""
+
+        static = payload["static_source"]
+        if not isinstance(static, dict):
+            raise ValueError("persisted static source is malformed")
+        velocity_paths = airflow_dataset.velocity_vti_sequence_paths
+        descriptor = StaticVelocitySourceDescriptor(
+            workload=binding.workload_mode,
+            dataset_identity=binding.dataset_identity,
+            sample_index=0,
+            vti_path=velocity_paths[0],
+            dataset_prim_path=self.STATIC_DATASET_PATH,
+            velocity_field_prim_path=(
+                f"{self.STATIC_IMPORT_ROOT}/PointData/"
+                f"{self.config.simulation_cache.velocity_field_name}"
+            ),
+            world_bounds=_float_tuple_pair(static["world_bounds"]),
+            dimensions=_int_tuple(static["dimensions"], 3),
+            spacing=_float_tuple(static["spacing"], 3),
+            origin=_float_tuple(static["origin"], 3),
+            source_origin=_float_tuple(static["source_origin"], 3),
+            stage_meters_per_unit=float(static["stage_meters_per_unit"]),
+        )
+        return temporal_source_from_airflow_dataset(
+            airflow_dataset,
+            workload=binding.workload_mode,
+            static_descriptor=descriptor,
+            time_codes_per_second=metadata.time_codes_per_second,
+        )
+
+    def _persist_streamlines_cache_validation_receipt(
+        self,
+        binding,
+        receipt: StreamlinesCacheValidationReceipt,
+    ) -> None:
+        """Persist only a fully VALID receipt and its plain reconstruction facts."""
+
+        store = getattr(self, "_validation_receipt_store", None)
+        metadata = receipt.inspection.metadata
+        source = receipt.source
+        if store is None or metadata is None or source is None:
+            return
+        static = source.static_descriptor
+        payload = {
+            "validation_contract_version": STREAMLINES_VALIDATION_CONTRACT_VERSION,
+            "workload": binding.workload_mode,
+            "dataset_identity": binding.dataset_identity,
+            "classification": "VALID",
+            "resource_fingerprint": list(receipt.resource_fingerprint),
+            "dependency_identity": list(receipt.dependency_identity),
+            "compatibility_identity": list(receipt.compatibility_identity),
+            "geometry_sha256": metadata.geometry_sha256,
+            "static_source": {
+                "world_bounds": static.world_bounds,
+                "dimensions": static.dimensions,
+                "spacing": static.spacing,
+                "origin": static.origin,
+                "source_origin": static.source_origin,
+                "stage_meters_per_unit": static.stage_meters_per_unit,
+            },
+        }
+        try:
+            store.store_streamlines(
+                key=self._persisted_streamlines_receipt_key(binding),
+                payload=payload,
+            )
+        except (OSError, TypeError, ValueError) as error:
+            carb = self._streamlines_carb_logger()
+            if carb:
+                carb.log_warn(
+                    "DTRS STREAMLINES CACHE VALIDATION | receipt persist failed "
+                    f"| workload={binding.workload_mode} | reason={error}"
+                )
+
+    def persist_session_streamlines_cache_validation_receipts(self) -> None:
+        """Publish current VALID session receipts after opt-in becomes enabled."""
+
+        if not self._reuse_streamlines_receipts_enabled():
+            return
+        for (workload, dataset_identity), receipt in getattr(
+            self,
+            "_streamlines_cache_validation_receipts",
+            {},
+        ).items():
+            binding = SimpleNamespace(
+                workload_mode=workload,
+                dataset_identity=dataset_identity,
+            )
+            if receipt.inspection.valid:
+                self._persist_streamlines_cache_validation_receipt(binding, receipt)
+
+    def _log_streamlines_cache_validation_receipt(
+        self,
+        receipt: StreamlinesCacheValidationReceipt,
+    ) -> None:
+        """Log whether strong geometry evidence was fresh or reused."""
+
+        carb = self._streamlines_carb_logger()
+        if not carb:
+            return
+        ownership = receipt.inspection.ownership
+        event = "REUSED" if not receipt.validation_executed else "VALIDATED"
+        carb.log_warn(
+            "DTRS STREAMLINES CACHE VALIDATION | "
+            f"{event} | workload={ownership.workload} | "
+            f"dataset={ownership.dataset_identity} | "
+            f"classification={receipt.inspection.classification} | "
+            f"receipt_source={receipt.receipt_source} | "
+            f"validation_executed={receipt.validation_executed} | "
+            "geometry_sha256_recomputed="
+            f"{receipt.geometry_sha256_recomputed}"
+        )
+
     def announce_streamlines_cache_build_ready(self) -> str:
         """Publish cache-build readiness without touching an existing artifact."""
 
@@ -206,12 +755,14 @@ class StreamlinesCacheRuntimeMixin:
     def inspect_existing_streamlines_cache(self) -> StreamlinesCacheValidation:
         """Inspect persisted cache provenance without creating a Kit operator."""
 
-        binding, airflow_dataset = self.resolve_current_airflow_dataset()
-        inspection = self._inspect_streamlines_cache_for_target(
-            binding,
-            airflow_dataset,
-        )
+        inspection = self.inspect_current_streamlines_cache()
         return StreamlinesCacheValidation(inspection.valid, inspection.message)
+
+    def inspect_current_streamlines_cache(self) -> StreamlinesCacheInspection:
+        """Classify the current workload cache without triggering any runtime work."""
+
+        binding, airflow_dataset = self.resolve_current_airflow_dataset()
+        return self._inspect_streamlines_cache_for_target(binding, airflow_dataset)
 
     def inspect_streamlines_caches(self) -> tuple[StreamlinesCacheInspection, ...]:
         """Classify every configured cache through the shared dataset registry.
@@ -296,19 +847,19 @@ class StreamlinesCacheRuntimeMixin:
         return self._streamlines_profile_state.profile
 
     def is_streamlines_production_profile_frozen(self) -> bool:
-        """Return whether cache promotion is authorised for this session."""
+        """Return whether the source-controlled production profile is accepted."""
 
         return self._streamlines_profile_state.frozen
 
     def mark_streamlines_production_profile_previewed(self) -> None:
-        """Record successful representative previews before manual acceptance."""
+        """Retain optional maintenance-preview compatibility without a state gate."""
 
         self._streamlines_profile_state = (
             self._streamlines_profile_state.mark_previewed()
         )
 
     def accept_streamlines_production_profile(self):
-        """Freeze the previewed geometry contract before any production build."""
+        """Return the source-controlled accepted production profile."""
 
         self._streamlines_profile_state = self._streamlines_profile_state.freeze()
         return self._streamlines_profile_state.profile
@@ -478,12 +1029,6 @@ class StreamlinesCacheRuntimeMixin:
                 False,
                 "Cache build is unavailable while airflow Attach is active.",
             )
-        if not self.is_streamlines_production_profile_frozen():
-            return StreamlinesCacheBuildResult(
-                False,
-                "Accept Production Streamlines Profile before building a cache.",
-            )
-
         started_at = time.monotonic()
         carb = self._streamlines_carb_logger()
         cleanup = None
@@ -587,10 +1132,6 @@ class StreamlinesCacheRuntimeMixin:
         touched, so no unrelated valid cache is rebuilt as collateral work.
         """
 
-        if not self.is_streamlines_production_profile_frozen():
-            raise RuntimeError(
-                "Accept Production Streamlines Profile before building the cache set."
-            )
         if self._flow_lifecycle_state != "DETACHED":
             raise RuntimeError(
                 "Production Streamlines cache build requires Flow DETACHED."
@@ -919,6 +1460,10 @@ class StreamlinesCacheRuntimeMixin:
         status_callback: StatusCallback | None = None,
         *,
         start_playback: bool = True,
+        allow_attached_flow: bool = False,
+        presentation_hidden: bool = False,
+        validated_receipt: StreamlinesCacheValidationReceipt | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> StreamlinesCacheLoadResult:
         """Attach and select a validated persisted cache without cadence tests.
 
@@ -927,7 +1472,8 @@ class StreamlinesCacheRuntimeMixin:
         the only cached-playback start in that workflow.
         """
 
-        if not self.is_streamlines_cache_load_allowed():
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+        if not allow_attached_flow and not self.is_streamlines_cache_load_allowed():
             raise RuntimeError("Load Streamlines Cache requires Flow DETACHED.")
 
         import omni.kit.app
@@ -943,47 +1489,36 @@ class StreamlinesCacheRuntimeMixin:
         stage = omni.usd.get_context().get_stage()
         if not stage:
             raise RuntimeError("Cache load requires an open stage.")
-        await self.stop_streamlines_cached_playback_in_kit()
-        self._clear_streamlines_cache_load_state(stage)
-        binding, airflow_dataset = self.resolve_current_airflow_dataset()
-        cache_paths = streamlines_cache_paths(
-            self.config.repo_root,
-            self._streamlines_cache_ownership(binding),
+        receipt = (
+            validated_receipt
+            or await self.ensure_current_streamlines_cache_validation_in_background()
         )
-        if not cache_paths.metadata_path.is_file():
-            raise RuntimeError("No completed Streamlines cache metadata was found.")
-        if not cache_paths.geometry_path.is_file():
-            raise RuntimeError("No completed Streamlines cache geometry was found.")
-
-        self._report_streamlines_cache_load(
-            event="PROGRESS",
-            message="Loading Streamlines cache: validating source provenance.",
-            status_callback=status_callback,
-        )
-        metadata = load_streamlines_cache_metadata(cache_paths.metadata_path)
-        expected = self._streamlines_cache_expected_contract(
-            binding=binding,
-            airflow_dataset=airflow_dataset,
-            stage_time_codes_per_second=float(stage.GetTimeCodesPerSecond()),
-        )
-        validation = validate_streamlines_cache(
-            metadata,
-            source=expected["source"],
-            settings_signature=expected["settings_signature"],
-            geometry_path=cache_paths.geometry_path,
-        )
-        if not validation.valid:
-            if metadata.settings is None or validation.message.startswith(
-                "Cache settings"
-            ):
-                self._log_streamlines_cache_identity_mismatch(metadata, expected)
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+        inspection = receipt.inspection
+        if inspection.classification != "VALID" or receipt.source is None:
             raise RuntimeError(
                 "Cache validation failed: "
-                f"{validation.message} Explicitly rebuild the cache."
+                f"{inspection.message} Explicitly rebuild the cache."
             )
+        await self.release_streamlines_timeline_control_in_kit()
+        self._clear_streamlines_cache_load_state(stage)
+        self._report_streamlines_cache_load(
+            event="PROGRESS",
+            message="Loading Streamlines cache: using validated provenance receipt.",
+            status_callback=status_callback,
+        )
+        metadata = inspection.metadata
+        if metadata is None:
+            raise RuntimeError("Validated Streamlines cache receipt lacks metadata.")
+        if metadata.time_codes_per_second != float(stage.GetTimeCodesPerSecond()):
+            raise RuntimeError(
+                "Cache validation failed: Cache time-code rate is stale. "
+                "Explicitly rebuild the cache."
+            )
+        cache_paths = inspection.paths
         playback_contract = cached_playback_contract_from_validated_cache(
             metadata,
-            expected["source"],
+            receipt.source,
         )
         app = omni.kit.app.get_app()
         try:
@@ -993,6 +1528,12 @@ class StreamlinesCacheRuntimeMixin:
                 status_callback=status_callback,
             )
             self._attach_streamlines_cache_playback_layer(stage, cache_paths)
+            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+            if (
+                presentation_hidden
+                and not self.set_streamlines_cached_presentation_visible_in_kit(False)
+            ):
+                raise RuntimeError("Prepared Streamlines cache could not be hidden.")
             return await self._complete_streamlines_cache_load_in_kit(
                 stage=stage,
                 app=app,
@@ -1001,12 +1542,125 @@ class StreamlinesCacheRuntimeMixin:
                 started_at=started_at,
                 status_callback=status_callback,
                 start_playback=start_playback,
+                cancellation_requested=cancellation_requested,
                 Usd=Usd,
                 UsdGeom=UsdGeom,
             )
         except BaseException:
             self._clear_streamlines_cache_load_state(stage)
             raise
+
+    async def prepare_streamlines_cached_presentation_in_kit(
+        self,
+        context,
+        *,
+        status_callback: StatusCallback | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
+    ):
+        """Attach one VALID persisted cache hidden at a preserved shared phase.
+
+        This Phase 4.2 seam consumes only persisted geometry.  It deliberately
+        bypasses the public Flow-detached UI guard while Flow remains the last
+        visible presentation during a transactional handoff.
+        """
+
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+        receipt = await self.ensure_current_streamlines_cache_validation_in_background()
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+        inspection = receipt.inspection
+        if inspection.classification != "VALID":
+            raise RuntimeError(
+                "Streamlines cache is "
+                f"{inspection.classification}: {inspection.message}"
+            )
+        await self.load_streamlines_cache_in_kit(
+            status_callback=status_callback,
+            start_playback=False,
+            allow_attached_flow=True,
+            presentation_hidden=True,
+            validated_receipt=receipt,
+            cancellation_requested=cancellation_requested,
+        )
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+        resolution = await self.select_streamlines_cache_state_in_kit(
+            context.logical_phase_seconds
+        )
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+        if (
+            resolution.sample.sample_index != context.source_sample_index
+            or resolution.sample.source_vti.resolve() != context.source_vti.resolve()
+        ):
+            raise RuntimeError(
+                "Prepared Streamlines sample does not match the preserved "
+                "shared-airflow source identity."
+            )
+        return resolution
+
+    async def cleanup_streamlines_cached_presentation_in_kit(self) -> None:
+        """Stop one scheduler and detach only DTRS-owned persisted presentation."""
+
+        import omni.kit.app
+        import omni.usd
+
+        await self.release_streamlines_timeline_control_in_kit()
+        stage = omni.usd.get_context().get_stage()
+        if stage:
+            self._clear_streamlines_cache_load_state(stage)
+            await omni.kit.app.get_app().next_update_async()
+        self._streamlines_cached_presentation_visible = False
+
+    def cancel_streamlines_cached_presentation_in_kit(self) -> None:
+        """Synchronously cancel scheduler and cache ownership during shutdown."""
+
+        import omni.usd
+
+        self.cancel_streamlines_cached_playback()
+        stage = omni.usd.get_context().get_stage()
+        if stage:
+            self._clear_streamlines_cache_load_state(stage)
+        self._streamlines_cached_presentation_visible = False
+
+    def set_streamlines_cached_presentation_visible_in_kit(self, visible: bool) -> bool:
+        """Show or hide validated cache geometry without changing its scheduler."""
+
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        root = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH) if stage else None
+        if not root or not root.IsValid():
+            return False
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            UsdGeom.Imageable(root).CreateVisibilityAttr().Set(
+                UsdGeom.Tokens.inherited if visible else UsdGeom.Tokens.invisible
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+        self._streamlines_cached_presentation_visible = visible
+        return True
+
+    def streamlines_cached_presentation_is_visible_in_kit(self) -> bool:
+        """Read the composed visibility of the cache root in the open stage."""
+
+        import omni.usd
+        from pxr import UsdGeom
+
+        stage = omni.usd.get_context().get_stage()
+        root = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH) if stage else None
+        if not root or not root.IsValid():
+            return False
+        return UsdGeom.Imageable(root).ComputeVisibility() != UsdGeom.Tokens.invisible
+
+    def streamlines_cached_presentation_is_prepared_in_kit(self) -> bool:
+        """Report a composed cache root even when its presentation is hidden."""
+
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        root = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH) if stage else None
+        return bool(root and root.IsValid())
 
     async def _complete_streamlines_cache_load_in_kit(
         self,
@@ -1018,6 +1672,7 @@ class StreamlinesCacheRuntimeMixin:
         started_at: float,
         status_callback: StatusCallback | None,
         start_playback: bool,
+        cancellation_requested: Callable[[], bool] | None,
         Usd,
         UsdGeom,
     ) -> StreamlinesCacheLoadResult:
@@ -1033,7 +1688,9 @@ class StreamlinesCacheRuntimeMixin:
                 app,
                 status_callback=status_callback,
                 started_at=started_at,
+                cancellation_requested=cancellation_requested,
             )
+        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
         curves_prim = stage.GetPrimAtPath(CACHE_PLAYBACK_CURVES_PATH)
         if not curves_prim or not curves_prim.IsValid():
             raise RuntimeError("Cache layer did not compose its BasisCurves prim.")
@@ -1096,6 +1753,7 @@ class StreamlinesCacheRuntimeMixin:
             self.config.simulation_cache.streamlines_presentation_period_seconds
             is not None
         ):
+            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
             await self.start_streamlines_cached_playback_in_kit(
                 status_callback=status_callback,
             )
@@ -1291,27 +1949,48 @@ class StreamlinesCacheRuntimeMixin:
         status_callback: StatusCallback | None,
         started_at: float,
         heartbeat_seconds: float = 5.0,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> None:
         """Await one Kit frame while making a stalled composition observable."""
 
         update = asyncio.ensure_future(app.next_update_async())
-        while not update.done():
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(update),
-                    timeout=heartbeat_seconds,
+        try:
+            while not update.done():
+                self._raise_if_streamlines_presentation_cancelled(
+                    cancellation_requested
                 )
-            except TimeoutError:
-                elapsed_seconds = time.monotonic() - started_at
-                self._report_streamlines_cache_load(
-                    event="WAITING",
-                    message=(
-                        "Loading Streamlines cache: waiting for Kit composition "
-                        f"({elapsed_seconds:.0f} s elapsed)."
-                    ),
-                    status_callback=status_callback,
-                )
-        await update
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(update),
+                        timeout=heartbeat_seconds,
+                    )
+                except TimeoutError:
+                    elapsed_seconds = time.monotonic() - started_at
+                    self._report_streamlines_cache_load(
+                        event="WAITING",
+                        message=(
+                            "Loading Streamlines cache: waiting for Kit composition "
+                            f"({elapsed_seconds:.0f} s elapsed)."
+                        ),
+                        status_callback=status_callback,
+                    )
+            await update
+        finally:
+            if not update.done():
+                update.cancel()
+                with suppress(asyncio.CancelledError):
+                    await update
+
+    @staticmethod
+    def _raise_if_streamlines_presentation_cancelled(
+        cancellation_requested: Callable[[], bool] | None,
+    ) -> None:
+        """Reject stale candidate work before it can mutate presentation state."""
+
+        if cancellation_requested and cancellation_requested():
+            raise StreamlinesPresentationCancelled(
+                "Streamlines presentation request was superseded or cancelled."
+            )
 
     def _attach_streamlines_cache_playback_layer(
         self,
@@ -1348,6 +2027,14 @@ class StreamlinesCacheRuntimeMixin:
                 matches_cache = sublayer_path.replace("\\", "/") in expected_paths
             if matches_cache:
                 session_layer.subLayerPaths.remove(sublayer_path)
+        previous_target = stage.GetEditTarget()
+        try:
+            stage.SetEditTarget(session_layer)
+            # Visibility is authored in Session Layer.  Remove that owned over
+            # as well as the sublayer so it cannot outlive cache geometry.
+            stage.RemovePrim(CACHE_PLAYBACK_ROOT_PATH)
+        finally:
+            stage.SetEditTarget(previous_target)
 
     @staticmethod
     def _format_cache_build_success(

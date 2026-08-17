@@ -317,6 +317,10 @@ x = 0.0
 y = 0.0
 z = 0.0
 
+[validation_receipts]
+reuse_verified_vti_receipts = false
+reuse_verified_streamlines_cache_receipts = false
+
 [simulation_cache]
 enabled = true
 runtime_mode = "kit_cae"

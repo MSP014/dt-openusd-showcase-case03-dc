@@ -19,6 +19,9 @@ from digital_twin_runtime_suite.app.airflow_validation.cache import (
     SessionValidationCache,
     build_dataset_validation_signature,
 )
+from digital_twin_runtime_suite.app.validation_receipts import (
+    ValidationReceiptStore,
+)
 from digital_twin_runtime_suite.app.workload_binding.background_validation import (
     BackgroundAirflowValidationCoordinator,
     BackgroundValidationError,
@@ -55,6 +58,29 @@ def test_background_validation_is_sequential_and_current_workload_first(tmp_path
             "Mode: sequential",
         )
     )
+    assert sum("receipt_source=FRESH" in line for line in logs) == 4
+    assert sum("validation_executed=True" in line for line in logs) == 4
+
+
+def test_expensive_vti_preflight_runs_off_the_calling_thread(tmp_path):
+    dataset = _datasets(tmp_path)[1]
+    calling_thread = threading.get_ident()
+    worker_threads = []
+
+    def validator(*_args):
+        worker_threads.append(threading.get_ident())
+        return _metadata(), True
+
+    asyncio.run(
+        _coordinator(
+            (dataset,),
+            "Nominal",
+            preflight_validator=validator,
+        ).run(lambda _message: None)
+    )
+
+    assert worker_threads
+    assert all(thread_id != calling_thread for thread_id in worker_threads)
 
 
 def test_background_validation_reuses_existing_preflight_receipt(tmp_path):
@@ -78,7 +104,96 @@ def test_background_validation_reuses_existing_preflight_receipt(tmp_path):
 
     assert result.validated == 0
     assert any("REUSED | selector=server/load_normal" in line for line in logs)
+    assert any("receipt_source=FRESH" in line for line in logs)
+    assert any("current_cache_location=SESSION" in line for line in logs)
+    assert any("validation_executed=False" in line for line in logs)
     assert not any("| BEGIN | selector=server/load_normal" in line for line in logs)
+
+
+def test_next_process_reuses_persisted_vti_without_worker_call(tmp_path):
+    dataset = _datasets(tmp_path)[1]
+    store_path = tmp_path / "receipts.local.json"
+    first_calls = []
+    first_cache = SessionValidationCache(
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+
+    def first_validator(*_args):
+        first_calls.append("validated")
+        return _metadata(), True
+
+    asyncio.run(
+        _coordinator(
+            (dataset,),
+            "Nominal",
+            validation_cache=first_cache,
+            preflight_validator=first_validator,
+        ).run(lambda _message: None)
+    )
+
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted_cache = SessionValidationCache(
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+    logs = []
+
+    def unexpected_validator(*_args):
+        raise AssertionError("Persisted VTI evidence must bypass the worker.")
+
+    result = asyncio.run(
+        _coordinator(
+            (dataset,),
+            "Nominal",
+            validation_cache=restarted_cache,
+            preflight_validator=unexpected_validator,
+        ).run(logs.append)
+    )
+
+    assert first_calls == ["validated"]
+    assert result.failed == 0
+    assert any("receipt_source=PERSISTED" in line for line in logs)
+    assert restarted_store.metrics_snapshot().vti.expensive_validation_calls == 0
+
+
+def test_changed_vti_fingerprint_revalidates_only_changed_workload(tmp_path):
+    datasets = _datasets(tmp_path)
+    store_path = tmp_path / "receipts.local.json"
+    first_cache = SessionValidationCache(
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(
+        _coordinator(
+            datasets,
+            "Nominal",
+            validation_cache=first_cache,
+            preflight_validator=lambda *_args: (_metadata(), True),
+        ).run(lambda _message: None)
+    )
+    changed_path = datasets[1].velocity_vti_sequence_paths[0]
+    changed_path.write_bytes(changed_path.read_bytes() + b"changed")
+    calls = []
+
+    def validator(paths, *_args):
+        calls.append(paths[0].parent.name)
+        return _metadata(), True
+
+    restarted_cache = SessionValidationCache(
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(
+        _coordinator(
+            datasets,
+            "Nominal",
+            validation_cache=restarted_cache,
+            preflight_validator=validator,
+        ).run(lambda _message: None)
+    )
+
+    assert calls == ["load_normal"]
 
 
 def test_failed_dataset_retries_after_other_first_pass_and_becomes_terminal(tmp_path):
@@ -389,4 +504,18 @@ def _dataset(root: Path, state: str) -> AirflowDataset:
 
 
 def _metadata() -> dict[str, object]:
-    return {"dimensions": (2, 2, 2), "spacing": (1.0, 1.0, 1.0)}
+    return {
+        "components": 3,
+        "data_type": "float",
+        "dimensions": (2, 2, 2),
+        "point_count": 8,
+        "origin": (0.0, 0.0, 0.0),
+        "vti_header_origin": (0.0, 0.0, 0.0),
+        "vtk_reader_origin": (0.0, 0.0, 0.0),
+        "spacing": (1.0, 1.0, 1.0),
+        "bounds": (0.0, 1.0, 0.0, 1.0, 0.0, 1.0),
+        "velocity_magnitude_max": 1.0,
+        "kit_cae_direct_attach_base_velocity_scale": 1.0,
+        "velocity_field_name": "vel",
+        "velocity_field_association": "point_data",
+    }

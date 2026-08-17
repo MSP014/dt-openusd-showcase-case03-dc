@@ -45,6 +45,20 @@ def test_scheduler_uses_immutable_deadlines_without_drift() -> None:
     assert report.backlog_count == 0
 
 
+def test_second_tick_cannot_precede_the_accepted_200ms_period() -> None:
+    """A liveness receipt needs a later scheduler tick, not task creation."""
+
+    clock = _Clock()
+    phases: list[float] = []
+    scheduler = _scheduler(clock, phases, target_ticks=2, period_seconds=0.2)
+
+    asyncio.run(_start_and_stop(scheduler))
+
+    first_tick, second_tick = scheduler.ticks
+    assert second_tick.deadline_seconds - first_tick.deadline_seconds == 0.2
+    assert second_tick.started_at_seconds >= first_tick.deadline_seconds + 0.2
+
+
 def test_scheduler_counts_repeated_no_ops_without_queueing() -> None:
     clock = _Clock()
     phases: list[float] = []

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +14,8 @@ from digital_twin_runtime_suite.app.airflow_dataset import AirflowDatasetSelecto
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
+from digital_twin_runtime_suite.app.streamlines import cache as cache_module
+from digital_twin_runtime_suite.app.streamlines import cache_runtime
 from digital_twin_runtime_suite.app.streamlines.cache import (
     CACHE_SCHEMA_VERSION,
     StreamlinesCacheMetadata,
@@ -37,6 +41,9 @@ from digital_twin_runtime_suite.app.streamlines.proof import (
 )
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalVelocitySourceDescriptor,
+)
+from digital_twin_runtime_suite.app.validation_receipts import (
+    ValidationReceiptStore,
 )
 from digital_twin_runtime_suite.app.workload_binding import WorkloadAirflowBinding
 
@@ -351,8 +358,18 @@ class _DiscoveryRuntime(StreamlinesCacheRuntimeMixin):
         self,
         repo_root: Path,
         sources: tuple[TemporalVelocitySourceDescriptor, ...],
+        *,
+        persisted_store: ValidationReceiptStore | None = None,
+        reuse_persisted: bool = False,
     ) -> None:
-        self.config = SimpleNamespace(repo_root=repo_root)
+        self.config = SimpleNamespace(
+            repo_root=repo_root,
+            simulation_cache=SimpleNamespace(velocity_field_name="vel"),
+            validation_receipts=SimpleNamespace(
+                reuse_verified_streamlines_cache_receipts=reuse_persisted
+            ),
+        )
+        self._validation_receipt_store = persisted_store
         self._sources = {source.workload: source for source in sources}
         self.builder_calls = 0
         self.vti_import_calls = 0
@@ -399,3 +416,554 @@ class _DiscoveryRuntime(StreamlinesCacheRuntimeMixin):
     async def _run_fresh_streamlines_operator_in_kit(self, *_args, **_kwargs):
         self.kit_cae_recompute_calls += 1
         raise AssertionError("Cache discovery must not run the Streamlines operator.")
+
+
+class _ReceiptRuntime(StreamlinesCacheRuntimeMixin):
+    """Plain owner fixture for background receipt contracts."""
+
+    def __init__(
+        self,
+        repo_root: Path,
+        sources: tuple[TemporalVelocitySourceDescriptor, ...],
+        *,
+        persisted_store: ValidationReceiptStore | None = None,
+        reuse_persisted: bool = False,
+    ) -> None:
+        self.config = SimpleNamespace(
+            repo_root=repo_root,
+            simulation_cache=SimpleNamespace(velocity_field_name="vel"),
+            validation_receipts=SimpleNamespace(
+                reuse_verified_streamlines_cache_receipts=reuse_persisted
+            ),
+        )
+        self._validation_receipt_store = persisted_store
+        self._sources = {source.workload: source for source in sources}
+        self._workload = sources[0].workload
+        self.settings_suffix = ""
+        self.reset_streamlines_cache_validation_receipts()
+
+    @staticmethod
+    def _streamlines_carb_logger():
+        return None
+
+    def resolve_current_airflow_dataset(self):
+        source = self._sources[self._workload]
+        return (
+            SimpleNamespace(
+                workload_mode=source.workload,
+                dataset_identity=source.dataset_identity,
+            ),
+            object(),
+        )
+
+    def _streamlines_cache_expected_contract(
+        self,
+        *,
+        binding,
+        airflow_dataset,
+        stage_time_codes_per_second: float,
+    ) -> dict[str, object]:
+        del airflow_dataset, stage_time_codes_per_second
+        source = self._sources[binding.workload_mode]
+        request = build_streamlines_operator_request(source.static_descriptor)
+        return {
+            "source": source,
+            "settings_signature": (
+                streamlines_settings_signature(request) + self.settings_suffix
+            ),
+        }
+
+    def select_workload(self, workload: str) -> None:
+        """Switch the fixture's authoritative workload without touching receipts."""
+
+        self._workload = workload
+
+    def _streamlines_source_from_persisted_payload(
+        self,
+        binding,
+        _airflow_dataset,
+        _metadata,
+        _payload,
+    ):
+        return self._sources[binding.workload_mode]
+
+
+def test_background_receipt_reuses_unchanged_strong_validation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    runtime = _ReceiptRuntime(tmp_path, (source,))
+    original_hash = cache_module.file_sha256
+    hash_calls = 0
+
+    def count_hash(path: Path) -> str:
+        nonlocal hash_calls
+        hash_calls += 1
+        return original_hash(path)
+
+    monkeypatch.setattr(cache_module, "file_sha256", count_hash)
+
+    first = asyncio.run(
+        runtime.ensure_current_streamlines_cache_validation_in_background()
+    )
+    with monkeypatch.context() as readonly:
+        readonly.setattr(
+            Path,
+            "open",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("readiness opened a cache resource")
+            ),
+        )
+        readonly.setattr(
+            Path,
+            "stat",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("readiness statted a cache resource")
+            ),
+        )
+        for _ in range(5):
+            assert (
+                runtime.streamlines_cache_readiness_snapshot().classification == "VALID"
+            )
+    second = asyncio.run(
+        runtime.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert second.inspection is first.inspection
+    assert second.receipt_source == "FRESH"
+    assert second.cache_location == "SESSION"
+    assert second.validation_executed is False
+    assert hash_calls == 1
+
+
+def test_concurrent_background_validation_deduplicates_one_geometry_hash(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    runtime = _ReceiptRuntime(tmp_path, (source,))
+    original_hash = cache_module.file_sha256
+    hash_calls = 0
+
+    def count_hash(path: Path) -> str:
+        nonlocal hash_calls
+        hash_calls += 1
+        return original_hash(path)
+
+    monkeypatch.setattr(cache_module, "file_sha256", count_hash)
+
+    async def validate_twice():
+        return await asyncio.gather(
+            runtime.ensure_current_streamlines_cache_validation_in_background(),
+            runtime.ensure_current_streamlines_cache_validation_in_background(),
+        )
+
+    first, second = asyncio.run(validate_twice())
+
+    assert first is second
+    assert hash_calls == 1
+
+
+def test_strong_streamlines_validation_runs_off_the_calling_thread(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    runtime = _ReceiptRuntime(tmp_path, (source,))
+    calling_thread = threading.get_ident()
+    worker_threads = []
+    original = runtime._validate_streamlines_cache_receipt
+
+    def record_worker(*args, **kwargs):
+        worker_threads.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        runtime,
+        "_validate_streamlines_cache_receipt",
+        record_worker,
+    )
+
+    asyncio.run(runtime.ensure_current_streamlines_cache_validation_in_background())
+
+    assert worker_threads
+    assert all(thread_id != calling_thread for thread_id in worker_threads)
+
+
+def test_next_process_reuses_streamlines_without_geometry_hash(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    store_path = tmp_path / "receipts.local.json"
+    first = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    fresh = asyncio.run(
+        first.ensure_current_streamlines_cache_validation_in_background()
+    )
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+
+    def unexpected_strong_validation(*_args, **_kwargs):
+        raise AssertionError("Persisted cache evidence must bypass geometry hashing.")
+
+    monkeypatch.setattr(
+        cache_runtime,
+        "inspect_streamlines_cache",
+        unexpected_strong_validation,
+    )
+    reused = asyncio.run(
+        restarted.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert fresh.receipt_source == "FRESH"
+    assert reused.receipt_source == "PERSISTED"
+    assert reused.inspection.classification == "VALID"
+    assert reused.validation_executed is False
+    assert reused.geometry_sha256_recomputed is False
+    metrics = restarted_store.metrics_snapshot().streamlines
+    assert metrics.persisted_reused == 1
+    assert metrics.expensive_validation_calls == 0
+    assert metrics.geometry_sha256_recomputed == 0
+
+
+def test_changed_geometry_fingerprint_invalidates_persisted_streamlines(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    store_path = tmp_path / "receipts.local.json"
+    first = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(first.ensure_current_streamlines_cache_validation_in_background())
+    paths = streamlines_cache_paths(tmp_path, _ownership(source))
+    paths.geometry_path.write_bytes(paths.geometry_path.read_bytes() + b"changed")
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+
+    receipt = asyncio.run(
+        restarted.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert receipt.receipt_source == "FRESH"
+    assert receipt.inspection.classification == "STALE"
+    metrics = restarted_store.metrics_snapshot().streamlines
+    assert metrics.invalidated == 1
+    assert metrics.expensive_validation_calls == 1
+    assert metrics.geometry_sha256_recomputed == 1
+
+
+def test_changed_profile_identity_invalidates_persisted_streamlines(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    store_path = tmp_path / "receipts.local.json"
+    first = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(first.ensure_current_streamlines_cache_validation_in_background())
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+    restarted.settings_suffix = "-new-profile"
+
+    receipt = asyncio.run(
+        restarted.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert receipt.receipt_source == "FRESH"
+    assert restarted_store.metrics_snapshot().streamlines.invalidated == 1
+
+
+def test_changed_metadata_identity_invalidates_persisted_streamlines(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    store_path = tmp_path / "receipts.local.json"
+    first = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(first.ensure_current_streamlines_cache_validation_in_background())
+    paths = streamlines_cache_paths(tmp_path, _ownership(source))
+    metadata = paths.metadata_path.read_text(encoding="utf-8")
+    paths.metadata_path.write_text(metadata + "\n", encoding="utf-8")
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+
+    receipt = asyncio.run(
+        restarted.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert receipt.receipt_source == "FRESH"
+    assert receipt.inspection.classification == "VALID"
+    assert restarted_store.metrics_snapshot().streamlines.invalidated == 1
+
+
+def test_changed_vti_dependency_invalidates_persisted_streamlines(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    store_path = tmp_path / "receipts.local.json"
+    first = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(first.ensure_current_streamlines_cache_validation_in_background())
+    source.velocity_paths[0].write_bytes(b"changed-source-identity")
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+
+    receipt = asyncio.run(
+        restarted.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert receipt.receipt_source == "FRESH"
+    assert receipt.inspection.classification == "STALE"
+    metrics = restarted_store.metrics_snapshot().streamlines
+    assert metrics.invalidated == 1
+    assert metrics.geometry_sha256_recomputed == 0
+
+
+def test_persisted_streamlines_receipt_is_isolated_by_workload(tmp_path: Path) -> None:
+    nominal = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    surge = _source(
+        tmp_path,
+        workload="Surge",
+        state="load_surge",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, nominal)
+    _persist_cache(tmp_path, surge)
+    store_path = tmp_path / "receipts.local.json"
+    first = _ReceiptRuntime(
+        tmp_path,
+        (nominal,),
+        persisted_store=ValidationReceiptStore(store_path),
+        reuse_persisted=True,
+    )
+    asyncio.run(first.ensure_current_streamlines_cache_validation_in_background())
+    restarted_store = ValidationReceiptStore(store_path)
+    restarted = _ReceiptRuntime(
+        tmp_path,
+        (nominal, surge),
+        persisted_store=restarted_store,
+        reuse_persisted=True,
+    )
+    restarted.select_workload("Surge")
+
+    receipt = asyncio.run(
+        restarted.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert receipt.receipt_source == "FRESH"
+    assert restarted_store.metrics_snapshot().streamlines.persisted_reused == 0
+
+
+def test_changed_cache_fingerprint_is_checking_until_new_receipt_completes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    runtime = _ReceiptRuntime(tmp_path, (source,))
+    asyncio.run(runtime.ensure_current_streamlines_cache_validation_in_background())
+    paths = streamlines_cache_paths(tmp_path, _ownership(source))
+    paths.geometry_path.write_bytes(b"changed-derived-usdc")
+    original_validate = runtime._validate_streamlines_cache_receipt
+    started = threading.Event()
+    release = threading.Event()
+
+    def delayed_validate(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=5.0)
+        return original_validate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        runtime,
+        "_validate_streamlines_cache_receipt",
+        delayed_validate,
+    )
+
+    async def validate_after_change():
+        task = asyncio.create_task(
+            runtime.ensure_current_streamlines_cache_validation_in_background()
+        )
+        await asyncio.to_thread(started.wait, 5.0)
+        snapshot = runtime.streamlines_cache_readiness_snapshot()
+        release.set()
+        receipt = await task
+        return snapshot, receipt
+
+    snapshot, receipt = asyncio.run(validate_after_change())
+
+    assert snapshot.classification == "CHECKING"
+    assert receipt.inspection.classification == "STALE"
+
+
+def test_changed_manifest_source_provenance_invalidates_a_receipt(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    runtime = _ReceiptRuntime(tmp_path, (source,))
+    asyncio.run(runtime.ensure_current_streamlines_cache_validation_in_background())
+    source.velocity_paths[0].write_bytes(b"changed-manifest-source")
+
+    receipt = asyncio.run(
+        runtime.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert receipt.inspection.classification == "STALE"
+
+
+def test_changed_settings_and_workload_never_reuse_another_receipt(
+    tmp_path: Path,
+) -> None:
+    nominal = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    surge = _source(
+        tmp_path,
+        workload="Surge",
+        state="load_surge",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, nominal)
+    _persist_cache(tmp_path, surge)
+    runtime = _ReceiptRuntime(tmp_path, (nominal, surge))
+    asyncio.run(runtime.ensure_current_streamlines_cache_validation_in_background())
+
+    runtime.settings_suffix = "-changed"
+    changed_settings = asyncio.run(
+        runtime.ensure_current_streamlines_cache_validation_in_background()
+    )
+    runtime.settings_suffix = ""
+    runtime.select_workload("Surge")
+    before_surge = runtime.streamlines_cache_readiness_snapshot()
+    surge_receipt = asyncio.run(
+        runtime.ensure_current_streamlines_cache_validation_in_background()
+    )
+
+    assert changed_settings.inspection.classification == "STALE"
+    assert before_surge.classification == "CHECKING"
+    assert surge_receipt.inspection.classification == "VALID"

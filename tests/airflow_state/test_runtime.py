@@ -113,6 +113,24 @@ def test_flow_and_streamlines_consume_one_dataset_and_phase_truth() -> None:
     assert flow_resolution.normalized_phase_seconds == pytest.approx(0.41)
 
 
+def test_transition_phase_pair_uses_one_absolute_clock_with_nonzero_origin() -> None:
+    state = _state(monotonic=lambda: 53.81)
+    nominal = state.begin_for_workload("Nominal")
+    assert nominal is not None and state.commit(nominal.transition_id)
+    critical = state.resolve_target(state.resolve_binding("Critical")).dataset
+
+    active, target = state.resolve_transition_phase_pair(
+        state.committed.dataset,
+        critical,
+        now=54.62,
+    )
+
+    assert state.phase_seconds(now=54.62) == pytest.approx(0.81)
+    assert active.normalized_phase_seconds == pytest.approx(0.81)
+    assert target.normalized_phase_seconds == pytest.approx(0.81)
+    assert active.sample.sample_index == target.sample.sample_index == 2
+
+
 def _state(*, monotonic=lambda: 0.0) -> AirflowStateRuntime:
     workloads = {
         "Idle": "load_idle",

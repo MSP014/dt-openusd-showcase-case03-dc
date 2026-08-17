@@ -291,6 +291,26 @@ class AirflowStateRuntime:
             active_sample_index=active_sample_index,
         )
 
+    def resolve_transition_phase_pair(
+        self,
+        active_dataset: AirflowDataset,
+        target_dataset: AirflowDataset,
+        *,
+        now: float | None = None,
+    ) -> tuple[TemporalSampleResolution, TemporalSampleResolution]:
+        """Resolve active and target datasets at one absolute shared-clock instant.
+
+        ``resolve_phase(now=...)`` accepts a monotonic timestamp, not an
+        already elapsed phase.  Sampling that timestamp once keeps a live Flow
+        retarget on the same normalized phase for both datasets.
+        """
+
+        current = self._monotonic() if now is None else now
+        return (
+            self.resolve_phase(active_dataset, now=current),
+            self.resolve_phase(target_dataset, now=current),
+        )
+
     def replace_committed_binding(self, binding: WorkloadAirflowBinding | None) -> None:
         """Compatibility seam for legacy tests; production state remains shared."""
 

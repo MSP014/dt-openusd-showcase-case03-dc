@@ -40,6 +40,12 @@ def test_cached_playback_switches_persisted_geometry_without_cae_or_vti(
     assert timeline.current_time == 0.2
     assert app.update_count == 2
     assert runtime._streamlines_cache_active_sample_index == 1
+    assert runtime.streamlines_controls_timeline_in_kit() is True
+
+    asyncio.run(runtime.release_streamlines_timeline_control_in_kit())
+
+    assert runtime.streamlines_controls_timeline_in_kit() is False
+    assert timeline.pauses == 1
 
 
 def test_cached_playback_same_state_is_no_op_without_kit_updates(
@@ -333,9 +339,17 @@ class _Timeline:
     def __init__(self) -> None:
         self.pauses = 0
         self.current_time: float | None = None
+        self.playing = True
+
+    def is_playing(self) -> bool:
+        return self.playing
+
+    def get_current_time(self) -> float:
+        return 7.25
 
     def pause(self) -> None:
         self.pauses += 1
+        self.playing = False
 
     def set_current_time(self, value: float) -> None:
         self.current_time = value

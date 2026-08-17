@@ -79,6 +79,35 @@ class StreamlinesProductionCacheSanityResult:
         )
 
 
+@dataclass(frozen=True)
+class StreamlinesPlaybackAdvanceProof:
+    """Evidence that a later scheduler tick selected a different real sample."""
+
+    initial_sample_identity: str
+    advanced_sample_identity: str | None
+    scheduler_tasks: int
+    scheduler_tick_count: int
+
+    @property
+    def sample_advanced(self) -> bool:
+        """Return whether the accepted scheduler observed a later real sample."""
+
+        return bool(
+            self.advanced_sample_identity
+            and self.advanced_sample_identity != self.initial_sample_identity
+            and self.scheduler_tasks == 1
+            and self.scheduler_tick_count >= 2
+        )
+
+
+@dataclass(frozen=True)
+class StreamlinesTimelineOwnership:
+    """Timeline state captured when cached playback takes temporal control."""
+
+    was_playing: bool
+    current_time_seconds: float
+
+
 class StreamlinesPlaybackRuntimeMixin:
     """Own persisted-geometry switching; never import VTI or execute Kit-CAE."""
 
@@ -124,6 +153,7 @@ class StreamlinesPlaybackRuntimeMixin:
         if not curves_prim or not curves_prim.IsValid():
             raise RuntimeError("Validated Streamlines cache geometry is not attached.")
         timeline = omni.timeline.get_timeline_interface()
+        self._acquire_streamlines_timeline_control_in_kit(timeline)
         timeline.pause()
         timeline.set_current_time(resolution.sample.source_time_seconds)
         app = omni.kit.app.get_app()
@@ -156,11 +186,14 @@ class StreamlinesPlaybackRuntimeMixin:
                 "No accepted Streamlines presentation period is configured."
             )
         await self.stop_streamlines_cached_playback_in_kit()
+        self._streamlines_cached_playback_advanced = False
+        self._streamlines_cached_playback_last_sample = None
         started_at = time.monotonic()
         scheduler = CachedPlaybackScheduler(
             period_seconds=active_period,
             phase_source=self._airflow_state.phase_seconds,
             state_selector=self.select_streamlines_cache_state_in_kit,
+            tick_observer=self._record_streamlines_cached_playback_tick,
         )
         self._streamlines_cached_playback_scheduler = scheduler
         self._streamlines_cached_playback_started_at = started_at
@@ -172,6 +205,74 @@ class StreamlinesPlaybackRuntimeMixin:
             ),
             status_callback=status_callback,
         )
+
+    async def await_streamlines_cached_playback_advancement_in_kit(
+        self,
+        initial_sample,
+    ) -> StreamlinesPlaybackAdvanceProof:
+        """Require a later 200 ms tick to select a different real cache sample."""
+
+        import omni.kit.app
+
+        app = omni.kit.app.get_app()
+        initial_identity = self._streamlines_cached_sample_identity(initial_sample)
+        advanced_identity = None
+        for _ in range(480):
+            await app.next_update_async()
+            scheduler = getattr(self, "_streamlines_cached_playback_scheduler", None)
+            tick_count = len(scheduler.ticks) if scheduler is not None else 0
+            sample = getattr(self, "_streamlines_cached_playback_last_sample", None)
+            advanced_identity = (
+                self._streamlines_cached_sample_identity(sample)
+                if sample is not None
+                else None
+            )
+            proof = StreamlinesPlaybackAdvanceProof(
+                initial_sample_identity=initial_identity,
+                advanced_sample_identity=advanced_identity,
+                scheduler_tasks=self._active_streamlines_playback_task_count(),
+                scheduler_tick_count=tick_count,
+            )
+            if proof.sample_advanced:
+                self._streamlines_cached_playback_advanced = True
+                self._streamlines_cached_playback_advance_proof = proof
+                return proof
+        self._streamlines_cached_playback_advanced = False
+        proof = StreamlinesPlaybackAdvanceProof(
+            initial_sample_identity=initial_identity,
+            advanced_sample_identity=advanced_identity,
+            scheduler_tasks=self._active_streamlines_playback_task_count(),
+            scheduler_tick_count=(
+                len(self._streamlines_cached_playback_scheduler.ticks)
+                if getattr(self, "_streamlines_cached_playback_scheduler", None)
+                else 0
+            ),
+        )
+        self._streamlines_cached_playback_advance_proof = proof
+        return proof
+
+    def streamlines_cached_playback_advanced_in_kit(self) -> bool:
+        """Expose the visible transition's scheduler-driven advancement proof."""
+
+        return bool(getattr(self, "_streamlines_cached_playback_advanced", False))
+
+    def streamlines_cached_playback_advance_proof_in_kit(self):
+        """Expose the latest exact cached-sample liveness receipt."""
+
+        return getattr(self, "_streamlines_cached_playback_advance_proof", None)
+
+    def _record_streamlines_cached_playback_tick(self, tick) -> None:
+        """Keep the scheduler's resolved sample without altering its cadence."""
+
+        self._streamlines_cached_playback_last_sample = tick.resolution.sample
+
+    @staticmethod
+    def _streamlines_cached_sample_identity(sample) -> str:
+        """Format only canonical real-sample identity for transition evidence."""
+
+        source = getattr(sample, "source_vti", None)
+        source_name = source.name if source is not None else "unavailable"
+        return f"index={sample.sample_index}; source={source_name}"
 
     async def stop_streamlines_cached_playback_in_kit(
         self,
@@ -185,6 +286,31 @@ class StreamlinesPlaybackRuntimeMixin:
             return None
         return await scheduler.stop()
 
+    def _acquire_streamlines_timeline_control_in_kit(self, timeline) -> None:
+        """Capture timeline state once before Streamlines begins selecting samples."""
+
+        if getattr(self, "_streamlines_timeline_ownership", None) is not None:
+            return
+        self._streamlines_timeline_ownership = StreamlinesTimelineOwnership(
+            was_playing=bool(timeline.is_playing()),
+            current_time_seconds=float(timeline.get_current_time()),
+        )
+
+    def streamlines_controls_timeline_in_kit(self) -> bool:
+        """Report whether cached Streamlines still owns global timeline updates."""
+
+        return getattr(self, "_streamlines_timeline_ownership", None) is not None
+
+    async def release_streamlines_timeline_control_in_kit(
+        self,
+    ) -> StreamlinesTimelineOwnership | None:
+        """Stop all selectors before releasing global timeline ownership."""
+
+        ownership = getattr(self, "_streamlines_timeline_ownership", None)
+        await self.stop_streamlines_cached_playback_in_kit()
+        self._streamlines_timeline_ownership = None
+        return ownership
+
     def cancel_streamlines_cached_playback(self) -> None:
         """Request immediate task cancellation during synchronous stage teardown."""
 
@@ -193,6 +319,7 @@ class StreamlinesPlaybackRuntimeMixin:
             scheduler.cancel()
         self._streamlines_cached_playback_scheduler = None
         self._streamlines_cached_playback_started_at = None
+        self._streamlines_timeline_ownership = None
 
     async def run_streamlines_production_cache_sanity_in_kit(
         self,

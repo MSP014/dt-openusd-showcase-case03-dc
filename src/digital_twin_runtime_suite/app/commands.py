@@ -22,6 +22,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    ValidationReceiptReuseConfig,
     XRayMaterialConfig,
     chassis_presentation_with_operator_state,
     format_runtime_override,
@@ -46,6 +47,7 @@ from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
 from digital_twin_runtime_suite.app.flow.runtime import (
     FlowRuntimeMixin,
     SimulationCacheResult,
+    VtiReceiptConsumerCheck,
 )
 from digital_twin_runtime_suite.app.flow.quality_runtime import (
     FlowQualityRuntimeMixin,
@@ -57,7 +59,10 @@ from digital_twin_runtime_suite.app.smoke.runtime import SmokeRuntimeMixin
 from digital_twin_runtime_suite.app.streamlines.runtime import (
     StreamlinesRuntimeMixin,
 )
-from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin
+from digital_twin_runtime_suite.app.visualization_mode import (
+    VisualizationModeRuntimeMixin,
+)
+from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin, XRayTargetState
 from digital_twin_runtime_suite.app.workload_binding import (
     AttachValidationLease,
     BackgroundAirflowValidationCoordinator,
@@ -81,6 +86,9 @@ from digital_twin_runtime_suite.app.simulation_cache import (
 )
 from digital_twin_runtime_suite.app.telemetry.model import WORKLOAD_MODES
 from digital_twin_runtime_suite.app.usd_preflight import run_usd_preflight
+from digital_twin_runtime_suite.app.validation_receipts import (
+    ValidationReceiptStore,
+)
 
 # isort: on
 
@@ -127,6 +135,7 @@ class FacePanelApplyResult:
 
 
 class RuntimeController(
+    VisualizationModeRuntimeMixin,
     StreamlinesRuntimeMixin,
     FlowRuntimeMixin,
     FlowQualityRuntimeMixin,
@@ -174,14 +183,19 @@ class RuntimeController(
         self._xray_session_binding_snapshots: dict[str, object] = {}
         self._xray_baseline_composed_bindings: dict[str, str] = {}
         self._xray_last_lifecycle_diagnostics: list[dict[str, object]] = []
+        self._xray_target_state = XRayTargetState()
         self._front_panel_indicator_last_snapshot = None
         self._front_panel_indicator_last_state = None
+        self._xray_material_active = False
         self._xray_material_performance_started_at: float | None = None
         self._xray_material_performance_next_sample_at: float | None = None
         self._xray_material_performance_next_log_at: float | None = None
         self._xray_material_performance_interval_started_at: float | None = None
         self._xray_material_performance_samples: list[ViewportPerformanceSample] = []
         self.config = RuntimeConfig.load(self._config_path)
+        self._validation_receipt_store = ValidationReceiptStore(
+            ValidationReceiptStore.default_path(self.config.repo_root)
+        )
         self._workload_source: Callable[[], str] | None = None
         self._airflow_state = self._create_airflow_state()
         self._flow_last_temporal_proof_selector: str | None = None
@@ -202,6 +216,10 @@ class RuntimeController(
         self._flow_vti_spacing: tuple[float, float, float] | None = None
         self._flow_voxel_max_resolution: int | None = None
         self._flow_lifecycle_state = "DETACHED"
+        self._smoke_presentation_visible = True
+        self._streamlines_cached_presentation_visible = False
+        self.reset_visualization_mode_state()
+        self.reset_streamlines_cache_validation_receipts()
         self.reset_streamlines_runtime_state()
         self._flow_attach_cancel_event: Event | None = None
         self._flow_kit_cae_operator_lock = Lock()
@@ -225,7 +243,13 @@ class RuntimeController(
         self._flow_temporal_proof_task: asyncio.Task | None = None
         self._flow_temporal_proof_generation = 0
         self._flow_temporal_progress = TemporalProofProgress()
-        self._flow_validation_cache = SessionValidationCache()
+        self._flow_last_vti_receipt_consumer_check = VtiReceiptConsumerCheck()
+        self._flow_validation_cache = SessionValidationCache(
+            persisted_store=self._validation_receipt_store,
+            reuse_persisted=(
+                self.config.validation_receipts.reuse_verified_vti_receipts
+            ),
+        )
         self._flow_performance_task: asyncio.Task | None = None
         self._flow_performance_session_id = 0
         self._flow_performance_attached_at: float | None = None
@@ -250,7 +274,15 @@ class RuntimeController(
         self._airflow_dataset_family_compatible = None
         self._airflow_dataset_family_failure = None
         self.config = RuntimeConfig.load(self._config_path)
+        self._flow_validation_cache.configure_persistence(
+            persisted_store=self._validation_receipt_store,
+            reuse_persisted=(
+                self.config.validation_receipts.reuse_verified_vti_receipts
+            ),
+        )
         self._airflow_state = self._create_airflow_state()
+        self._xray_target_state = XRayTargetState()
+        self._xray_material_active = False
         self._simulation_cache_contract = None
         self._simulation_cache_time_code = None
         self._flow_airflow_simulate_path = None
@@ -261,6 +293,10 @@ class RuntimeController(
         self._flow_vti_spacing = None
         self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
+        self._smoke_presentation_visible = True
+        self._streamlines_cached_presentation_visible = False
+        self.reset_visualization_mode_state()
+        self.reset_streamlines_cache_validation_receipts()
         self.reset_streamlines_runtime_state()
         self._flow_attach_cancel_event = None
         self._flow_temporal_asset_hashes = {}
@@ -292,6 +328,7 @@ class RuntimeController(
         emitter_layout: EmitterLayoutConfig | None = None,
         chassis_presentation: ChassisPresentationConfig | None = None,
         streamlines_presentation_period_seconds: float | None = None,
+        validation_receipts: ValidationReceiptReuseConfig | None = None,
     ) -> Path:
         """Persist local operator settings beside the base config."""
 
@@ -309,6 +346,9 @@ class RuntimeController(
             if streamlines_presentation_period_seconds is not None
             else self.config.simulation_cache.streamlines_presentation_period_seconds
         )
+        active_validation_receipts = (
+            validation_receipts or self.config.validation_receipts
+        )
         local_path = RuntimeConfig.local_config_path_for(self._config_path)
         temporary_path = local_path.with_name(f"{local_path.name}.tmp")
         temporary_path.write_text(
@@ -320,12 +360,114 @@ class RuntimeController(
                 active_emitter_layout,
                 active_chassis_presentation,
                 active_presentation_period,
+                active_validation_receipts,
             ),
             encoding="utf-8",
         )
         temporary_path.replace(local_path)
         self.config = RuntimeConfig.load(self._config_path)
         return local_path
+
+    def save_validation_receipt_reuse_override(
+        self,
+        *,
+        reuse_verified_vti_receipts: bool,
+        reuse_verified_streamlines_cache_receipts: bool,
+    ) -> Path:
+        """Persist receipt preferences and publish current session evidence."""
+
+        preferences = ValidationReceiptReuseConfig(
+            reuse_verified_vti_receipts=reuse_verified_vti_receipts,
+            reuse_verified_streamlines_cache_receipts=(
+                reuse_verified_streamlines_cache_receipts
+            ),
+        )
+        path = self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            self.config.chassis_presentation,
+            self.config.simulation_cache.streamlines_presentation_period_seconds,
+            preferences,
+        )
+        self._flow_validation_cache.configure_persistence(
+            persisted_store=self._validation_receipt_store,
+            reuse_persisted=reuse_verified_vti_receipts,
+        )
+        if reuse_verified_vti_receipts:
+            self._flow_validation_cache.persist_session_preflight_receipts()
+        if reuse_verified_streamlines_cache_receipts:
+            self.persist_session_streamlines_cache_validation_receipts()
+        return path
+
+    def validation_receipt_identity_snapshot(self) -> dict[str, object]:
+        """Return cheap current identities for controlled restart comparison."""
+
+        cache = self.config.simulation_cache
+        vti = {}
+        for dataset in self.airflow_dataset_registry():
+            signature = build_dataset_validation_signature(
+                dataset,
+                cache.velocity_field_name,
+            )
+            vti[signature.selector] = signature.digest
+        return {
+            "vti": vti,
+            "streamlines": self.streamlines_validation_identity_snapshot(),
+        }
+
+    def validation_receipt_coverage_snapshot(
+        self,
+        identities: dict[str, object],
+    ) -> dict[str, object]:
+        """Check persisted coverage without running either strong validator."""
+
+        vti_identities = identities.get("vti", {})
+        streamlines_identities = identities.get("streamlines", {})
+        vti_valid = sum(
+            self._validation_receipt_store.has_vti(selector, digest)
+            for selector, digest in vti_identities.items()
+        )
+        streamlines_valid = sum(
+            self._validation_receipt_store.has_streamlines(
+                key=key,
+                resource_fingerprint=tuple(value["resource_fingerprint"]),
+                dependency_identity=tuple(value["dependency_identity"]),
+            )
+            for key, value in streamlines_identities.items()
+        )
+        return {
+            "vti_valid": vti_valid,
+            "vti_total": len(vti_identities),
+            "streamlines_valid": streamlines_valid,
+            "streamlines_total": len(streamlines_identities),
+            "store_path": self._validation_receipt_store.path,
+        }
+
+    def validation_receipt_metrics_snapshot(self):
+        """Expose cheap instrumentation for startup summary and acceptance."""
+
+        return self._validation_receipt_store.metrics_snapshot()
+
+    def load_validation_receipt_acceptance_checkpoint(self):
+        """Load restart orchestration without treating it as evidence."""
+
+        return self._validation_receipt_store.load_acceptance_checkpoint()
+
+    def write_validation_receipt_acceptance_checkpoint(
+        self,
+        payload: dict[str, object],
+    ) -> None:
+        """Persist only the next acceptance session and controlled identities."""
+
+        self._validation_receipt_store.write_acceptance_checkpoint(payload)
+
+    def clear_validation_receipt_acceptance_checkpoint(self) -> None:
+        """Clear terminal acceptance state while retaining verified receipts."""
+
+        self._validation_receipt_store.clear_acceptance_checkpoint()
 
     def save_smoke_tuning_override(self, smoke_tuning: SmokeTuningConfig) -> Path:
         """Persist a successfully applied Flow tuning without losing peer overrides."""
@@ -450,6 +592,7 @@ class RuntimeController(
                 self.config.simulation_cache.emitter_layout,
                 self.config.chassis_presentation,
                 self.config.simulation_cache.streamlines_presentation_period_seconds,
+                self.config.validation_receipts,
             ),
             encoding="utf-8",
         )
@@ -470,6 +613,23 @@ class RuntimeController(
         """Remove local operator lighting settings and reload project defaults."""
 
         local_path = RuntimeConfig.local_config_path_for(self._config_path)
+        preferences = self.config.validation_receipts
+        if (
+            preferences.reuse_verified_vti_receipts
+            or preferences.reuse_verified_streamlines_cache_receipts
+        ):
+            defaults = self.project_defaults()
+            self.save_runtime_override(
+                defaults.lighting,
+                self.config.camera,
+                self.config.grid,
+                self.config.simulation_cache.smoke_tuning,
+                self.config.simulation_cache.emitter_layout,
+                self.config.chassis_presentation,
+                self.config.simulation_cache.streamlines_presentation_period_seconds,
+                preferences,
+            )
+            return self.config
         if local_path.exists():
             local_path.unlink()
         self.config = RuntimeConfig.load(self._config_path)

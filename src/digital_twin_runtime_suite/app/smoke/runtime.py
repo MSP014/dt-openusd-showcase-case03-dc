@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from digital_twin_runtime_suite.app.config import (
     EmitterLayoutConfig,
@@ -14,10 +14,290 @@ from digital_twin_runtime_suite.app.flow.runtime import SimulationCacheResult
 from digital_twin_runtime_suite.app.smoke import flow as smoke_flow
 
 
+@dataclass(frozen=True)
+class SmokeTemporalAdvanceProof:
+    """Sustained real Flow progression observed after Streamlines releases time."""
+
+    source_0: str | None
+    source_1: str | None = None
+    source_2: str | None = None
+    stability_source: str | None = None
+    timeline_playing: bool = False
+
+    @property
+    def source_before(self) -> str | None:
+        """Retain the old diagnostic name for the initial source."""
+
+        return self.source_0
+
+    @property
+    def source_after(self) -> str | None:
+        """Retain the old diagnostic name for the final required source."""
+
+        return self.source_2
+
+    @property
+    def sustained_flow_playback(self) -> bool:
+        """Require two advances plus one later playing update opportunity."""
+
+        return bool(
+            self.source_0
+            and self.source_1
+            and self.source_2
+            and self.stability_source
+            and self.source_0 != self.source_1
+            and self.source_1 != self.source_2
+            and self.source_2 != self.stability_source
+            and self.timeline_playing
+        )
+
+    @property
+    def source_advanced(self) -> bool:
+        """Compatibility alias for the stronger sustained playback proof."""
+
+        return self.sustained_flow_playback
+
+
 class SmokeRuntimeMixin:
     """Own smoke tuning, tracer layout, and Flow smoke presentation hooks."""
 
     EMITTER_REBUILD_SETTLE_UPDATES = 3
+    SMOKE_RESUME_PROOF_UPDATES = 240
+    FLOW_PRESENTATION_LAYER_SEARCH_LIMIT = 64
+
+    def flow_source_is_prepared_in_kit(self) -> bool:
+        """Report retained Flow-source ownership independently of rendering."""
+
+        return bool(
+            self._flow_lifecycle_state == "ATTACHED"
+            and self._flow_airflow_simulate_path
+        )
+
+    def _flow_render_prim_in_kit(self):
+        """Resolve the native Flow renderer rather than its enclosing scope."""
+
+        if not self.flow_source_is_prepared_in_kit():
+            return None
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        flow_path = self._flow_airflow_simulate_path.removesuffix("/flowSimulate")
+        render = stage.GetPrimAtPath(f"{flow_path}/flowRender") if stage else None
+        return render if render and render.IsValid() else None
+
+    def _flow_simulate_prim_in_kit(self):
+        """Resolve the retained native Flow simulation source."""
+
+        if not self.flow_source_is_prepared_in_kit():
+            return None
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        simulate = (
+            stage.GetPrimAtPath(self._flow_airflow_simulate_path) if stage else None
+        )
+        return simulate if simulate and simulate.IsValid() else None
+
+    @staticmethod
+    def _flow_layer_value(prim) -> int | None:
+        """Read one native Flow layer value without assuming a USD schema."""
+
+        attribute = prim.GetAttribute("layer") if prim else None
+        if not attribute or not attribute.IsValid():
+            return None
+        value = attribute.Get()
+        return value if isinstance(value, int) else None
+
+    def _flow_empty_presentation_layer(self, stage, source_layer: int) -> int:
+        """Choose an unpopulated Flow layer for renderer-only quiescence."""
+
+        occupied_layers = set()
+        for prim in stage.Traverse():
+            if prim.GetTypeName() == "FlowSimulate":
+                layer = self._flow_layer_value(prim)
+                if layer is not None:
+                    occupied_layers.add(layer)
+        for candidate in range(
+            source_layer + 1,
+            source_layer + self.FLOW_PRESENTATION_LAYER_SEARCH_LIMIT + 1,
+        ):
+            if candidate not in occupied_layers:
+                return candidate
+        raise RuntimeError("No unused native Flow layer is available for Smoke.")
+
+    def set_smoke_presentation_visible_in_kit(
+        self,
+        visible: bool,
+    ) -> SimulationCacheResult:
+        """Show or quiesce Flow smoke while retaining its prepared source."""
+
+        if self._flow_lifecycle_state != "ATTACHED":
+            return SimulationCacheResult(
+                False,
+                "Flow Smoke presentation is not attached.",
+            )
+        if not self._flow_airflow_simulate_path:
+            return SimulationCacheResult(False, "Flow Smoke source is unavailable.")
+
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        flow_render = self._flow_render_prim_in_kit()
+        flow_simulate = self._flow_simulate_prim_in_kit()
+        if flow_render is None or flow_simulate is None or stage is None:
+            return SimulationCacheResult(
+                False,
+                "Flow Smoke renderer or source is missing.",
+            )
+        source_layer = self._flow_layer_value(flow_simulate)
+        render_layer = flow_render.GetAttribute("layer")
+        if source_layer is None or not render_layer or not render_layer.IsValid():
+            return SimulationCacheResult(
+                False,
+                "Flow Smoke layer controls are unavailable.",
+            )
+        # FlowRender is a native Flow participant, not a UsdGeom renderer.
+        # Routing only it to an unpopulated layer suppresses RTX volume output
+        # without pausing or detaching the retained Flow source layer.
+        target_layer = (
+            source_layer
+            if visible
+            else self._flow_empty_presentation_layer(stage, source_layer)
+        )
+        previous_target = stage.GetEditTarget()
+        stage.SetEditTarget(stage.GetSessionLayer())
+        try:
+            render_layer.Set(target_layer)
+        finally:
+            stage.SetEditTarget(previous_target)
+        is_visible = self.smoke_presentation_is_visible_in_kit()
+        if is_visible is not visible:
+            return SimulationCacheResult(
+                False,
+                "Flow Smoke renderer visibility did not change.",
+            )
+        self._smoke_presentation_visible = visible
+        return SimulationCacheResult(
+            True,
+            (
+                "Flow Smoke renderer targets the prepared simulation layer."
+                if visible
+                else "Flow Smoke renderer targets an empty layer; source retained."
+            ),
+        )
+
+    def smoke_presentation_is_visible_in_kit(self) -> bool:
+        """Read the native Flow renderer state, not a requested-state flag."""
+
+        flow_render = self._flow_render_prim_in_kit()
+        flow_simulate = self._flow_simulate_prim_in_kit()
+        if flow_render is None or flow_simulate is None:
+            return False
+        render_layer = self._flow_layer_value(flow_render)
+        source_layer = self._flow_layer_value(flow_simulate)
+        return render_layer is not None and render_layer == source_layer
+
+    async def await_smoke_presentation_visibility_in_kit(self, visible: bool) -> bool:
+        """Settle RTX updates before reading the native Flow visibility control."""
+
+        import omni.kit.app
+
+        app = omni.kit.app.get_app()
+        for _ in range(3):
+            await app.next_update_async()
+        return self.smoke_presentation_is_visible_in_kit() is visible
+
+    async def resume_smoke_presentation_in_kit(
+        self,
+        *,
+        show_presentation: bool = True,
+    ) -> SimulationCacheResult:
+        """Restart retained Smoke and prove sustained post-cleanup progression."""
+
+        baseline = self._kit_cae_current_temporal_source_name()
+        self._smoke_resume_source_advanced = False
+        self._smoke_resume_advance_proof = SmokeTemporalAdvanceProof(
+            source_0=baseline,
+        )
+        _, dataset = self.resolve_current_airflow_dataset()
+        expected = {path.name for path in dataset.velocity_vti_sequence_paths}
+        if baseline not in expected:
+            return SimulationCacheResult(
+                False,
+                "Retained Flow source has no valid initial temporal sample.",
+            )
+        if show_presentation:
+            visible = self.set_smoke_presentation_visible_in_kit(True)
+            if not visible.success:
+                return visible
+        played = self.play_simulation_cache_in_kit()
+        if not played.success:
+            return played
+        import omni.kit.app
+        import omni.timeline
+
+        app = omni.kit.app.get_app()
+        timeline = omni.timeline.get_timeline_interface()
+        observed_sources = [baseline]
+        stability_source = None
+        for _ in range(self.SMOKE_RESUME_PROOF_UPDATES):
+            await app.next_update_async()
+            if not timeline.is_playing():
+                break
+            source = self._kit_cae_current_temporal_source_name()
+            if source not in expected or source == observed_sources[-1]:
+                continue
+            if len(observed_sources) < 3:
+                observed_sources.append(source)
+                continue
+            stability_source = source
+            break
+        proof = SmokeTemporalAdvanceProof(
+            source_0=observed_sources[0],
+            source_1=observed_sources[1] if len(observed_sources) > 1 else None,
+            source_2=observed_sources[2] if len(observed_sources) > 2 else None,
+            stability_source=stability_source,
+            timeline_playing=bool(timeline.is_playing()),
+        )
+        self._smoke_resume_advance_proof = proof
+        self._smoke_resume_source_advanced = proof.sustained_flow_playback
+        if proof.sustained_flow_playback:
+            return SimulationCacheResult(
+                True,
+                "Flow Smoke sustained playback: "
+                f"source_0={proof.source_0}; source_1={proof.source_1}; "
+                f"source_2={proof.source_2}.",
+            )
+        if not proof.timeline_playing:
+            reason = "Flow timeline stopped during sustained Smoke resume proof."
+        elif proof.source_1 is None:
+            reason = "Retained Flow source did not advance after Smoke resume."
+        elif proof.source_2 is None:
+            reason = "One Flow source advancement is not sustained playback."
+        else:
+            reason = "Flow playback did not remain live for a later update opportunity."
+        return SimulationCacheResult(
+            False,
+            reason,
+        )
+
+    def smoke_resume_source_advanced_in_kit(self) -> bool:
+        """Expose the current transition's post-resume temporal proof."""
+
+        return bool(getattr(self, "_smoke_resume_source_advanced", False))
+
+    @staticmethod
+    def flow_timeline_is_playing_in_kit() -> bool:
+        """Read the production timeline state used by native Flow playback."""
+
+        import omni.timeline
+
+        return bool(omni.timeline.get_timeline_interface().is_playing())
+
+    def smoke_resume_advance_proof_in_kit(self):
+        """Expose sustained source progression evidence for mode acceptance."""
+
+        return getattr(self, "_smoke_resume_advance_proof", None)
 
     def apply_kit_cae_smoke_tuning_in_kit(
         self,

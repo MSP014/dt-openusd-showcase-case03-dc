@@ -67,6 +67,26 @@ class SimulationCacheResult:
     message: str
 
 
+@dataclass(frozen=True)
+class VtiReceiptConsumerCheck:
+    """Evidence that one restored VTI receipt survived the real Flow consumer."""
+
+    selector: str | None = None
+    receipt_source: str = "NONE"
+    kit_cae_grid_contract_passed: bool = False
+    flow_initial_readiness_passed: bool = False
+    failure_reason: str | None = None
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.receipt_source == "PERSISTED"
+            and self.kit_cae_grid_contract_passed
+            and self.flow_initial_readiness_passed
+            and self.failure_reason is None
+        )
+
+
 class FlowRuntimeMixin(
     FlowPerformanceMixin,
     FlowTemporalMixin,
@@ -102,6 +122,8 @@ class FlowRuntimeMixin(
                             ("Result:", lookup.result),
                             ("Reason:", lookup.reason),
                             ("Signature:", lookup.signature.compact_digest),
+                            ("Receipt source:", lookup.receipt_source),
+                            ("Cache location:", lookup.cache_location),
                             (
                                 "Preflight:",
                                 "REUSED" if lookup.preflight else "RUN",
@@ -120,6 +142,15 @@ class FlowRuntimeMixin(
         """Return the latest plain-data temporal validation snapshot."""
 
         return self._flow_temporal_progress
+
+    def vti_receipt_consumer_check_snapshot(self) -> VtiReceiptConsumerCheck:
+        """Return the latest real Attach consumer evidence without new work."""
+
+        return getattr(
+            self,
+            "_flow_last_vti_receipt_consumer_check",
+            VtiReceiptConsumerCheck(),
+        )
 
     def _set_temporal_proof_progress(
         self,
@@ -444,6 +475,9 @@ class FlowRuntimeMixin(
         import carb
 
         cache = self.config.simulation_cache
+        self._flow_last_vti_receipt_consumer_check = VtiReceiptConsumerCheck(
+            selector=binding.dataset_identity,
+        )
         attach_selector_log = (
             "DTRS FLOW ATTACH SELECTOR | "
             f"workload={binding.workload_mode} | "
@@ -537,6 +571,10 @@ class FlowRuntimeMixin(
             validation_cache_lookup = self._flow_validation_cache.lookup(
                 dataset_signature
             )
+            self._flow_last_vti_receipt_consumer_check = replace(
+                self._flow_last_vti_receipt_consumer_check,
+                receipt_source=validation_cache_lookup.receipt_source,
+            )
             self._log_dataset_validation_cache(carb, validation_cache_lookup)
             if validation_cache_lookup.preflight:
                 metadata = dict(validation_cache_lookup.preflight.metadata)
@@ -560,6 +598,7 @@ class FlowRuntimeMixin(
                     )
                 preflight_started_at = time.monotonic()
                 preflight_updates = SimpleQueue()
+                self._flow_validation_cache.record_expensive_preflight_call()
 
                 # The worker sends only plain VTI facts. The Kit coroutine owns
                 # status updates and cache mutation after the result is accepted.
@@ -608,9 +647,10 @@ class FlowRuntimeMixin(
                     grid_match,
                 )
                 carb.log_warn(
-                    "DTRS FLOW DATASET VALIDATION CACHE | "
-                    "Preflight receipt stored | "
-                    f"signature={receipt.signature.compact_digest} | "
+                    "DTRS AIRFLOW VALIDATION | VALIDATED | "
+                    f"selector={receipt.signature.selector} | "
+                    "receipt_source=FRESH | validation_executed=True | "
+                    f"receipt={receipt.signature.compact_digest} | "
                     f"samples={len(velocity_paths)}"
                 )
                 self._log_kit_cae_attach_phase(
@@ -692,6 +732,10 @@ class FlowRuntimeMixin(
                 metadata,
                 cae,
                 cae_vtk,
+            )
+            self._flow_last_vti_receipt_consumer_check = replace(
+                self._flow_last_vti_receipt_consumer_check,
+                kit_cae_grid_contract_passed=True,
             )
 
             if status_callback:
@@ -946,6 +990,10 @@ class FlowRuntimeMixin(
                     verbose=cache.temporal_debug_logging,
                 )
                 temporal_proof_ready = True
+                self._flow_last_vti_receipt_consumer_check = replace(
+                    self._flow_last_vti_receipt_consumer_check,
+                    flow_initial_readiness_passed=True,
+                )
             else:
                 dav_origin_trace = (
                     await flow_validation.trace_kit_cae_dav_velocity_dataset(
@@ -1005,6 +1053,10 @@ class FlowRuntimeMixin(
             self._clear_flow_runtime_state()
             return SimulationCacheResult(False, "Airflow preparation cancelled.")
         except Exception as error:
+            self._flow_last_vti_receipt_consumer_check = replace(
+                self._flow_last_vti_receipt_consumer_check,
+                failure_reason=str(error),
+            )
             carb.log_error(f"DTRS Kit-CAE Flow probe failed: {error}")
             self._flow_airflow_simulate_path = None
             self._flow_base_velocity_scale = None
@@ -1041,6 +1093,10 @@ class FlowRuntimeMixin(
         self._flow_lifecycle_state = "ATTACHED"
         self._start_flow_performance_sampler()
         if not temporal_proof_ready:
+            self._flow_last_vti_receipt_consumer_check = replace(
+                self._flow_last_vti_receipt_consumer_check,
+                failure_reason="Flow initial readiness validation failed.",
+            )
             return SimulationCacheResult(
                 False,
                 "Kit-CAE Flow remains attached, but initial readiness validation "
@@ -1778,6 +1834,9 @@ class FlowRuntimeMixin(
         self._flow_vti_spacing = None
         self._flow_voxel_max_resolution = None
         self._flow_lifecycle_state = "DETACHED"
+        self._smoke_presentation_visible = False
+        self._smoke_resume_source_advanced = False
+        self._smoke_resume_advance_proof = None
         self._airflow_state.reset()
         self._flow_attach_cancel_event = None
         self._flow_temporal_records = []
