@@ -1,0 +1,56 @@
+mdl 1.7;
+
+import ::df::*;
+import ::math::*;
+import ::scene::*;
+
+float dtrs_clamp01(float value) = value < 0.0 ? 0.0 : (value > 1.0 ? 1.0 : value);
+
+color dtrs_palette(
+    float value,
+    color color_0,
+    color color_1,
+    color color_2,
+    color color_3,
+    color color_4
+) = value <= 0.25 ? math::lerp(color_0, color_1, value / 0.25) :
+    value <= 0.50 ? math::lerp(color_1, color_2, (value - 0.25) / 0.25) :
+    value <= 0.75 ? math::lerp(color_2, color_3, (value - 0.50) / 0.25) :
+    math::lerp(color_3, color_4, (value - 0.75) / 0.25);
+
+export material DTRS_Streamlines_Velocity(
+    float speed_min = 0.0,
+    float speed_max = 1.0,
+    color color_0 = color(0.015, 0.055, 0.28),
+    color color_1 = color(0.0, 0.75, 1.0),
+    color color_2 = color(0.05, 0.85, 0.35),
+    color color_3 = color(1.0, 0.85, 0.05),
+    color color_4 = color(1.0, 0.16, 0.02),
+    float opacity = 0.85,
+    float emission_intensity = 1.5,
+    float lighting_influence = 0.2
+) = let {
+    // USD primvar "primvars:dtrs:speed" is exposed to MDL scene data as
+    // "dtrs:speed", matching the installed Kit-CAE ScalarColor convention.
+    float speed = scene::data_lookup_float("dtrs:speed", 0.0);
+    float span = speed_max > speed_min ? speed_max - speed_min : 1.0;
+    float normalized = dtrs_clamp01((speed - speed_min) / span);
+    color data_color = dtrs_palette(
+        normalized, color_0, color_1, color_2, color_3, color_4
+    );
+    float light_weight = dtrs_clamp01(lighting_influence);
+    float emission_weight = emission_intensity < 0.0 ? 0.0 : emission_intensity;
+} in material(
+    surface: material_surface(
+        scattering: df::diffuse_reflection_bsdf(
+            tint: data_color * color(light_weight),
+            roughness: 0.0
+        ),
+        emission: material_emission(
+            df::diffuse_edf(),
+            intensity: data_color * color(emission_weight * 1000.0)
+        )
+    ),
+    geometry: material_geometry(cutout_opacity: dtrs_clamp01(opacity)),
+    thin_walled: true
+);

@@ -6,15 +6,110 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
+from enum import Enum
 
 PROFILE_STATE_FROZEN = "FROZEN"
 
 
+class StreamlinesProfileId(str, Enum):
+    """Identify one production-facing Streamlines geometry intent."""
+
+    VOLUME_COVERAGE = "volume_coverage"
+    GLOBAL_FLOW_PATH = "global_flow_path"
+
+
+STREAMLINES_PROFILE_LABELS = {
+    StreamlinesProfileId.VOLUME_COVERAGE: "Volume Coverage",
+    StreamlinesProfileId.GLOBAL_FLOW_PATH: "Global Flow Path",
+}
+DEFAULT_STREAMLINES_PROFILE = StreamlinesProfileId.VOLUME_COVERAGE
+
+
+@dataclass(frozen=True)
+class StreamlinesGeometryContract:
+    """Store effective geometry values without transient UI labels."""
+
+    profile_id: StreamlinesProfileId
+    seed_count: int
+    max_steps: int
+    min_step_cell_multiplier: float
+    initial_step_cell_multiplier: float
+    max_step_cell_multiplier: float
+    section_count: int = 1
+
+    def __post_init__(self) -> None:
+        values = (
+            self.min_step_cell_multiplier,
+            self.initial_step_cell_multiplier,
+            self.max_step_cell_multiplier,
+        )
+        if (
+            self.seed_count <= 0
+            or self.section_count <= 0
+            or self.max_steps <= 0
+            or any(not math.isfinite(value) or value <= 0.0 for value in values)
+        ):
+            raise ValueError("Streamlines geometry contract is invalid.")
+
+
+FINAL_GLOBAL_FLOW_PATH_GEOMETRY_CONTRACT = StreamlinesGeometryContract(
+    profile_id=StreamlinesProfileId.GLOBAL_FLOW_PATH,
+    seed_count=256,
+    max_steps=200,
+    min_step_cell_multiplier=0.02,
+    initial_step_cell_multiplier=0.4,
+    max_step_cell_multiplier=1.0,
+)
+FINAL_VOLUME_COVERAGE_GEOMETRY_CONTRACT = StreamlinesGeometryContract(
+    profile_id=StreamlinesProfileId.VOLUME_COVERAGE,
+    seed_count=256,
+    section_count=24,
+    max_steps=20,
+    min_step_cell_multiplier=0.01,
+    initial_step_cell_multiplier=0.2,
+    max_step_cell_multiplier=0.5,
+)
+
+FINAL_STREAMLINES_GEOMETRY_CONTRACTS = {
+    StreamlinesProfileId.VOLUME_COVERAGE: (FINAL_VOLUME_COVERAGE_GEOMETRY_CONTRACT),
+    StreamlinesProfileId.GLOBAL_FLOW_PATH: (FINAL_GLOBAL_FLOW_PATH_GEOMETRY_CONTRACT),
+}
+
+
+def final_geometry_contract(
+    profile_id: StreamlinesProfileId,
+) -> StreamlinesGeometryContract:
+    """Return the frozen geometry contract for one production profile."""
+
+    return FINAL_STREAMLINES_GEOMETRY_CONTRACTS[StreamlinesProfileId(profile_id)]
+
+
+def geometry_contract_signature(contract: StreamlinesGeometryContract) -> str:
+    """Hash only frozen geometry/operator values used to generate curves."""
+
+    payload = {
+        "profile_id": contract.profile_id.value,
+        "seed_count": contract.seed_count,
+        "section_count": contract.section_count,
+        "max_steps": contract.max_steps,
+        "min_step_cell_multiplier": contract.min_step_cell_multiplier,
+        "initial_step_cell_multiplier": contract.initial_step_cell_multiplier,
+        "max_step_cell_multiplier": contract.max_step_cell_multiplier,
+        "direction": "forward",
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(frozen=True)
 class ProductionStreamlinesProfile:
-    """All geometry and persisted-attribute choices for one cache generation."""
+    """All geometry and persisted-attribute choices for one cache generation.
 
-    name: str = "dtrs_standard_streamlines_v2"
+    Step multipliers are dimensionless DAV factors applied to each cell's
+    bounding-box diagonal by the installed standard Streamlines operator.
+    """
+
+    name: str = "dtrs_standard_streamlines_v3_cell_relative_steps"
     operator_type: str = "standard"
     seed_preset: str = "front_center_unit_sphere"
     seed_resolution: int = 16
@@ -23,9 +118,9 @@ class ProductionStreamlinesProfile:
     seed_radius_cell_multiplier: float = 4.0
     seed_front_inset_radius_multiplier: float = 1.5
     seed_front_inset_cell_multiplier: float = 4.0
-    min_step_cell_multiplier: float = 0.5
-    initial_step_cell_multiplier: float = 2.0
-    max_step_cell_multiplier: float = 4.0
+    min_step_cell_multiplier: float = 0.01
+    initial_step_cell_multiplier: float = 0.2
+    max_step_cell_multiplier: float = 0.5
     max_steps: int = 200
     width_cell_multiplier: float = 0.4
     persisted_attributes: tuple[str, ...] = (
@@ -35,6 +130,7 @@ class ProductionStreamlinesProfile:
         "widths",
         "dtrs:sourceTime",
         "primvars:dtrs:speed",
+        "dtrs:sourceCurveVertexCounts",
     )
 
     def __post_init__(self) -> None:

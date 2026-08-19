@@ -27,6 +27,7 @@ class CachedPlaybackContract:
     dataset_identity: str
     sample_interval_seconds: float
     samples: tuple[TemporalSourceSample, ...]
+    profile_id: str = "volume_coverage"
 
     @property
     def sample_count(self) -> int:
@@ -80,6 +81,7 @@ def cached_playback_contract_from_validated_cache(
         dataset_identity=metadata.dataset_identity,
         sample_interval_seconds=source.sample_interval_seconds,
         samples=tuple(samples),
+        profile_id=metadata.profile_id,
     )
 
 

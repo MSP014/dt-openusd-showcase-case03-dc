@@ -32,7 +32,7 @@ def test_phase36_controls_and_callbacks_are_retired(monkeypatch) -> None:
 
     extension._build_view_tab(config=object())
 
-    assert "Streamlines" not in sections
+    assert "Streamlines" in sections
     assert "Airflow cache" in sections
     assert not hasattr(module, "PHASE36_MANUAL_ACCEPTANCE_ENABLED")
     assert not hasattr(
@@ -58,7 +58,7 @@ def test_phase3_acceptance_wiring_is_retired_without_removing_flow_controls(
     assert not hasattr(extension, "_schedule_run_production_cache_sanity")
     assert not hasattr(extension, "_schedule_streamlines_cadence_characterization")
     assert hasattr(extension, "_schedule_attach_airflow")
-    assert hasattr(extension, "_run_attached_workload_transition")
+    assert hasattr(extension, "_schedule_workload_transition")
     assert hasattr(extension, "_schedule_detach_airflow")
 
 

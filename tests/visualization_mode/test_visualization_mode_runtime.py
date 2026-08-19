@@ -1,4 +1,4 @@
-"""Focused Phase 4.2 visualization-mode orchestration contracts."""
+"""Focused visualization-mode transaction and independent-target contracts."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._streamlines_advancement_proved = False
         self._streamlines_root_count = 0
         self._maximum_streamlines_root_count = 0
-        self._smoke_visible = True
+        self._smoke_visible = False
         self._detach_leaves_smoke_visible = False
         self._smoke_resumes = True
         self._smoke_resume_advancement_count = 3
@@ -72,8 +72,10 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._pause_timeline_during_smoke_visibility_settle = False
         self._hide_smoke_but_remains_visible = False
         self._flow_incompatible = False
+        self._live_flow_dataset_state = None
         self._prepare_failure = False
         self._attach_failure = False
+        self._streamlines_release_failure = False
         self._prepare_started = None
         self._prepare_release = None
         self._temporal_progress = TemporalProofProgress()
@@ -84,10 +86,11 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self.reset_visualization_mode_state()
 
     def resolve_current_airflow_dataset(self):
+        state = self._dataset.manifest.state
         return (
             SimpleNamespace(
                 workload_mode=self._workload,
-                dataset_identity="telemetry/load_normal",
+                dataset_identity=f"server/{state}",
             ),
             self._dataset,
         )
@@ -108,13 +111,30 @@ class _Runtime(VisualizationModeRuntimeMixin):
                 VisualizationMode.STREAMLINES,
             )
         self._flow_lifecycle_state = "ATTACHED"
+        self._smoke_visible = True
+        self._live_flow_dataset_state = self._dataset.manifest.state
         return VisualizationModeResult(True, "Flow attached.", VisualizationMode.NORMAL)
 
     async def detach_simulation_cache_in_kit(self):
         self._flow_lifecycle_state = "DETACHED"
+        self._live_flow_dataset_state = None
         if not self._detach_leaves_smoke_visible:
             self._smoke_visible = False
         return VisualizationModeResult(True, "Flow detached.", VisualizationMode.NORMAL)
+
+    async def request_attached_workload_transition_in_kit(
+        self,
+        _workload_mode,
+        status_callback=None,
+    ):
+        del status_callback
+        self._live_flow_dataset_state = self._dataset.manifest.state
+        self._flow_incompatible = False
+        return VisualizationModeResult(
+            True,
+            "Flow workload reconciled.",
+            VisualizationMode.STREAMLINES,
+        )
 
     def apply_heatmap_xray_override_in_kit(self):
         self._override_owner = "heatmap_preview"
@@ -152,7 +172,16 @@ class _Runtime(VisualizationModeRuntimeMixin):
             ),
         )
 
-    async def prepare_streamlines_cached_presentation_in_kit(self, context, **_kwargs):
+    async def prepare_streamlines_cached_target_in_kit(
+        self,
+        binding,
+        airflow_dataset,
+        phase_seconds,
+        *,
+        expected_sample_index=None,
+        expected_source_vti=None,
+        **_kwargs,
+    ):
         self._streamlines_prepare_count += 1
         if self._prepare_started is not None:
             self._prepare_started.set()
@@ -162,15 +191,23 @@ class _Runtime(VisualizationModeRuntimeMixin):
         if self._cache_classification != "VALID":
             raise RuntimeError(f"Cache is {self._cache_classification}.")
         self._streamlines_cache_playback_contract = SimpleNamespace(
-            workload=context.workload,
-            dataset_identity=context.dataset_identity,
+            workload=binding.workload_mode,
+            dataset_identity=binding.dataset_identity,
         )
         self._streamlines_root_count = 1
         self._maximum_streamlines_root_count = max(
             self._maximum_streamlines_root_count,
             self._streamlines_root_count,
         )
-        self._prepared_context = context
+        self._prepared_context = SimpleNamespace(
+            workload=binding.workload_mode,
+            dataset_identity=binding.dataset_identity,
+            logical_phase_seconds=phase_seconds,
+            normalized_phase_seconds=7.25,
+            source_sample_index=expected_sample_index,
+            source_vti=expected_source_vti,
+            airflow_dataset=airflow_dataset,
+        )
         self._temporal_proof_state_at_prepare = self._temporal_progress.state
         return self._airflow_state.resolve_phase(self._dataset)
 
@@ -218,6 +255,8 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._streamlines_scheduler_count = 0
 
     async def release_streamlines_timeline_control_in_kit(self):
+        if self._streamlines_release_failure:
+            raise RuntimeError("Streamlines timeline release failed.")
         await self.stop_streamlines_cached_playback_in_kit()
         self._streamlines_controls_timeline = False
         self._lifecycle_events.append("streamlines_timeline_released")
@@ -297,8 +336,12 @@ class _Runtime(VisualizationModeRuntimeMixin):
     def flow_timeline_is_playing_in_kit(self):
         return self._timeline_playing
 
-    def _retained_flow_source_matches(self, _context):
-        return self._flow_lifecycle_state == "ATTACHED" and not self._flow_incompatible
+    def _live_flow_consumer_matches_dataset(self, dataset):
+        matches = (
+            not self._flow_incompatible
+            and dataset.manifest.state == self._live_flow_dataset_state
+        )
+        return matches, self._live_flow_dataset_state or "unavailable"
 
     def temporal_proof_progress(self):
         return self._temporal_progress
@@ -451,6 +494,8 @@ def _install_smoke_resume_modules(monkeypatch, runtime) -> None:
 class _AirflowState:
     def __init__(self) -> None:
         self._phase = 107.25
+        self.committed = None
+        self.pending = None
 
     def phase_seconds(self):
         return self._phase
@@ -465,6 +510,36 @@ class _AirflowState:
                 source_vti=Path("nominal_1037.vti"),
             ),
         )
+
+    def resolve_binding(self, workload):
+        state = {
+            "Idle": "load_idle",
+            "Nominal": "load_normal",
+            "Surge": "load_surge",
+            "Critical": "load_critical",
+        }[workload]
+        return SimpleNamespace(
+            workload_mode=workload,
+            dataset_identity=f"server/{state}",
+        )
+
+    def resolve_target(self, binding):
+        return SimpleNamespace(
+            workload_mode=binding.workload_mode,
+            binding=binding,
+            dataset=SimpleNamespace(
+                manifest=SimpleNamespace(
+                    state=binding.dataset_identity.split("/", 1)[1]
+                )
+            ),
+        )
+
+    def commit_target(self, target):
+        if self.pending is not None and self.pending.target != target:
+            return False
+        self.committed = target
+        self.pending = None
+        return True
 
 
 class _ValidationCache:
@@ -609,6 +684,82 @@ def test_normal_to_smoke_preserves_independent_manual_xray_selection():
     assert result.success is True
     assert runtime.xray_target_snapshot().manual_target_ids == frozenset({"chassis"})
     assert runtime.xray_target_snapshot().override_owner is None
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    (
+        ("Normal", "Smoke"),
+        ("Smoke", "Normal"),
+        ("Normal", "Streamlines"),
+        ("Streamlines", "Normal"),
+        ("Normal", "Heatmap"),
+        ("Heatmap", "Normal"),
+        ("Smoke", "Streamlines"),
+        ("Streamlines", "Smoke"),
+        ("Smoke", "Heatmap"),
+        ("Heatmap", "Smoke"),
+        ("Streamlines", "Heatmap"),
+        ("Heatmap", "Streamlines"),
+    ),
+)
+def test_supported_mode_graph_activates_target_independently(source, target):
+    runtime = _Runtime()
+
+    async def _transition():
+        if source != "Normal":
+            source_result = await runtime.request_visualization_mode_in_kit(source)
+            assert source_result.success
+        return await runtime.request_visualization_mode_in_kit(target)
+
+    result = asyncio.run(_transition())
+
+    assert result.success
+    assert runtime.visualization_snapshot().committed is VisualizationMode(target)
+    assert runtime.visualization_snapshot().pending is None
+    visible = {
+        "Normal": (False, False, None, 0),
+        "Smoke": (True, False, None, 0),
+        "Streamlines": (False, True, None, 1),
+        "Heatmap": (False, False, "heatmap_preview", 0),
+    }
+    expected = visible[target]
+    assert runtime._smoke_visible is expected[0]
+    assert runtime._streamlines_visible is expected[1]
+    assert runtime._override_owner == expected[2]
+    assert runtime._streamlines_scheduler_count == expected[3]
+
+
+def test_direct_normal_to_streamlines_uses_only_persisted_cache_playback():
+    runtime = _Runtime()
+
+    result = asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines"))
+
+    assert result.success
+    assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
+    assert runtime._flow_lifecycle_state == "DETACHED"
+    assert runtime.visualization_flow_attach_call_count() == 0
+    assert runtime._streamlines_prepare_count == 1
+    assert runtime._streamlines_scheduler_count == 1
+    assert runtime._streamlines_advancement_proved is True
+    assert runtime._cache_mutations == 0
+    assert runtime._kit_cae_executions == 0
+    assert runtime._runtime_preview_rebuilds == 0
+    assert runtime._vti_imports == 0
+
+
+def test_broken_smoke_target_does_not_block_streamlines_or_heatmap():
+    runtime = _Runtime()
+    runtime._attach_failure = True
+
+    smoke = asyncio.run(runtime.request_visualization_mode_in_kit("Smoke"))
+    streamlines = asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines"))
+    heatmap = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
+
+    assert smoke.success is False
+    assert streamlines.success is True
+    assert heatmap.success is True
+    assert runtime.visualization_snapshot().committed is VisualizationMode.HEATMAP
 
 
 def test_failed_heatmap_to_smoke_keeps_heatmap_override_active():
@@ -780,17 +931,17 @@ def test_smoke_visibility_uses_the_native_flow_render_layer(monkeypatch):
     assert runtime.smoke_presentation_is_visible_in_kit() is True
 
 
-def test_invisible_committed_smoke_cannot_start_streamlines():
+def test_streamlines_target_does_not_require_visible_source_smoke():
     runtime = _Runtime()
     assert asyncio.run(runtime.request_visualization_mode_in_kit("Smoke")).success
     runtime._smoke_visible = False
 
     result = asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines"))
 
-    assert result.success is False
-    assert runtime.visualization_snapshot().committed is VisualizationMode.SMOKE
-    assert runtime._streamlines_scheduler_count == 0
-    assert runtime._streamlines_root_count == 0
+    assert result.success is True
+    assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
+    assert runtime._streamlines_scheduler_count == 1
+    assert runtime._streamlines_visible is True
 
 
 def test_nonadvancing_streamlines_scheduler_cannot_commit():
@@ -865,6 +1016,25 @@ def test_streamlines_releases_timeline_before_sustained_flow_proof():
     assert runtime._streamlines_scheduler_count == 0
     assert runtime._streamlines_controls_timeline is False
     assert runtime._timeline_playing is True
+
+
+def test_stale_retained_flow_is_reconstructed_from_actual_consumer_identity():
+    runtime = _Runtime()
+    assert asyncio.run(runtime.request_visualization_mode_in_kit("Smoke")).success
+    assert asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines")).success
+    runtime._workload = "Critical"
+    runtime._dataset = SimpleNamespace(manifest=SimpleNamespace(state="load_critical"))
+    critical = runtime._airflow_state.resolve_target(
+        runtime._airflow_state.resolve_binding("Critical")
+    )
+    runtime._airflow_state.commit_target(critical)
+
+    result = asyncio.run(runtime.request_visualization_mode_in_kit("Smoke"))
+
+    assert result.success is True
+    assert "reused=False; reconstructed=False; reconciled=True" in result.message
+    assert runtime._live_flow_dataset_state == "load_critical"
+    assert runtime.visualization_snapshot().committed is VisualizationMode.SMOKE
 
 
 def test_late_streamlines_cleanup_cannot_pause_resumed_smoke():
@@ -1058,7 +1228,6 @@ def test_streamlines_cache_rejection_preserves_smoke_without_runtime_fallback(
 
 def test_rapid_supersession_cleans_streamlines_candidate_without_orphan():
     runtime = _Runtime()
-    assert asyncio.run(runtime.request_visualization_mode_in_kit("Smoke")).success
 
     async def _supersede():
         runtime._prepare_started = asyncio.Event()
@@ -1067,20 +1236,35 @@ def test_rapid_supersession_cleans_streamlines_candidate_without_orphan():
             runtime.request_visualization_mode_in_kit("Streamlines")
         )
         await runtime._prepare_started.wait()
-        normal = asyncio.create_task(
-            runtime.request_visualization_mode_in_kit("Normal")
+        heatmap = asyncio.create_task(
+            runtime.request_visualization_mode_in_kit("Heatmap")
         )
         runtime._prepare_release.set()
-        return await streamlines, await normal
+        return await streamlines, await heatmap
 
-    streamlines, normal = asyncio.run(_supersede())
+    streamlines, heatmap = asyncio.run(_supersede())
 
     assert streamlines.success is False
-    assert normal.success is True
-    assert runtime.visualization_snapshot().committed is VisualizationMode.NORMAL
+    assert heatmap.success is True
+    assert runtime.visualization_snapshot().committed is VisualizationMode.HEATMAP
     assert runtime._streamlines_scheduler_count == 0
     assert runtime._streamlines_root_count == 0
     assert runtime._streamlines_start_count == 0
+
+
+def test_streamlines_release_failure_preserves_committed_streamlines():
+    runtime = _Runtime()
+    assert asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines")).success
+    runtime._streamlines_release_failure = True
+
+    result = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
+
+    assert result.success is False
+    assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
+    assert runtime.visualization_snapshot().pending is None
+    assert runtime._streamlines_visible is True
+    assert runtime._streamlines_scheduler_count == 1
+    assert runtime.xray_target_snapshot().override_owner is None
 
 
 async def _yield_update_cycles() -> None:
@@ -1090,8 +1274,9 @@ async def _yield_update_cycles() -> None:
         await asyncio.sleep(0)
 
 
-def test_streamlines_request_is_deferred_without_runtime_mutation():
+def test_nonvalid_streamlines_target_is_rejected_without_runtime_mutation():
     runtime = _Runtime()
+    runtime._cache_classification = "MISSING"
 
     result = asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines"))
 

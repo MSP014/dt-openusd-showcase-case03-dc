@@ -19,6 +19,9 @@ from digital_twin_runtime_suite.app.streamlines.lifecycle import (
     inspect_streamlines_runtime_cleanup,
     remove_streamlines_runtime_roots_from_layers,
 )
+from digital_twin_runtime_suite.app.streamlines.mesh_playback_acceptance import (
+    StreamlinesMeshPlaybackAcceptanceMixin,
+)
 from digital_twin_runtime_suite.app.streamlines.operator_runtime import (
     StreamlinesOperatorExecutionReceipt,
     StreamlinesOperatorRuntimeMixin,
@@ -26,8 +29,17 @@ from digital_twin_runtime_suite.app.streamlines.operator_runtime import (
 from digital_twin_runtime_suite.app.streamlines.playback_runtime import (
     StreamlinesPlaybackRuntimeMixin,
 )
+from digital_twin_runtime_suite.app.streamlines.presentation_runtime import (
+    StreamlinesPresentationRuntimeMixin,
+)
 from digital_twin_runtime_suite.app.streamlines.profile import (
     ProductionStreamlinesProfileState,
+)
+from digital_twin_runtime_suite.app.streamlines.profile_preview_runtime import (
+    StreamlinesProfilePreviewRuntimeMixin,
+)
+from digital_twin_runtime_suite.app.streamlines.profile_transition import (
+    StreamlinesProfileTransitionMixin,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     clear_streamlines_operator_from_stage,
@@ -37,6 +49,12 @@ from digital_twin_runtime_suite.app.streamlines.recompute_runtime import (
 )
 from digital_twin_runtime_suite.app.streamlines.source_runtime import (
     StreamlinesSourceRuntimeMixin,
+)
+from digital_twin_runtime_suite.app.streamlines.speed_distribution_runtime import (
+    StreamlinesSpeedDistributionRuntimeMixin,
+)
+from digital_twin_runtime_suite.app.streamlines.workload_transition import (
+    StreamlinesWorkloadTransitionMixin,
 )
 
 StatusCallback = Callable[[str], None]
@@ -95,7 +113,13 @@ def report_streamlines_task_failure(
 
 
 class StreamlinesRuntimeMixin(
+    StreamlinesMeshPlaybackAcceptanceMixin,
+    StreamlinesWorkloadTransitionMixin,
+    StreamlinesProfileTransitionMixin,
     StreamlinesPlaybackRuntimeMixin,
+    StreamlinesPresentationRuntimeMixin,
+    StreamlinesSpeedDistributionRuntimeMixin,
+    StreamlinesProfilePreviewRuntimeMixin,
     StreamlinesCacheRuntimeMixin,
     StreamlinesRecomputeRuntimeMixin,
     StreamlinesSourceRuntimeMixin,
@@ -131,8 +155,12 @@ class StreamlinesRuntimeMixin(
         self._streamlines_temporal_source_descriptor = None
         self._streamlines_loaded_cache_metadata = None
         self._streamlines_loaded_cache_paths = None
+        self._streamlines_presentation_reference_snapshot = None
         self._streamlines_cache_playback_contract = None
         self._streamlines_cache_active_sample_index = None
+        self._streamlines_mesh_cache_receipt = None
+        self._streamlines_mesh_points_time_codes = ()
+        self._streamlines_mesh_speed_time_codes = ()
         self._streamlines_recompute_active_sample_index = None
         pending_tasks = self._streamlines_pending_runtime_task_count()
         try:
@@ -144,6 +172,7 @@ class StreamlinesRuntimeMixin(
         if not stage:
             return self._empty_static_cleanup_receipt(pending_tasks)
         self._detach_streamlines_cache_playback_layer(stage)
+        self.clear_streamlines_presentation_material_from_stage(stage)
         clear_static_velocity_source_from_stage(stage, self.STATIC_IMPORT_ROOT)
         clear_streamlines_operator_from_stage(stage)
         remove_streamlines_runtime_roots_from_layers(stage)
@@ -179,12 +208,26 @@ class StreamlinesRuntimeMixin(
         self._streamlines_cache_build_active_sample_index = None
         self._streamlines_loaded_cache_metadata = None
         self._streamlines_loaded_cache_paths = None
+        self._streamlines_presentation_reference_snapshot = None
         self._streamlines_cache_playback_contract = None
         self._streamlines_cache_active_sample_index = None
+        self._streamlines_mesh_cache_receipt = None
+        self._streamlines_mesh_points_time_codes = ()
+        self._streamlines_mesh_speed_time_codes = ()
         self._streamlines_recompute_active_sample_index = None
         self._streamlines_cached_playback_scheduler = None
         self._streamlines_cached_playback_started_at = None
+        self._streamlines_state_replacement_proofs = []
+        self._streamlines_last_profile_transition_evidence = None
         self._streamlines_profile_state = ProductionStreamlinesProfileState()
+        self._streamlines_phase44b_cache_ready_emitted = False
+        self._streamlines_speed_scale_proposal = None
+        self._streamlines_accepted_speed_scale = None
+        self.reset_streamlines_mesh_playback_state()
+        self.reset_streamlines_presentation_runtime_state()
+        self.reset_streamlines_profile_preview_state()
+        self.reset_streamlines_workload_transition_state()
+        self.reset_streamlines_mesh_playback_acceptance_state()
 
     def _streamlines_pending_runtime_task_count(self) -> int:
         """Count DTRS-owned CAE subscriptions and active operators after teardown."""

@@ -157,6 +157,8 @@ def _cache_incompatibility_reason(
         return "Cache workload ownership differs from the expected workload."
     if metadata.dataset_identity != ownership.dataset_identity:
         return "Cache dataset ownership differs from the expected dataset."
+    if metadata.profile_id != ownership.profile_id:
+        return "Cache profile ownership differs from the expected profile."
     if metadata.settings is None:
         return "Cache canonical settings provenance is unavailable."
     if (

@@ -47,9 +47,9 @@ def test_streamlines_request_has_deterministic_paths_bindings_and_seed():
     assert request.direction == STREAMLINES_DIRECTION == "forward"
     assert request.seed_center == (0.0, 0.1, 0.07)
     assert request.seed_radius == pytest.approx(0.02)
-    assert request.min_step_size == pytest.approx(0.0025)
-    assert request.initial_step_size == pytest.approx(0.01)
-    assert request.max_step_size == pytest.approx(0.02)
+    assert request.min_step_size == pytest.approx(0.01)
+    assert request.initial_step_size == pytest.approx(0.2)
+    assert request.max_step_size == pytest.approx(0.5)
     assert request.width == pytest.approx(0.002)
 
 

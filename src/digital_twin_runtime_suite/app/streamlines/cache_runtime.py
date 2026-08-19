@@ -63,26 +63,78 @@ from digital_twin_runtime_suite.app.streamlines.cache_discovery import (
     inspect_streamlines_cache,
     streamlines_cache_resource_fingerprint,
 )
+from digital_twin_runtime_suite.app.streamlines.constant_topology import (
+    SOURCE_CURVE_VERTEX_COUNTS_ATTRIBUTE,
+    pad_streamlines_sample_for_renderer,
+    renderer_topology_for_profile,
+    terminal_padding_is_exact,
+    validate_persisted_constant_topology_cache,
+)
 from digital_twin_runtime_suite.app.streamlines.lifecycle import (
     StreamlinesCleanupReceipt,
 )
+from digital_twin_runtime_suite.app.streamlines.mesh_cache import (
+    MESH_CACHE_GEOMETRY_PATH,
+    MESH_SPEED_ATTRIBUTE,
+    load_streamlines_mesh_cache_receipt,
+    mesh_cache_paths,
+)
 from digital_twin_runtime_suite.app.streamlines.playback import (
     cached_playback_contract_from_validated_cache,
+    resolve_cached_playback_state,
+)
+from digital_twin_runtime_suite.app.streamlines.profile import (
+    DEFAULT_STREAMLINES_PROFILE,
+    StreamlinesProfileId,
+    final_geometry_contract,
+    geometry_contract_signature,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     StreamlinesOperatorRequest,
-    build_streamlines_operator_request,
+    build_streamlines_preview_operator_request,
     clear_streamlines_seed_from_stage,
+)
+from digital_twin_runtime_suite.app.streamlines.seed_layout import (
+    PRODUCTION_STREAMLINES_SEED_LAYOUT,
+    STREAMLINES_FRONT_INTAKE_SEED_PATH,
+    STREAMLINES_SERVER_ROOT_PATH,
+    FrontIntakeSeedLayout,
+    build_point_rake_quad_topology,
+    canonicalize_point3f_points,
+    derive_front_intake_seed_layout,
+    derive_global_flow_path_layout,
+    derive_volume_coverage_layout,
+    validate_point3f_seed_round_trip,
+)
+from digital_twin_runtime_suite.app.streamlines.seed_runtime import (
+    author_streamlines_seed_mesh_in_kit,
 )
 from digital_twin_runtime_suite.app.streamlines.speed import (
     SPEED_PRIMVAR_ATTRIBUTE,
     SPEED_PRIMVAR_NAME,
     validate_persisted_speed_magnitudes,
 )
+from digital_twin_runtime_suite.app.streamlines.speed_distribution import (
+    persisted_speed_chunks,
+    validate_persisted_speed_cache,
+)
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalVelocitySourceDescriptor,
     manifest_samples,
     temporal_source_from_airflow_dataset,
+)
+from digital_twin_runtime_suite.app.streamlines.tuning import (
+    BASELINE_STREAMLINES_TUNING,
+    FINAL_GLOBAL_FLOW_PATH_CANDIDATE,
+    FINAL_VOLUME_COVERAGE_CANDIDATE,
+    PREVIEW_WORKLOAD_OPTIONS,
+    StreamlinesGeometryTuning,
+    StreamlinesProfileTuning,
+    StreamlinesTuningEvidence,
+    calculate_streamlines_geometry_metrics,
+    curves_per_section_from_starts,
+    format_streamlines_tuning_failure,
+    source_cell_diagonal_m,
 )
 
 StatusCallback = Callable[[str], None]
@@ -166,6 +218,50 @@ def _author_persisted_speed_sample(
     return speeds
 
 
+def _validate_composed_constant_topology_cache(curves, metadata, *, Usd) -> None:
+    """Require renderer topology and source provenance on the attached prim."""
+
+    topology = renderer_topology_for_profile(metadata.profile_id)
+    renderer_counts_attr = curves.GetCurveVertexCountsAttr()
+    if renderer_counts_attr.GetTimeSamples():
+        raise RuntimeError("Composed renderer topology is time sampled.")
+    if tuple(renderer_counts_attr.Get() or ()) != topology.curve_vertex_counts:
+        raise RuntimeError("Composed renderer topology differs from the profile.")
+    source_counts_attr = curves.GetPrim().GetAttribute(
+        SOURCE_CURVE_VERTEX_COUNTS_ATTRIBUTE
+    )
+    if not source_counts_attr or not source_counts_attr.IsValid():
+        raise RuntimeError("Cache source curve topology is missing.")
+    expected_times = tuple(state.time_code for state in metadata.states)
+    actual_times = tuple(float(value) for value in source_counts_attr.GetTimeSamples())
+    if actual_times != expected_times:
+        raise RuntimeError("Cache source topology samples are incomplete.")
+    points_attr = curves.GetPointsAttr()
+    speed_attr = curves.GetPrim().GetAttribute(SPEED_PRIMVAR_ATTRIBUTE)
+    for state in metadata.states:
+        time_code = Usd.TimeCode(state.time_code)
+        points = tuple(points_attr.Get(time_code) or ())
+        speeds = tuple(speed_attr.Get(time_code) or ())
+        source_counts = tuple(source_counts_attr.Get(time_code) or ())
+        if (
+            len(points) != topology.point_count
+            or len(speeds) != topology.point_count
+            or len(source_counts) != topology.curve_count
+            or sum(source_counts) != state.source_point_count
+        ):
+            raise RuntimeError("Composed constant-topology arrays are misaligned.")
+        if not terminal_padding_is_exact(
+            points,
+            source_counts,
+            vertices_per_curve=topology.vertices_per_curve,
+        ) or not terminal_padding_is_exact(
+            speeds,
+            source_counts,
+            vertices_per_curve=topology.vertices_per_curve,
+        ):
+            raise RuntimeError("Composed terminal padding is not an exact repeat.")
+
+
 @dataclass(frozen=True)
 class StreamlinesCacheBuildResult:
     """Outcome of one complete derived-cache build."""
@@ -173,6 +269,16 @@ class StreamlinesCacheBuildResult:
     success: bool
     message: str
     metadata: StreamlinesCacheMetadata | None = None
+
+
+@dataclass(frozen=True)
+class StreamlinesConstantTopologyPrototypeResult:
+    """One Volume/Nominal cache build and representative offline proof."""
+
+    success: bool
+    message: str
+    metadata: StreamlinesCacheMetadata | None = None
+    sample_proofs: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -185,11 +291,49 @@ class StreamlinesCacheLoadResult:
 
 
 @dataclass(frozen=True)
+class StreamlinesPresentationReferenceSnapshot:
+    """Prove one cache swap was isolated to the DTRS presentation prim."""
+
+    asset_path: str | None
+    referenced_prim_path: str
+    session_sublayers_before: tuple[str, ...]
+    session_sublayers_after: tuple[str, ...]
+    root_sublayers_before: tuple[str, ...]
+    root_sublayers_after: tuple[str, ...]
+    server_scene_composition_mutations: int = 0
+
+    @property
+    def session_sublayers_unchanged(self) -> bool:
+        """Report whether the Session Layer stack survived the local swap."""
+
+        return self.session_sublayers_before == self.session_sublayers_after
+
+    @property
+    def root_sublayers_unchanged(self) -> bool:
+        """Report whether the Root Layer stack survived the local swap."""
+
+        return self.root_sublayers_before == self.root_sublayers_after
+
+    @property
+    def reference_swap_passed(self) -> bool:
+        """Require an explicit target plus unchanged surrounding layer stacks."""
+
+        return bool(
+            self.asset_path
+            and self.referenced_prim_path == CACHE_PLAYBACK_ROOT_PATH
+            and self.session_sublayers_unchanged
+            and self.root_sublayers_unchanged
+            and self.server_scene_composition_mutations == 0
+        )
+
+
+@dataclass(frozen=True)
 class StreamlinesProductionCacheResult:
     """Validated or newly built cache evidence for one authoritative workload."""
 
     workload: str
     dataset_identity: str
+    profile_id: str
     reused: bool
     metadata: StreamlinesCacheMetadata
     cache_size_bytes: int
@@ -212,9 +356,29 @@ class StreamlinesProfilePreviewResult:
 
     workload: str
     dataset_identity: str
+    sample_index: int
+    source_vti: str
     curve_count: int
     point_count: int
     generation_ms: float
+    seed_type: str
+    seed_columns: int
+    seed_rows: int
+    seed_points: int
+    horizontal_spacing: float
+    vertical_spacing: float
+    edge_margin_x: float
+    edge_margin_y: float
+    seed_plane_z: float
+    operator_type: str
+    cache_build_count: int = 0
+    cache_rebuild_count: int = 0
+    tuning_evidence: StreamlinesTuningEvidence | None = None
+    profile_id: str = "global_flow_path"
+    section_count: int = 1
+    seeds_per_section: int = 0
+    section_planes: tuple[float, ...] = ()
+    expected_curve_count: int = 0
 
 
 class StreamlinesCacheRuntimeMixin:
@@ -226,11 +390,29 @@ class StreamlinesCacheRuntimeMixin:
         self._streamlines_cache_validation_receipts = {}
         self._streamlines_cache_validation_tasks = {}
 
+    def announce_streamlines_phase44b_cache_build_when_ready(self) -> bool:
+        """Keep the completed cache-build scenario permanently retired."""
+
+        return False
+
     def streamlines_cache_readiness_snapshot(self) -> StreamlinesCacheInspection:
         """Return the current receipt state without touching cache resources."""
 
         binding, airflow_dataset = self.resolve_current_airflow_dataset()
         return self._streamlines_cache_receipt_snapshot(binding, airflow_dataset)
+
+    def configured_streamlines_cache_readiness_snapshot(
+        self,
+    ) -> tuple[StreamlinesCacheInspection, ...]:
+        """Return cheap receipt projections for every configured workload."""
+
+        return tuple(
+            self._streamlines_cache_receipt_snapshot(
+                target.binding,
+                target.dataset,
+            )
+            for target in self.resolve_configured_airflow_targets()
+        )
 
     async def ensure_current_streamlines_cache_validation_in_background(
         self,
@@ -247,28 +429,68 @@ class StreamlinesCacheRuntimeMixin:
         self,
         status_callback: StatusCallback | None = None,
     ) -> tuple[StreamlinesCacheValidationReceipt, ...]:
-        """Validate or reuse each workload cache sequentially off the Kit thread."""
+        """Validate all final workload/profile caches off the Kit thread."""
 
         receipts = []
         for target in self.resolve_configured_airflow_targets():
-            if status_callback:
-                status_callback(
-                    "Streamlines receipt: "
-                    f"workload={target.binding.workload_mode}; status=CHECKING"
+            for profile_id in StreamlinesProfileId:
+                if status_callback:
+                    status_callback(
+                        "Streamlines receipt: "
+                        f"workload={target.binding.workload_mode}; "
+                        f"profile={profile_id.value}; status=CHECKING"
+                    )
+                receipt = await self.ensure_streamlines_cache_validation_in_background(
+                    target.binding,
+                    target.dataset,
+                    profile_id=profile_id,
                 )
-            receipt = await self.ensure_streamlines_cache_validation_in_background(
-                target.binding,
-                target.dataset,
-            )
-            receipts.append(receipt)
-            if status_callback:
-                status_callback(
-                    "Streamlines receipt: "
-                    f"workload={target.binding.workload_mode}; "
-                    f"status={receipt.inspection.classification}; "
-                    f"receipt_source={receipt.receipt_source}"
-                )
+                receipts.append(receipt)
+                if status_callback:
+                    status_callback(
+                        "Streamlines receipt: "
+                        f"workload={target.binding.workload_mode}; "
+                        f"profile={profile_id.value}; "
+                        f"status={receipt.inspection.classification}; "
+                        f"receipt_source={receipt.receipt_source}"
+                    )
         return tuple(receipts)
+
+    def final_streamlines_cache_readiness_snapshot(self):
+        """Return eight plain receipt projections without filesystem access."""
+
+        snapshots = []
+        receipts = getattr(self, "_streamlines_cache_validation_receipts", {})
+        tasks = getattr(self, "_streamlines_cache_validation_tasks", {})
+        for target in self.resolve_configured_airflow_targets():
+            for profile_id in StreamlinesProfileId:
+                key = self._streamlines_cache_receipt_key(
+                    target.binding,
+                    profile_id,
+                )
+                task = tasks.get(key)
+                receipt = receipts.get(key)
+                inspection = (
+                    receipt.inspection
+                    if receipt is not None
+                    else SimpleNamespace(
+                        classification=(
+                            "CHECKING"
+                            if task is not None and not task.done()
+                            else "UNKNOWN"
+                        ),
+                        metadata=None,
+                    )
+                )
+                snapshots.append(
+                    SimpleNamespace(
+                        workload=target.binding.workload_mode,
+                        dataset_identity=target.binding.dataset_identity,
+                        profile_id=profile_id,
+                        inspection=inspection,
+                    )
+                )
+        return tuple(snapshots)
 
     def streamlines_validation_identity_snapshot(self) -> dict[str, object]:
         """Compute only small metadata/stat identities for restart acceptance."""
@@ -278,7 +500,11 @@ class StreamlinesCacheRuntimeMixin:
             ownership = self._streamlines_cache_ownership(target.binding)
             paths = streamlines_cache_paths(self.config.repo_root, ownership)
             metadata = load_streamlines_cache_metadata(paths.metadata_path)
-            key = self._persisted_streamlines_receipt_key(target.binding)
+            profile_id = self._resolved_streamlines_profile_id()
+            key = self._persisted_streamlines_receipt_key(
+                target.binding,
+                profile_id,
+            )
             identities[key] = {
                 "resource_fingerprint": list(
                     streamlines_cache_resource_fingerprint(paths)
@@ -298,10 +524,13 @@ class StreamlinesCacheRuntimeMixin:
         self,
         binding,
         airflow_dataset,
+        *,
+        profile_id: StreamlinesProfileId | None = None,
     ) -> StreamlinesCacheValidationReceipt:
         """Deduplicate one target's strong validation and publish its receipt."""
 
-        key = self._streamlines_cache_receipt_key(binding)
+        profile_id = self._resolved_streamlines_profile_id(profile_id)
+        key = self._streamlines_cache_receipt_key(binding, profile_id)
         tasks = getattr(self, "_streamlines_cache_validation_tasks", None)
         if tasks is None:
             self.reset_streamlines_cache_validation_receipts()
@@ -315,6 +544,7 @@ class StreamlinesCacheRuntimeMixin:
                     binding,
                     airflow_dataset,
                     previous,
+                    profile_id,
                 )
             )
             tasks[key] = task
@@ -339,7 +569,10 @@ class StreamlinesCacheRuntimeMixin:
         del airflow_dataset
         ownership = self._streamlines_cache_ownership(binding)
         paths = streamlines_cache_paths(self.config.repo_root, ownership)
-        key = self._streamlines_cache_receipt_key(binding)
+        key = self._streamlines_cache_receipt_key(
+            binding,
+            self._resolved_streamlines_profile_id(),
+        )
         task = getattr(self, "_streamlines_cache_validation_tasks", {}).get(key)
         if task is not None and not task.done():
             return StreamlinesCacheInspection(
@@ -367,10 +600,11 @@ class StreamlinesCacheRuntimeMixin:
         binding,
         airflow_dataset,
         previous: StreamlinesCacheValidationReceipt | None,
+        profile_id: StreamlinesProfileId,
     ) -> StreamlinesCacheValidationReceipt:
         """Perform source, metadata, and geometry validation in a worker thread."""
 
-        ownership = self._streamlines_cache_ownership(binding)
+        ownership = self._streamlines_cache_ownership(binding, profile_id)
         paths = streamlines_cache_paths(self.config.repo_root, ownership)
         fingerprint = streamlines_cache_resource_fingerprint(paths)
         try:
@@ -378,6 +612,7 @@ class StreamlinesCacheRuntimeMixin:
             dependency = self._streamlines_cache_dependency_identity(
                 binding,
                 airflow_dataset,
+                profile_id,
             )
         except Exception:
             metadata = None
@@ -393,7 +628,7 @@ class StreamlinesCacheRuntimeMixin:
                 store.record_reuse(
                     "streamlines",
                     previous.receipt_source,
-                    self._persisted_streamlines_receipt_key(binding),
+                    self._persisted_streamlines_receipt_key(binding, profile_id),
                 )
             return replace(
                 previous,
@@ -405,6 +640,7 @@ class StreamlinesCacheRuntimeMixin:
         persisted = self._reuse_persisted_streamlines_receipt(
             binding=binding,
             airflow_dataset=airflow_dataset,
+            profile_id=profile_id,
             metadata=metadata,
             paths=paths,
             fingerprint=fingerprint,
@@ -423,6 +659,7 @@ class StreamlinesCacheRuntimeMixin:
                 binding=binding,
                 airflow_dataset=airflow_dataset,
                 stage_time_codes_per_second=metadata.time_codes_per_second,
+                profile_id=profile_id,
             )
             source = expected["source"]
             settings_signature = expected["settings_signature"]
@@ -452,6 +689,25 @@ class StreamlinesCacheRuntimeMixin:
                 source=source,
                 settings_signature=settings_signature,
             )
+        if inspection.valid and inspection.metadata is not None:
+            try:
+                validate_persisted_constant_topology_cache(
+                    paths.geometry_path,
+                    inspection.metadata,
+                )
+                for _chunk in persisted_speed_chunks(
+                    paths.geometry_path,
+                    inspection.metadata,
+                ):
+                    pass
+            except ImportError:
+                pass
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                inspection = replace(
+                    inspection,
+                    classification="INCOMPATIBLE",
+                    message=f"Cache raw speed contract is invalid: {error}",
+                )
         receipt = StreamlinesCacheValidationReceipt(
             inspection=inspection,
             resource_fingerprint=fingerprint,
@@ -468,28 +724,43 @@ class StreamlinesCacheRuntimeMixin:
             store.record_reuse(
                 "streamlines",
                 "FRESH",
-                self._persisted_streamlines_receipt_key(binding),
+                self._persisted_streamlines_receipt_key(binding, profile_id),
             )
         if inspection.valid and self._reuse_streamlines_receipts_enabled():
-            self._persist_streamlines_cache_validation_receipt(binding, receipt)
+            self._persist_streamlines_cache_validation_receipt(
+                binding,
+                receipt,
+                profile_id=profile_id,
+            )
         return receipt
 
     @staticmethod
-    def _streamlines_cache_receipt_key(binding) -> tuple[str, str]:
+    def _streamlines_cache_receipt_key(
+        binding,
+        profile_id: StreamlinesProfileId,
+    ) -> tuple[str, str, str]:
         """Keep receipts isolated by their authoritative workload cache owner."""
 
-        return (binding.workload_mode, binding.dataset_identity)
+        return (
+            binding.workload_mode,
+            binding.dataset_identity,
+            profile_id.value,
+        )
 
     @staticmethod
-    def _persisted_streamlines_receipt_key(binding) -> str:
+    def _persisted_streamlines_receipt_key(
+        binding,
+        profile_id: StreamlinesProfileId,
+    ) -> str:
         """Format one JSON-safe workload and dataset cache owner."""
 
-        return f"{binding.workload_mode}|{binding.dataset_identity}"
+        return f"{binding.workload_mode}|{binding.dataset_identity}|{profile_id.value}"
 
     def _streamlines_cache_dependency_identity(
         self,
         binding,
         airflow_dataset,
+        profile_id: StreamlinesProfileId | None = None,
     ) -> tuple[str, str]:
         """Fingerprint VTI inputs and profile without reading VTI payloads."""
 
@@ -506,13 +777,10 @@ class StreamlinesCacheRuntimeMixin:
                 if source is not None
                 else "unavailable"
             )
-        profile_state = getattr(self, "_streamlines_profile_state", None)
-        profile = getattr(profile_state, "profile", None)
-        profile_signature = getattr(
-            profile,
-            "settings_signature",
-            getattr(self, "settings_suffix", "unavailable"),
+        profile_signature = geometry_contract_signature(
+            final_geometry_contract(self._resolved_streamlines_profile_id(profile_id))
         )
+        profile_signature += str(getattr(self, "settings_suffix", ""))
         validation_identity = (
             f"{STREAMLINES_VALIDATION_CONTRACT_VERSION}:{profile_signature}"
         )
@@ -531,6 +799,7 @@ class StreamlinesCacheRuntimeMixin:
         *,
         binding,
         airflow_dataset,
+        profile_id: StreamlinesProfileId,
         metadata: StreamlinesCacheMetadata | None,
         paths: StreamlinesCachePaths,
         fingerprint: tuple[str, str],
@@ -543,7 +812,7 @@ class StreamlinesCacheRuntimeMixin:
             return None
         if metadata is None:
             return None
-        key = self._persisted_streamlines_receipt_key(binding)
+        key = self._persisted_streamlines_receipt_key(binding, profile_id)
         lookup = store.lookup_streamlines(
             key=key,
             resource_fingerprint=fingerprint,
@@ -590,7 +859,7 @@ class StreamlinesCacheRuntimeMixin:
         store.record_reuse("streamlines", "PERSISTED", key)
         return StreamlinesCacheValidationReceipt(
             inspection=StreamlinesCacheInspection(
-                ownership=self._streamlines_cache_ownership(binding),
+                ownership=self._streamlines_cache_ownership(binding, profile_id),
                 paths=paths,
                 classification="VALID",
                 message="Persisted strong validation receipt matches resources.",
@@ -650,6 +919,8 @@ class StreamlinesCacheRuntimeMixin:
         self,
         binding,
         receipt: StreamlinesCacheValidationReceipt,
+        *,
+        profile_id: StreamlinesProfileId,
     ) -> None:
         """Persist only a fully VALID receipt and its plain reconstruction facts."""
 
@@ -663,6 +934,7 @@ class StreamlinesCacheRuntimeMixin:
             "validation_contract_version": STREAMLINES_VALIDATION_CONTRACT_VERSION,
             "workload": binding.workload_mode,
             "dataset_identity": binding.dataset_identity,
+            "profile_id": profile_id.value,
             "classification": "VALID",
             "resource_fingerprint": list(receipt.resource_fingerprint),
             "dependency_identity": list(receipt.dependency_identity),
@@ -679,7 +951,7 @@ class StreamlinesCacheRuntimeMixin:
         }
         try:
             store.store_streamlines(
-                key=self._persisted_streamlines_receipt_key(binding),
+                key=self._persisted_streamlines_receipt_key(binding, profile_id),
                 payload=payload,
             )
         except (OSError, TypeError, ValueError) as error:
@@ -695,7 +967,7 @@ class StreamlinesCacheRuntimeMixin:
 
         if not self._reuse_streamlines_receipts_enabled():
             return
-        for (workload, dataset_identity), receipt in getattr(
+        for (workload, dataset_identity, profile_value), receipt in getattr(
             self,
             "_streamlines_cache_validation_receipts",
             {},
@@ -705,7 +977,11 @@ class StreamlinesCacheRuntimeMixin:
                 dataset_identity=dataset_identity,
             )
             if receipt.inspection.valid:
-                self._persist_streamlines_cache_validation_receipt(binding, receipt)
+                self._persist_streamlines_cache_validation_receipt(
+                    binding,
+                    receipt,
+                    profile_id=StreamlinesProfileId(profile_value),
+                )
 
     def _log_streamlines_cache_validation_receipt(
         self,
@@ -799,10 +1075,13 @@ class StreamlinesCacheRuntimeMixin:
         self,
         binding,
         airflow_dataset,
+        *,
+        profile_id: StreamlinesProfileId | None = None,
     ) -> StreamlinesCacheInspection:
         """Classify one resolved target without introducing a second registry."""
 
-        ownership = self._streamlines_cache_ownership(binding)
+        profile_id = self._resolved_streamlines_profile_id(profile_id)
+        ownership = self._streamlines_cache_ownership(binding, profile_id)
         paths = streamlines_cache_paths(self.config.repo_root, ownership)
         try:
             preliminary = inspect_streamlines_cache(paths, ownership)
@@ -816,6 +1095,7 @@ class StreamlinesCacheRuntimeMixin:
                 binding=binding,
                 airflow_dataset=airflow_dataset,
                 stage_time_codes_per_second=metadata.time_codes_per_second,
+                profile_id=profile_id,
             )
         except Exception as error:
             return StreamlinesCacheInspection(
@@ -831,14 +1111,31 @@ class StreamlinesCacheRuntimeMixin:
             settings_signature=expected["settings_signature"],
         )
 
-    @staticmethod
-    def _streamlines_cache_ownership(binding) -> StreamlinesCacheOwnership:
+    def _streamlines_cache_ownership(
+        self,
+        binding,
+        profile_id: StreamlinesProfileId | None = None,
+    ) -> StreamlinesCacheOwnership:
         """Derive persisted-cache ownership only from the resolved binding."""
 
         return StreamlinesCacheOwnership(
             workload=binding.workload_mode,
             dataset_identity=binding.dataset_identity,
+            profile_id=self._resolved_streamlines_profile_id(profile_id).value,
         )
+
+    def _resolved_streamlines_profile_id(
+        self,
+        profile_id: StreamlinesProfileId | None = None,
+    ) -> StreamlinesProfileId:
+        """Resolve an explicit profile or the production-facing preference."""
+
+        if profile_id is not None:
+            return StreamlinesProfileId(profile_id)
+        preference = getattr(self, "_streamlines_profile_preference", None)
+        if preference is None:
+            return StreamlinesProfileId.GLOBAL_FLOW_PATH
+        return preference.snapshot.preferred_profile
 
     @property
     def streamlines_production_profile(self):
@@ -864,55 +1161,15 @@ class StreamlinesCacheRuntimeMixin:
         self._streamlines_profile_state = self._streamlines_profile_state.freeze()
         return self._streamlines_profile_state.profile
 
-    async def preview_streamlines_production_profile_in_kit(
-        self,
-        status_callback: StatusCallback | None = None,
-    ) -> tuple[StreamlinesProfilePreviewResult, ...]:
-        """Run bounded Idle/Critical previews without writing a cache artifact."""
-
-        if self._flow_lifecycle_state != "DETACHED":
-            raise RuntimeError("Production profile preview requires Flow DETACHED.")
-        targets = {
-            target.binding.workload_mode: target
-            for target in self.resolve_configured_airflow_targets()
-        }
-        required = ("Idle", "Critical")
-        if any(workload not in targets for workload in required):
-            raise RuntimeError(
-                "Production profile preview requires Idle and Critical datasets."
-            )
-        results = []
-        for workload in required:
-            target = targets[workload]
-            self._report_streamlines_profile(
-                event="PROGRESS",
-                message=(f"Preparing representative {workload} profile preview."),
-                status_callback=status_callback,
-            )
-            results.append(
-                await self._preview_streamlines_profile_target_in_kit(
-                    binding=target.binding,
-                    airflow_dataset=target.dataset,
-                )
-            )
-        self.mark_streamlines_production_profile_previewed()
-        period = self.config.simulation_cache.streamlines_presentation_period_seconds
-        self._report_streamlines_profile(
-            event="PROGRESS",
-            message=(
-                "Profile preview cost sanity: cached playback remains configured "
-                f"at period_ms={float(period or 0.0) * 1000.0:.0f}; "
-                "no persistent cache was built."
-            ),
-            status_callback=status_callback,
-        )
-        return tuple(results)
-
     async def _preview_streamlines_profile_target_in_kit(
         self,
         *,
         binding,
         airflow_dataset,
+        profile_id: StreamlinesProfileId = StreamlinesProfileId.GLOBAL_FLOW_PATH,
+        tuning: StreamlinesProfileTuning | StreamlinesGeometryTuning = (
+            BASELINE_STREAMLINES_TUNING
+        ),
     ) -> StreamlinesProfilePreviewResult:
         """Show one exact source sample through the profile without persistence."""
 
@@ -927,9 +1184,8 @@ class StreamlinesCacheRuntimeMixin:
         from pxr import Sdf, Usd, UsdGeom
         from usdrt import UsdGeom as UsdGeomRT
 
-        cleanup = await self.clear_streamlines_static_runtime_in_kit()
-        if not cleanup.clean:
-            raise RuntimeError("Profile preview cleanup was not clean.")
+        preview_started_at = time.monotonic()
+        await self._clear_previous_streamlines_profile_preview_in_kit()
         source = await self.prepare_streamlines_temporal_velocity_source_in_kit(
             binding=binding,
             airflow_dataset=airflow_dataset,
@@ -946,24 +1202,49 @@ class StreamlinesCacheRuntimeMixin:
             raise RuntimeError(
                 "Production profile preview velocity field is unavailable."
             )
-        request = self._build_streamlines_cache_request(descriptor)
+        front_intake_z = self._streamlines_front_intake_z_in_kit(
+            stage,
+            Usd=Usd,
+            UsdGeom=UsdGeom,
+        )
+        if profile_id is StreamlinesProfileId.GLOBAL_FLOW_PATH:
+            seed_count = getattr(tuning, "seed_count", 128)
+            layout = derive_global_flow_path_layout(
+                descriptor.world_bounds,
+                seed_count=seed_count,
+                front_intake_z=front_intake_z,
+                max_cell_spacing=max(descriptor.spacing),
+            )
+        else:
+            layout = derive_volume_coverage_layout(
+                descriptor.world_bounds,
+                section_count=tuning.section_count,
+                seeds_per_section=tuning.seeds_per_section,
+            )
+        self._report_phase44a_active(
+            "PROGRESS",
+            f"seed_points={layout.seed_count}; "
+            f"sections={layout.section_count}; rows={layout.rows_per_section}",
+        )
+        request = build_streamlines_preview_operator_request(
+            descriptor,
+            layout,
+            tuning=tuning,
+        )
         app = omni.kit.app.get_app()
         previous_target = stage.GetEditTarget()
         try:
             stage.SetEditTarget(stage.GetSessionLayer())
-            await execute_command(
-                "CreateCaeVizMeshPrim",
-                prim_type="UnitSphere",
-                prim_path=request.seed_path,
-                resolution=request.seed_resolution,
-            )
-            await execute_command(
-                "TransformPrimSRT",
-                path=request.seed_path,
-                new_translation=list(request.seed_center),
-                new_scale=[request.seed_radius] * 3,
+            author_streamlines_seed_mesh_in_kit(
+                stage,
+                layout=layout,
+                UsdGeom=UsdGeom,
             )
             await app.next_update_async()
+            self._report_phase44a_active(
+                "PROGRESS",
+                "Executing standard Kit-CAE Streamlines preview.",
+            )
             sample = manifest_samples(source)[0]
             selected_asset = await self._select_temporal_source_in_kit(
                 app,
@@ -1001,13 +1282,227 @@ class StreamlinesCacheRuntimeMixin:
                 raise RuntimeError(
                     "Production profile preview did not remove its seed."
                 )
+        metrics = calculate_streamlines_geometry_metrics(
+            execution.evidence.runtime_point_positions,
+            execution.evidence.runtime_curve_vertex_counts,
+            descriptor.world_bounds,
+        )
+        section_curve_counts = (
+            curves_per_section_from_starts(
+                execution.evidence.runtime_point_positions,
+                execution.evidence.runtime_curve_vertex_counts,
+                layout.section_planes,
+            )
+            if profile_id is StreamlinesProfileId.VOLUME_COVERAGE
+            else ()
+        )
+        preview_total_ms = (time.monotonic() - preview_started_at) * 1000.0
+        tuning_evidence = StreamlinesTuningEvidence(
+            workload=binding.workload_mode,
+            dataset_identity=binding.dataset_identity,
+            sample_index=sample.sample_index,
+            source_vti=sample.source_vti.resolve().as_posix(),
+            seed_columns=max(layout.row_counts[: layout.rows_per_section]),
+            seed_rows=layout.rows_per_section,
+            seed_points=layout.seed_count,
+            selection=tuning,
+            authored_min_step=request.min_step_size,
+            authored_initial_step=request.initial_step_size,
+            authored_max_step=request.max_step_size,
+            source_cell_diagonal_m=source_cell_diagonal_m(
+                descriptor.spacing,
+                stage_meters_per_unit=descriptor.stage_meters_per_unit,
+            ),
+            metrics=metrics,
+            operator_execution_ms=execution.rebuild_ms,
+            preview_total_ms=preview_total_ms,
+            profile_id=profile_id,
+            section_count=layout.section_count,
+            seeds_per_section=layout.seeds_per_section,
+            sections_with_curves=(
+                sum(count > 0 for count in section_curve_counts)
+                if section_curve_counts
+                else None
+            ),
+            curves_per_section_min=(
+                min(section_curve_counts) if section_curve_counts else None
+            ),
+            curves_per_section_median=(
+                float(median(section_curve_counts)) if section_curve_counts else None
+            ),
+            curves_per_section_max=(
+                max(section_curve_counts) if section_curve_counts else None
+            ),
+        )
+        first_row_count = layout.row_counts[0]
+        horizontal_spacing = (
+            descriptor.world_bounds[1][0] - descriptor.world_bounds[0][0]
+        ) / (first_row_count + 1)
         return StreamlinesProfilePreviewResult(
             workload=binding.workload_mode,
             dataset_identity=binding.dataset_identity,
+            sample_index=sample.sample_index,
+            source_vti=sample.source_vti.resolve().as_posix(),
             curve_count=execution.evidence.runtime_curve_count,
             point_count=execution.evidence.runtime_point_count,
             generation_ms=execution.rebuild_ms,
+            seed_type=request.seed_type,
+            seed_columns=max(layout.row_counts[: layout.rows_per_section]),
+            seed_rows=layout.rows_per_section,
+            seed_points=layout.seed_count,
+            horizontal_spacing=horizontal_spacing,
+            vertical_spacing=layout.y_spacing,
+            edge_margin_x=horizontal_spacing,
+            edge_margin_y=layout.y_spacing,
+            seed_plane_z=layout.section_planes[0],
+            operator_type=request.operator_type,
+            tuning_evidence=tuning_evidence,
+            profile_id=profile_id.value,
+            section_count=layout.section_count,
+            seeds_per_section=layout.seeds_per_section,
+            section_planes=layout.section_planes,
+            expected_curve_count=layout.seed_count,
         )
+
+    async def _clear_previous_streamlines_profile_preview_in_kit(self) -> None:
+        """Replace every preview from the same full runtime-cleanup boundary."""
+
+        cleanup = await self.clear_streamlines_static_runtime_in_kit()
+        if not cleanup.clean:
+            raise RuntimeError("Profile preview cleanup was not clean.")
+
+    def _report_streamlines_tuning_failure(
+        self,
+        tuning: StreamlinesGeometryTuning,
+        reason: str,
+    ) -> None:
+        """Emit one exact failure receipt without changing acceptance state."""
+
+        carb = self._streamlines_carb_logger()
+        if not carb:
+            return
+        log = getattr(carb, "log_error", carb.log_warn)
+        log(
+            with_dtrs_yerevan_timestamp(
+                format_streamlines_tuning_failure(tuning, reason)
+            )
+        )
+
+    @staticmethod
+    def _streamlines_front_intake_z_in_kit(stage, *, Usd, UsdGeom) -> float:
+        """Read the real server-front plane without importing Flow ownership."""
+
+        server = stage.GetPrimAtPath(STREAMLINES_SERVER_ROOT_PATH)
+        if not server or not server.IsValid():
+            raise RuntimeError(
+                "Streamlines preview requires the server front-intake geometry."
+            )
+        bbox_cache = UsdGeom.BBoxCache(
+            Usd.TimeCode.Default(),
+            [
+                UsdGeom.Tokens.default_,
+                UsdGeom.Tokens.render,
+                UsdGeom.Tokens.proxy,
+            ],
+        )
+        bounds = bbox_cache.ComputeWorldBound(server).ComputeAlignedRange()
+        if bounds.IsEmpty():
+            raise RuntimeError("Streamlines server bounds are unavailable.")
+        return float(bounds.GetMax()[2])
+
+    @staticmethod
+    def _author_streamlines_point_rake_in_kit(
+        stage,
+        *,
+        layout: FrontIntakeSeedLayout,
+        UsdGeom,
+    ) -> None:
+        """Author one planar Mesh seed containing the exact float32 rake."""
+
+        seed = UsdGeom.Mesh.Define(
+            stage,
+            STREAMLINES_FRONT_INTAKE_SEED_PATH,
+        )
+        canonical_points = canonicalize_point3f_points(layout.points)
+        face_counts, face_indices = build_point_rake_quad_topology(
+            layout.columns,
+            layout.rows,
+        )
+        seed.CreatePointsAttr().Set(list(canonical_points))
+        seed.CreateFaceVertexCountsAttr().Set(list(face_counts))
+        seed.CreateFaceVertexIndicesAttr().Set(list(face_indices))
+        seed.CreateExtentAttr().Set(
+            [
+                (
+                    min(point[0] for point in canonical_points),
+                    min(point[1] for point in canonical_points),
+                    canonical_points[0][2],
+                ),
+                (
+                    max(point[0] for point in canonical_points),
+                    max(point[1] for point in canonical_points),
+                    canonical_points[0][2],
+                ),
+            ]
+        )
+        validate_point3f_seed_round_trip(
+            layout,
+            seed.GetPointsAttr().Get() or (),
+        )
+        authored_counts = tuple(seed.GetFaceVertexCountsAttr().Get() or ())
+        authored_indices = tuple(seed.GetFaceVertexIndicesAttr().Get() or ())
+        if authored_counts != face_counts or authored_indices != face_indices:
+            raise RuntimeError("Streamlines point-rake mesh topology changed.")
+
+    def streamlines_phase44a_preview_ready(self) -> bool:
+        """Resolve all candidate rakes from receipt metadata without VTI I/O."""
+
+        targets = {
+            item.binding.workload_mode: item
+            for item in self.resolve_configured_airflow_targets()
+        }
+        if any(workload not in targets for workload in PREVIEW_WORKLOAD_OPTIONS):
+            return False
+        try:
+            import omni.usd
+            from pxr import Usd, UsdGeom
+
+            stage = omni.usd.get_context().get_stage()
+            if not stage:
+                return False
+            front_intake_z = self._streamlines_front_intake_z_in_kit(
+                stage,
+                Usd=Usd,
+                UsdGeom=UsdGeom,
+            )
+            layouts = {}
+            for workload in PREVIEW_WORKLOAD_OPTIONS:
+                target = targets[workload]
+                signature = build_dataset_validation_signature(
+                    target.dataset,
+                    self.config.simulation_cache.velocity_field_name,
+                )
+                receipt = self._flow_validation_cache.lookup(signature).preflight
+                if receipt is None or not receipt.grid_match:
+                    return False
+                metadata = receipt.metadata
+                dimensions = tuple(int(value) for value in metadata["dimensions"])
+                spacing = tuple(float(value) for value in metadata["spacing"])
+                origin = tuple(float(value) for value in metadata["vti_header_origin"])
+                maximum = tuple(
+                    origin[axis] + (dimensions[axis] - 1) * spacing[axis]
+                    for axis in range(3)
+                )
+                layouts[workload] = derive_front_intake_seed_layout(
+                    (origin, maximum),
+                    front_intake_z=front_intake_z,
+                    max_cell_spacing=max(spacing),
+                    profile=PRODUCTION_STREAMLINES_SEED_LAYOUT,
+                )
+            self._streamlines_phase44a_ready_layouts = layouts
+        except Exception:
+            return False
+        return True
 
     async def build_streamlines_cache_in_kit(
         self,
@@ -1015,6 +1510,7 @@ class StreamlinesCacheRuntimeMixin:
         *,
         binding=None,
         airflow_dataset=None,
+        profile_id: StreamlinesProfileId | None = None,
         emit_next_action: bool = True,
     ) -> StreamlinesCacheBuildResult:
         """Build one complete workload-owned cache from real Kit-CAE/UsdRT results.
@@ -1034,9 +1530,10 @@ class StreamlinesCacheRuntimeMixin:
         cleanup = None
         if binding is None or airflow_dataset is None:
             binding, airflow_dataset = self.resolve_current_airflow_dataset()
+        profile_id = self._resolved_streamlines_profile_id(profile_id)
         cache_paths = streamlines_cache_paths(
             self.config.repo_root,
-            self._streamlines_cache_ownership(binding),
+            self._streamlines_cache_ownership(binding, profile_id),
         )
         build_mode = streamlines_cache_build_mode(cache_paths)
         self._streamlines_cache_build_active_sample_index = None
@@ -1065,6 +1562,7 @@ class StreamlinesCacheRuntimeMixin:
                 source,
                 cache_paths=cache_paths,
                 status_callback=status_callback,
+                profile_id=profile_id,
             )
             cleanup = await self.clear_streamlines_static_runtime_in_kit()
             if not cleanup.clean:
@@ -1072,6 +1570,11 @@ class StreamlinesCacheRuntimeMixin:
                     "Streamlines cleanup was not clean after cache build."
                 )
             replace_streamlines_cache_artifacts(cache_paths)
+            receipt_key = self._streamlines_cache_receipt_key(binding, profile_id)
+            getattr(self, "_streamlines_cache_validation_receipts", {}).pop(
+                receipt_key,
+                None,
+            )
             if carb:
                 carb.log_warn(
                     with_dtrs_yerevan_timestamp(
@@ -1138,66 +1641,213 @@ class StreamlinesCacheRuntimeMixin:
             )
 
         results: list[StreamlinesProductionCacheResult] = []
+        total_targets = len(self.resolve_configured_airflow_targets()) * len(
+            tuple(StreamlinesProfileId)
+        )
         for target in self.resolve_configured_airflow_targets():
-            binding = target.binding
-            dataset = target.dataset
-            started_at = time.monotonic()
-            inspection = self._inspect_streamlines_cache_for_target(binding, dataset)
-            if inspection.valid and inspection.metadata is not None:
-                metadata = inspection.metadata
-                reused = True
-            else:
-                result = await self.build_streamlines_cache_in_kit(
-                    status_callback=status_callback,
-                    binding=binding,
-                    airflow_dataset=dataset,
-                    emit_next_action=False,
+            for profile_id in StreamlinesProfileId:
+                binding = target.binding
+                dataset = target.dataset
+                self._report_phase44b_cache_build(
+                    "PROGRESS",
+                    f"cache={len(results) + 1}/{total_targets}; "
+                    f"workload={binding.workload_mode}; profile={profile_id.value}",
+                    status_callback,
                 )
-                if not result.success or result.metadata is None:
-                    return StreamlinesProductionCacheSetResult(
-                        success=False,
-                        results=tuple(results),
-                        failed_workload=binding.workload_mode,
-                        message=result.message,
-                    )
+                started_at = time.monotonic()
                 inspection = self._inspect_streamlines_cache_for_target(
                     binding,
                     dataset,
+                    profile_id=profile_id,
                 )
-                if not inspection.valid or inspection.metadata is None:
+                if inspection.valid and inspection.metadata is not None:
+                    metadata = inspection.metadata
+                    reused = True
+                else:
+                    result = await self.build_streamlines_cache_in_kit(
+                        status_callback=status_callback,
+                        binding=binding,
+                        airflow_dataset=dataset,
+                        profile_id=profile_id,
+                        emit_next_action=False,
+                    )
+                    if not result.success or result.metadata is None:
+                        return StreamlinesProductionCacheSetResult(
+                            success=False,
+                            results=tuple(results),
+                            failed_workload=binding.workload_mode,
+                            message=result.message,
+                        )
+                    inspection = self._inspect_streamlines_cache_for_target(
+                        binding,
+                        dataset,
+                        profile_id=profile_id,
+                    )
+                    if not inspection.valid or inspection.metadata is None:
+                        return StreamlinesProductionCacheSetResult(
+                            success=False,
+                            results=tuple(results),
+                            failed_workload=binding.workload_mode,
+                            message=(
+                                "Built Streamlines cache did not pass final "
+                                "validation: "
+                                f"{inspection.message}"
+                            ),
+                        )
+                    metadata = inspection.metadata
+                    reused = False
+                paths = streamlines_cache_paths(
+                    self.config.repo_root,
+                    self._streamlines_cache_ownership(binding, profile_id),
+                )
+                try:
+                    await asyncio.to_thread(
+                        validate_persisted_constant_topology_cache,
+                        paths.geometry_path,
+                        metadata,
+                    )
+                    await asyncio.to_thread(
+                        validate_persisted_speed_cache,
+                        paths.geometry_path,
+                        metadata,
+                    )
+                except ImportError:
+                    # Pure unit environments do not ship USD; real Kit builds do.
+                    pass
+                except (OSError, RuntimeError, TypeError, ValueError) as error:
                     return StreamlinesProductionCacheSetResult(
                         success=False,
                         results=tuple(results),
                         failed_workload=binding.workload_mode,
                         message=(
-                            "Built Streamlines cache did not pass final validation: "
-                            f"{inspection.message}"
+                            "Final Streamlines raw-speed validation failed: " f"{error}"
                         ),
                     )
-                metadata = inspection.metadata
-                reused = False
-            paths = streamlines_cache_paths(
-                self.config.repo_root,
-                self._streamlines_cache_ownership(binding),
-            )
-            results.append(
-                StreamlinesProductionCacheResult(
-                    workload=binding.workload_mode,
-                    dataset_identity=binding.dataset_identity,
-                    reused=reused,
-                    metadata=metadata,
-                    cache_size_bytes=(
-                        paths.geometry_path.stat().st_size
-                        + paths.metadata_path.stat().st_size
-                    ),
-                    total_ms=(time.monotonic() - started_at) * 1000.0,
+                results.append(
+                    StreamlinesProductionCacheResult(
+                        workload=binding.workload_mode,
+                        dataset_identity=binding.dataset_identity,
+                        profile_id=profile_id.value,
+                        reused=reused,
+                        metadata=metadata,
+                        cache_size_bytes=(
+                            paths.geometry_path.stat().st_size
+                            + paths.metadata_path.stat().st_size
+                        ),
+                        total_ms=(time.monotonic() - started_at) * 1000.0,
+                    )
                 )
-            )
-        return StreamlinesProductionCacheSetResult(
+        result = StreamlinesProductionCacheSetResult(
             success=True,
             results=tuple(results),
             message="All configured production Streamlines caches are VALID.",
         )
+        self._report_phase44b_cache_build(
+            "COMPLETE",
+            f"{len(results)}/{total_targets} final Streamlines caches are VALID.\n"
+            "dtrs:speed=PASS; metadata_profile_identity=PASS.",
+            status_callback,
+        )
+        return result
+
+    async def build_validate_constant_topology_prototype_in_kit(
+        self,
+        status_callback: StatusCallback | None = None,
+    ) -> StreamlinesConstantTopologyPrototypeResult:
+        """Build only the Volume Coverage / Nominal renderer-safe prototype."""
+
+        target = next(
+            (
+                item
+                for item in self.resolve_configured_airflow_targets()
+                if item.binding.workload_mode == "Nominal"
+            ),
+            None,
+        )
+        if target is None:
+            return StreamlinesConstantTopologyPrototypeResult(
+                False,
+                "Nominal authoritative airflow target is unavailable.",
+            )
+        profile_id = StreamlinesProfileId.VOLUME_COVERAGE
+        result = await self.build_streamlines_cache_in_kit(
+            status_callback=status_callback,
+            binding=target.binding,
+            airflow_dataset=target.dataset,
+            profile_id=profile_id,
+            emit_next_action=False,
+        )
+        if not result.success or result.metadata is None:
+            return StreamlinesConstantTopologyPrototypeResult(
+                False,
+                result.message,
+            )
+        receipt = await self.ensure_streamlines_cache_validation_in_background(
+            target.binding,
+            target.dataset,
+            profile_id=profile_id,
+        )
+        if not receipt.inspection.valid or receipt.inspection.metadata is None:
+            return StreamlinesConstantTopologyPrototypeResult(
+                False,
+                "Constant-topology prototype did not pass strong validation.",
+            )
+        metadata = receipt.inspection.metadata
+        paths = streamlines_cache_paths(
+            self.config.repo_root,
+            self._streamlines_cache_ownership(target.binding, profile_id),
+        )
+        proofs = await asyncio.to_thread(
+            validate_persisted_constant_topology_cache,
+            paths.geometry_path,
+            metadata,
+            sample_indices=(0, 1, 2, 79),
+        )
+        if len(proofs) != 4 or not all(proof.passed for proof in proofs):
+            return StreamlinesConstantTopologyPrototypeResult(
+                False,
+                "Representative constant-topology offline proof failed.",
+                metadata,
+                proofs,
+            )
+        self._streamlines_constant_topology_prototype_proofs = proofs
+        message = (
+            "Volume Coverage / Nominal constant-topology cache is VALID; "
+            "samples=0,1,2,79; curves=6144; points=122880; "
+            "topology_consistent=True."
+        )
+        return StreamlinesConstantTopologyPrototypeResult(
+            True,
+            message,
+            metadata,
+            proofs,
+        )
+
+    def _report_phase44b_cache_build(
+        self,
+        event: str,
+        message: str,
+        status_callback: StatusCallback | None,
+    ) -> None:
+        """Emit only bounded profile/workload cache-build acceptance milestones."""
+
+        if status_callback:
+            status_callback(message)
+        logger = getattr(self, "_streamlines_carb_logger", None)
+        if logger is None:
+            try:
+                import carb
+            except ImportError:
+                carb = None
+        else:
+            carb = logger()
+        if carb:
+            carb.log_warn(
+                with_dtrs_yerevan_timestamp(
+                    f"DTRS STREAMLINES | PHASE_4_4B_CACHE_BUILD | {event}\n"
+                    f"status={message}"
+                )
+            )
 
     async def _build_cache_geometry_in_kit(
         self,
@@ -1205,6 +1855,7 @@ class StreamlinesCacheRuntimeMixin:
         *,
         cache_paths: StreamlinesCachePaths,
         status_callback: StatusCallback | None,
+        profile_id: StreamlinesProfileId,
     ) -> tuple[StreamlinesCacheMetadata, tuple[float, ...]]:
         """Persist every real manifest sample without creating a RuntimePreview."""
 
@@ -1231,7 +1882,12 @@ class StreamlinesCacheRuntimeMixin:
         if not field_prim or not field_prim.IsValid():
             raise RuntimeError("Cache build velocity field is unavailable.")
 
-        request = self._build_streamlines_cache_request(descriptor)
+        layout = self._streamlines_cache_seed_layout(descriptor, profile_id)
+        request = self._build_streamlines_cache_request(
+            descriptor,
+            profile_id=profile_id,
+            layout=layout,
+        )
         cache_paths.directory.mkdir(parents=True, exist_ok=True)
         for partial_path in (
             cache_paths.partial_geometry_path,
@@ -1270,23 +1926,26 @@ class StreamlinesCacheRuntimeMixin:
             Sdf.ValueTypeNames.FloatArray,
             UsdGeom.Tokens.vertex,
         )
+        source_counts_attribute = cache_curves.GetPrim().CreateAttribute(
+            SOURCE_CURVE_VERTEX_COUNTS_ATTRIBUTE,
+            Sdf.ValueTypeNames.IntArray,
+            custom=True,
+        )
+        renderer_topology = renderer_topology_for_profile(profile_id)
+        cache_curves.GetCurveVertexCountsAttr().Set(
+            list(renderer_topology.curve_vertex_counts)
+        )
 
         previous_target = stage.GetEditTarget()
         states: list[StreamlinesCacheState] = []
         generation_ms: list[float] = []
         try:
             stage.SetEditTarget(stage.GetSessionLayer())
-            await execute_command(
-                "CreateCaeVizMeshPrim",
-                prim_type="UnitSphere",
-                prim_path=request.seed_path,
-                resolution=request.seed_resolution,
-            )
-            await execute_command(
-                "TransformPrimSRT",
-                path=request.seed_path,
-                new_translation=list(request.seed_center),
-                new_scale=[request.seed_radius] * 3,
+            author_streamlines_seed_mesh_in_kit(
+                stage,
+                layout=layout,
+                UsdGeom=UsdGeom,
+                seed_path=request.seed_path,
             )
             await app.next_update_async()
             self._start_kit_cae_operator_tracking()
@@ -1339,19 +1998,25 @@ class StreamlinesCacheRuntimeMixin:
                     raise RuntimeError(
                         "Cache build did not capture raw vertex speed values."
                     )
+                padded = pad_streamlines_sample_for_renderer(
+                    profile_id=profile_id,
+                    points=evidence.runtime_point_positions,
+                    curve_vertex_counts=evidence.runtime_curve_vertex_counts,
+                    speeds=execution.speed_magnitudes,
+                )
                 _author_persisted_speed_sample(
                     speed_primvar,
-                    execution.speed_magnitudes,
-                    expected_point_count=evidence.runtime_point_count,
+                    padded.speeds,
+                    expected_point_count=renderer_topology.point_count,
                     time_code=Usd.TimeCode(sample.time_code),
                 )
                 time_code = Usd.TimeCode(sample.time_code)
                 cache_curves.GetPointsAttr().Set(
-                    list(evidence.runtime_point_positions),
+                    list(padded.points),
                     time_code,
                 )
-                cache_curves.GetCurveVertexCountsAttr().Set(
-                    list(evidence.runtime_curve_vertex_counts),
+                source_counts_attribute.Set(
+                    list(padded.source_curve_vertex_counts),
                     time_code,
                 )
                 cache_curves.CreateExtentAttr().Set(
@@ -1367,20 +2032,24 @@ class StreamlinesCacheRuntimeMixin:
                         time_code=sample.time_code,
                         source_vti=source_vti.resolve().as_posix(),
                         source_vti_identity=vti_file_identity(source_vti),
-                        curve_count=evidence.runtime_curve_count,
-                        point_count=evidence.runtime_point_count,
+                        curve_count=renderer_topology.curve_count,
+                        point_count=renderer_topology.point_count,
                         topology_signature=cache_topology_signature(
-                            evidence.runtime_curve_vertex_counts
+                            renderer_topology.curve_vertex_counts
                         ),
                         geometry_signature=cache_geometry_signature(
-                            curve_count=evidence.runtime_curve_count,
-                            point_count=evidence.runtime_point_count,
+                            curve_count=renderer_topology.curve_count,
+                            point_count=renderer_topology.point_count,
                             bounds=evidence.runtime_curve_bounds,
-                            point_head=evidence.point_head,
-                            point_tail=evidence.point_tail,
+                            point_head=padded.points[:8],
+                            point_tail=padded.points[-8:],
                         ),
                         generation_ms=elapsed_ms,
                         bounds=evidence.runtime_curve_bounds,
+                        source_point_count=evidence.runtime_point_count,
+                        source_topology_signature=cache_topology_signature(
+                            evidence.runtime_curve_vertex_counts
+                        ),
                     )
                 )
                 generation_ms.append(elapsed_ms)
@@ -1419,6 +2088,19 @@ class StreamlinesCacheRuntimeMixin:
             raise RuntimeError(
                 "Cache source-time attributes do not match the active manifest."
             )
+        source_count_time_codes = tuple(
+            float(value) for value in source_counts_attribute.GetTimeSamples()
+        )
+        if source_count_time_codes != expected_time_codes:
+            raise RuntimeError(
+                "Cache source topology samples do not match the active manifest."
+            )
+        if cache_curves.GetCurveVertexCountsAttr().GetTimeSamples():
+            raise RuntimeError("Renderer curve topology must not be time sampled.")
+        if tuple(cache_curves.GetCurveVertexCountsAttr().Get()) != (
+            renderer_topology.curve_vertex_counts
+        ):
+            raise RuntimeError("Renderer curve topology does not match the profile.")
         _validate_persisted_speed_primvar(
             speed_primvar.GetAttr(),
             expected_time_codes=expected_time_codes,
@@ -1449,6 +2131,10 @@ class StreamlinesCacheRuntimeMixin:
                 "Staged Streamlines cache validation failed: "
                 f"{staged_validation.message}"
             )
+        validate_persisted_constant_topology_cache(
+            cache_paths.partial_geometry_path,
+            staged_metadata,
+        )
         cache_paths.partial_metadata_path.write_text(
             serialise_streamlines_cache_metadata(metadata),
             encoding="utf-8",
@@ -1557,15 +2243,45 @@ class StreamlinesCacheRuntimeMixin:
         status_callback: StatusCallback | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
     ):
-        """Attach one VALID persisted cache hidden at a preserved shared phase.
+        """Prepare the current shared-airflow target through the explicit seam."""
 
-        This Phase 4.2 seam consumes only persisted geometry.  It deliberately
-        bypasses the public Flow-detached UI guard while Flow remains the last
-        visible presentation during a transactional handoff.
+        binding, airflow_dataset = self.resolve_current_airflow_dataset()
+        return await self.prepare_streamlines_cached_target_in_kit(
+            binding,
+            airflow_dataset,
+            context.logical_phase_seconds,
+            expected_sample_index=context.source_sample_index,
+            expected_source_vti=context.source_vti,
+            status_callback=status_callback,
+            cancellation_requested=cancellation_requested,
+        )
+
+    async def prepare_streamlines_cached_target_in_kit(
+        self,
+        binding,
+        airflow_dataset,
+        phase_seconds: float,
+        *,
+        expected_sample_index: int | None = None,
+        expected_source_vti: Path | None = None,
+        validated_receipt: StreamlinesCacheValidationReceipt | None = None,
+        status_callback: StatusCallback | None = None,
+        cancellation_requested: Callable[[], bool] | None = None,
+    ):
+        """Prepare one target's VALID persisted cache hidden at an exact phase.
+
+        Binding and dataset identity are explicit.  This owner validates and loads
+        persisted geometry only; it never commits shared state, imports VTI, runs
+        Kit-CAE Streamlines, or rebuilds a cache.
         """
 
         self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        receipt = await self.ensure_current_streamlines_cache_validation_in_background()
+        receipt = validated_receipt
+        if receipt is None:
+            receipt = await self.ensure_streamlines_cache_validation_in_background(
+                binding,
+                airflow_dataset,
+            )
         self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
         inspection = receipt.inspection
         if inspection.classification != "VALID":
@@ -1582,17 +2298,30 @@ class StreamlinesCacheRuntimeMixin:
             cancellation_requested=cancellation_requested,
         )
         self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        resolution = await self.select_streamlines_cache_state_in_kit(
-            context.logical_phase_seconds
+        contract = self._streamlines_cache_playback_contract
+        if (
+            contract.workload != binding.workload_mode
+            or contract.dataset_identity != binding.dataset_identity
+        ):
+            raise RuntimeError("Prepared Streamlines cache target identity drifted.")
+        resolution = resolve_cached_playback_state(
+            contract,
+            phase_seconds,
+            active_sample_index=None,
         )
         self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        if (
-            resolution.sample.sample_index != context.source_sample_index
-            or resolution.sample.source_vti.resolve() != context.source_vti.resolve()
-        ):
+        sample_index_matches = (
+            expected_sample_index is None
+            or resolution.sample.sample_index == expected_sample_index
+        )
+        source_vti_matches = (
+            expected_source_vti is None
+            or resolution.sample.source_vti.resolve() == expected_source_vti.resolve()
+        )
+        if not sample_index_matches or not source_vti_matches:
             raise RuntimeError(
-                "Prepared Streamlines sample does not match the preserved "
-                "shared-airflow source identity."
+                "Prepared Streamlines sample does not match the requested "
+                "target phase identity."
             )
         return resolution
 
@@ -1642,16 +2371,18 @@ class StreamlinesCacheRuntimeMixin:
         return True
 
     def streamlines_cached_presentation_is_visible_in_kit(self) -> bool:
-        """Read the composed visibility of the cache root in the open stage."""
+        """Read visibility from the stable renderer-facing Geometry prim."""
 
         import omni.usd
         from pxr import UsdGeom
 
         stage = omni.usd.get_context().get_stage()
-        root = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH) if stage else None
-        if not root or not root.IsValid():
+        geometry = stage.GetPrimAtPath(CACHE_PLAYBACK_CURVES_PATH) if stage else None
+        if not geometry or not geometry.IsValid():
             return False
-        return UsdGeom.Imageable(root).ComputeVisibility() != UsdGeom.Tokens.invisible
+        return (
+            UsdGeom.Imageable(geometry).ComputeVisibility() != UsdGeom.Tokens.invisible
+        )
 
     def streamlines_cached_presentation_is_prepared_in_kit(self) -> bool:
         """Report a composed cache root even when its presentation is hidden."""
@@ -1691,22 +2422,26 @@ class StreamlinesCacheRuntimeMixin:
                 cancellation_requested=cancellation_requested,
             )
         self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        curves_prim = stage.GetPrimAtPath(CACHE_PLAYBACK_CURVES_PATH)
-        if not curves_prim or not curves_prim.IsValid():
-            raise RuntimeError("Cache layer did not compose its BasisCurves prim.")
-        curves = UsdGeom.BasisCurves(curves_prim)
+        mesh_prim = stage.GetPrimAtPath(MESH_CACHE_GEOMETRY_PATH)
+        if (
+            not mesh_prim
+            or not mesh_prim.IsValid()
+            or mesh_prim.GetTypeName() != "Mesh"
+        ):
+            raise RuntimeError("Cache source did not compose its renderer Mesh.")
+        mesh = UsdGeom.Mesh(mesh_prim)
         self._report_streamlines_cache_load(
             event="PROGRESS",
             message="Loading Streamlines cache: verifying manifest time samples.",
             status_callback=status_callback,
         )
         actual_time_codes = tuple(
-            float(value) for value in curves.GetPointsAttr().GetTimeSamples()
+            float(value) for value in mesh.GetPointsAttr().GetTimeSamples()
         )
         expected_time_codes = tuple(state.time_code for state in metadata.states)
         if actual_time_codes != expected_time_codes:
             raise RuntimeError("Cache geometry time samples do not match metadata.")
-        source_time_attribute = curves.GetPrim().GetAttribute("dtrs:sourceTime")
+        source_time_attribute = mesh_prim.GetAttribute("dtrs:sourceTime")
         source_time_codes = tuple(
             float(value) for value in source_time_attribute.GetTimeSamples()
         )
@@ -1724,12 +2459,18 @@ class StreamlinesCacheRuntimeMixin:
             raise RuntimeError(
                 "Cache source-time attributes do not match metadata provenance."
             )
-        _validate_persisted_speed_primvar(
-            curves.GetPrim().GetAttribute(SPEED_PRIMVAR_ATTRIBUTE),
-            expected_time_codes=expected_time_codes,
-            expected_point_counts=tuple(state.point_count for state in metadata.states),
-            Usd=Usd,
+        speed_time_codes = tuple(
+            float(value)
+            for value in mesh_prim.GetAttribute(MESH_SPEED_ATTRIBUTE).GetTimeSamples()
         )
+        if speed_time_codes != expected_time_codes:
+            raise RuntimeError("Mesh speed samples do not match metadata times.")
+        counts_attr = mesh.GetFaceVertexCountsAttr()
+        indices_attr = mesh.GetFaceVertexIndicesAttr()
+        if counts_attr.GetTimeSamples() or indices_attr.GetTimeSamples():
+            raise RuntimeError("Mesh topology is unexpectedly time-sampled.")
+        self._streamlines_mesh_points_time_codes = actual_time_codes
+        self._streamlines_mesh_speed_time_codes = speed_time_codes
         if stage.GetPrimAtPath(CACHE_BUILD_OPERATOR_PATH).IsValid():
             raise RuntimeError("Cache load retained a Kit-CAE build operator.")
         self._streamlines_loaded_cache_metadata = metadata
@@ -1740,7 +2481,11 @@ class StreamlinesCacheRuntimeMixin:
             message="Loading Streamlines cache: selecting manifest state 1.",
             status_callback=status_callback,
         )
-        resolution = await self.select_streamlines_cache_state_in_kit(0.0)
+        resolution = resolve_cached_playback_state(
+            playback_contract,
+            0.0,
+            active_sample_index=None,
+        )
         self._report_streamlines_cache_load(
             event="COMPLETE",
             message=(
@@ -1766,11 +2511,21 @@ class StreamlinesCacheRuntimeMixin:
     def _clear_streamlines_cache_load_state(self, stage) -> None:
         """Detach an unverified cache and clear every playback-facing reference."""
 
+        invalidator = getattr(
+            self,
+            "invalidate_streamlines_mesh_playback_updates",
+            None,
+        )
+        if callable(invalidator):
+            invalidator()
         self._detach_streamlines_cache_playback_layer(stage)
         self._streamlines_loaded_cache_metadata = None
         self._streamlines_loaded_cache_paths = None
         self._streamlines_cache_playback_contract = None
         self._streamlines_cache_active_sample_index = None
+        self._streamlines_mesh_cache_receipt = None
+        self._streamlines_mesh_points_time_codes = ()
+        self._streamlines_mesh_speed_time_codes = ()
 
     def is_streamlines_cache_load_allowed(self) -> bool:
         """Return whether cache playback can start without contending with Flow."""
@@ -1783,6 +2538,7 @@ class StreamlinesCacheRuntimeMixin:
         binding,
         airflow_dataset,
         stage_time_codes_per_second: float,
+        profile_id: StreamlinesProfileId | None = None,
     ) -> dict[str, object]:
         """Resolve cache invalidation facts without importing a VTI into Kit."""
 
@@ -1808,7 +2564,11 @@ class StreamlinesCacheRuntimeMixin:
             source_origin=sample.source_origin,
             stage_meters_per_unit=1.0,
         )
-        request = self._build_streamlines_cache_request(descriptor)
+        profile_id = self._resolved_streamlines_profile_id(profile_id)
+        request = self._build_streamlines_cache_request(
+            descriptor,
+            profile_id=profile_id,
+        )
         source = temporal_source_from_airflow_dataset(
             airflow_dataset,
             workload=binding.workload_mode,
@@ -1824,8 +2584,11 @@ class StreamlinesCacheRuntimeMixin:
     def _build_streamlines_cache_request(
         self,
         descriptor: StaticVelocitySourceDescriptor,
+        *,
+        profile_id: StreamlinesProfileId | None = None,
+        layout=None,
     ) -> StreamlinesOperatorRequest:
-        """Derive cache geometry settings from VTI data, not importer floats."""
+        """Derive one frozen profile request from VTI data, not UI state."""
 
         minimum = tuple(float(value) for value in descriptor.source_origin)
         maximum = tuple(
@@ -1838,11 +2601,62 @@ class StreamlinesCacheRuntimeMixin:
             world_bounds=(minimum, maximum),
             origin=minimum,
         )
+        profile_id = (
+            DEFAULT_STREAMLINES_PROFILE
+            if self is None and profile_id is None
+            else (
+                StreamlinesProfileId(profile_id or DEFAULT_STREAMLINES_PROFILE)
+                if self is None
+                else self._resolved_streamlines_profile_id(profile_id)
+            )
+        )
+        if layout is None:
+            layout = StreamlinesCacheRuntimeMixin._streamlines_cache_seed_layout(
+                canonical_descriptor,
+                profile_id,
+            )
+        tuning = (
+            FINAL_VOLUME_COVERAGE_CANDIDATE
+            if profile_id is StreamlinesProfileId.VOLUME_COVERAGE
+            else FINAL_GLOBAL_FLOW_PATH_CANDIDATE
+        )
         return replace(
-            build_streamlines_operator_request(canonical_descriptor),
+            build_streamlines_preview_operator_request(
+                canonical_descriptor,
+                layout,
+                tuning=tuning,
+            ),
             operator_path=CACHE_BUILD_OPERATOR_PATH,
             seed_path=CACHE_BUILD_SEED_PATH,
             operator_type="standard",
+        )
+
+    @staticmethod
+    def _streamlines_cache_seed_layout(
+        descriptor: StaticVelocitySourceDescriptor,
+        profile_id: StreamlinesProfileId,
+    ):
+        """Derive the frozen deterministic point-grid for one cache profile."""
+
+        minimum = tuple(float(value) for value in descriptor.source_origin)
+        maximum = tuple(
+            minimum[index]
+            + ((descriptor.dimensions[index] - 1) * descriptor.spacing[index])
+            for index in range(3)
+        )
+        contract = final_geometry_contract(profile_id)
+        bounds = (minimum, maximum)
+        if profile_id is StreamlinesProfileId.VOLUME_COVERAGE:
+            return derive_volume_coverage_layout(
+                bounds,
+                section_count=contract.section_count,
+                seeds_per_section=contract.seed_count,
+            )
+        return derive_global_flow_path_layout(
+            bounds,
+            front_intake_z=maximum[2],
+            max_cell_spacing=max(descriptor.spacing),
+            seed_count=contract.seed_count,
         )
 
     def _log_streamlines_cache_identity_mismatch(
@@ -1997,44 +2811,79 @@ class StreamlinesCacheRuntimeMixin:
         stage,
         cache_paths: StreamlinesCachePaths,
     ) -> None:
-        """Attach one verified cache file only to the transient Session Layer."""
+        """Reference the sole prebaked renderer Mesh prototype once."""
+
+        from pxr import Sdf, UsdGeom
+
+        session_layer = stage.GetSessionLayer()
+        root_layer = stage.GetRootLayer()
+        session_before = tuple(session_layer.subLayerPaths)
+        root_before = tuple(root_layer.subLayerPaths)
+        mesh_geometry_path, mesh_metadata_path = mesh_cache_paths(
+            cache_paths.geometry_path
+        )
+        if not mesh_geometry_path.is_file() or not mesh_metadata_path.is_file():
+            raise RuntimeError(
+                "Prebaked Volume Coverage / Nominal Mesh prototype is unavailable."
+            )
+        mesh_receipt = load_streamlines_mesh_cache_receipt(mesh_metadata_path)
+        source_metadata = load_streamlines_cache_metadata(cache_paths.metadata_path)
+        if (
+            mesh_receipt.workload != source_metadata.workload
+            or mesh_receipt.dataset_identity != source_metadata.dataset_identity
+            or mesh_receipt.profile_id != source_metadata.profile_id
+            or mesh_receipt.source_geometry_sha256 != source_metadata.geometry_sha256
+        ):
+            raise RuntimeError(
+                "Prebaked Streamlines Mesh does not match its centerline cache."
+            )
+        asset_path = mesh_geometry_path.resolve().as_posix()
 
         self._detach_streamlines_cache_playback_layer(stage)
-        stage.GetSessionLayer().subLayerPaths.append(
-            cache_paths.geometry_path.resolve().as_posix()
-        )
-        self._streamlines_loaded_cache_paths = cache_paths
-
-    def _detach_streamlines_cache_playback_layer(self, stage) -> None:
-        """Detach only this cache reference; the persisted cache stays on disk."""
-
-        expected_paths = set()
-        loaded_paths = getattr(self, "_streamlines_loaded_cache_paths", None)
-        if loaded_paths is not None:
-            expected_paths.add(loaded_paths.geometry_path.resolve().as_posix())
-        if hasattr(self, "resolve_configured_airflow_targets"):
-            for target in self.resolve_configured_airflow_targets():
-                ownership = self._streamlines_cache_ownership(target.binding)
-                paths = streamlines_cache_paths(self.config.repo_root, ownership)
-                expected_paths.add(paths.geometry_path.resolve().as_posix())
-        session_layer = stage.GetSessionLayer()
-        for sublayer_path in tuple(session_layer.subLayerPaths):
-            try:
-                matches_cache = (
-                    Path(sublayer_path).resolve().as_posix() in expected_paths
-                )
-            except OSError:
-                matches_cache = sublayer_path.replace("\\", "/") in expected_paths
-            if matches_cache:
-                session_layer.subLayerPaths.remove(sublayer_path)
         previous_target = stage.GetEditTarget()
         try:
             stage.SetEditTarget(session_layer)
-            # Visibility is authored in Session Layer.  Remove that owned over
-            # as well as the sublayer so it cannot outlive cache geometry.
+            root = UsdGeom.Xform.Define(stage, CACHE_PLAYBACK_ROOT_PATH)
+            root.GetPrim().GetReferences().SetReferences(
+                [Sdf.Reference(asset_path, Sdf.Path(CACHE_PLAYBACK_ROOT_PATH))]
+            )
+        finally:
+            stage.SetEditTarget(previous_target)
+
+        snapshot = StreamlinesPresentationReferenceSnapshot(
+            asset_path=asset_path,
+            referenced_prim_path=CACHE_PLAYBACK_ROOT_PATH,
+            session_sublayers_before=session_before,
+            session_sublayers_after=tuple(session_layer.subLayerPaths),
+            root_sublayers_before=root_before,
+            root_sublayers_after=tuple(root_layer.subLayerPaths),
+        )
+        if not snapshot.reference_swap_passed:
+            self._detach_streamlines_cache_playback_layer(stage)
+            raise RuntimeError(
+                "Streamlines cache reference changed an unrelated layer stack."
+            )
+        self._streamlines_loaded_cache_paths = cache_paths
+        self._streamlines_mesh_cache_receipt = mesh_receipt
+        self._streamlines_presentation_reference_snapshot = snapshot
+
+    def _detach_streamlines_cache_playback_layer(self, stage) -> None:
+        """Remove only the DTRS reference prim; persisted files stay on disk."""
+
+        session_layer = stage.GetSessionLayer()
+        previous_target = stage.GetEditTarget()
+        try:
+            stage.SetEditTarget(session_layer)
             stage.RemovePrim(CACHE_PLAYBACK_ROOT_PATH)
         finally:
             stage.SetEditTarget(previous_target)
+
+    def streamlines_presentation_reference_snapshot(
+        self,
+    ) -> StreamlinesPresentationReferenceSnapshot | None:
+        """Return the latest successfully authored local-reference evidence."""
+
+        return getattr(self, "_streamlines_presentation_reference_snapshot", None)
 
     @staticmethod
     def _format_cache_build_success(

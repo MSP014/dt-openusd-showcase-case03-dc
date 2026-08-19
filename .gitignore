@@ -73,6 +73,10 @@ env/
 venv/
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp*/
+.test-tmp*/
+.tmp/
+logs/
 
 # --- Tools & System ---
 tool/tmp/
