@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isclose
 
 from digital_twin_runtime_suite.app.flow.static_source import (
@@ -11,6 +11,17 @@ from digital_twin_runtime_suite.app.flow.static_source import (
 from digital_twin_runtime_suite.app.streamlines.profile import (
     PRODUCTION_STREAMLINES_PROFILE,
     ProductionStreamlinesProfile,
+    geometry_contract_signature,
+)
+from digital_twin_runtime_suite.app.streamlines.seed_layout import (
+    STREAMLINES_FRONT_INTAKE_SEED_PATH,
+    FrontIntakeSeedLayout,
+    StratifiedSeedLayout,
+)
+from digital_twin_runtime_suite.app.streamlines.tuning import (
+    BASELINE_STREAMLINES_TUNING,
+    StreamlinesGeometryTuning,
+    StreamlinesProfileTuning,
 )
 
 STREAMLINES_OPERATOR_ROOT = "/DTRS_KitCAE/Streamlines"
@@ -37,7 +48,11 @@ class StreamlinesOperatorRequestError(RuntimeError):
 
 @dataclass(frozen=True)
 class StreamlinesOperatorRequest:
-    """Deterministic binding and geometry contract for one operator execution."""
+    """Deterministic binding and geometry contract for one operator execution.
+
+    The three step-size values are dimensionless DAV cell-diagonal-relative
+    multipliers. Width remains a world-space quantity derived from VTI spacing.
+    """
 
     dataset_prim_path: str
     velocity_field_prim_path: str
@@ -56,6 +71,17 @@ class StreamlinesOperatorRequest:
     profile_name: str = "unprofiled"
     profile_signature: str = ""
     persisted_attributes: tuple[str, ...] = ()
+    seed_type: str = "unit_sphere"
+    seed_points: tuple[tuple[float, float, float], ...] = ()
+    seed_columns: int = 0
+    seed_rows: int = 0
+    seed_horizontal_spacing: float = 0.0
+    seed_vertical_spacing: float = 0.0
+    seed_plane_z: float | None = None
+    seed_layout_signature: str = ""
+    profile_id: str = "global_flow_path"
+    seed_section_count: int = 1
+    seeds_per_section: int = 0
 
 
 @dataclass(frozen=True)
@@ -115,15 +141,92 @@ def build_streamlines_operator_request(
             maximum[2] - front_inset,
         ),
         seed_radius=seed_radius,
-        min_step_size=max_spacing * profile.min_step_cell_multiplier,
-        initial_step_size=max_spacing * profile.initial_step_cell_multiplier,
-        max_step_size=max_spacing * profile.max_step_cell_multiplier,
+        min_step_size=profile.min_step_cell_multiplier,
+        initial_step_size=profile.initial_step_cell_multiplier,
+        max_step_size=profile.max_step_cell_multiplier,
         max_steps=profile.max_steps,
         width=max_spacing * profile.width_cell_multiplier,
         seed_resolution=profile.seed_resolution,
         profile_name=profile.name,
         profile_signature=profile.settings_signature,
         persisted_attributes=profile.persisted_attributes,
+        seed_layout_signature="unit_sphere_v1",
+    )
+
+
+def build_streamlines_preview_operator_request(
+    descriptor: StaticVelocitySourceDescriptor | None,
+    layout: FrontIntakeSeedLayout | StratifiedSeedLayout,
+    *,
+    profile: ProductionStreamlinesProfile = PRODUCTION_STREAMLINES_PROFILE,
+    tuning: StreamlinesGeometryTuning | StreamlinesProfileTuning = (
+        BASELINE_STREAMLINES_TUNING
+    ),
+) -> StreamlinesOperatorRequest:
+    """Bind the standard operator to one exact developer seed layout."""
+
+    request = build_streamlines_operator_request(descriptor, profile=profile)
+    contract = tuning.geometry_contract
+    if isinstance(layout, StratifiedSeedLayout):
+        expected = contract.seed_count * contract.section_count
+        if layout.seed_count != expected:
+            raise StreamlinesOperatorRequestError(
+                "Streamlines profile seed layout is incomplete."
+            )
+        columns = max(layout.row_counts[: layout.rows_per_section])
+        rows = layout.rows_per_section
+        horizontal_spacing = 0.0
+        vertical_spacing = layout.y_spacing
+        seed_plane_z = layout.section_planes[0]
+        layout_signature = (
+            f"{contract.profile_id.value}:{contract.seed_count}:"
+            f"{contract.section_count}"
+        )
+        profile_id = contract.profile_id.value
+        section_count = layout.section_count
+        seeds_per_section = layout.seeds_per_section
+        centre = (
+            (layout.domain_bounds[0][0] + layout.domain_bounds[1][0]) / 2.0,
+            (layout.domain_bounds[0][1] + layout.domain_bounds[1][1]) / 2.0,
+            sum(layout.section_planes) / len(layout.section_planes),
+        )
+    else:
+        if layout.seed_count != layout.columns * layout.rows:
+            raise StreamlinesOperatorRequestError(
+                "Streamlines preview seed layout is incomplete."
+            )
+        columns = layout.columns
+        rows = layout.rows
+        horizontal_spacing = layout.horizontal_spacing
+        vertical_spacing = layout.vertical_spacing
+        seed_plane_z = layout.seed_plane_z
+        layout_signature = layout.profile_signature
+        profile_id = "global_flow_path"
+        section_count = 1
+        seeds_per_section = layout.seed_count
+        centre = layout.centre
+    return replace(
+        request,
+        seed_path=STREAMLINES_FRONT_INTAKE_SEED_PATH,
+        seed_center=centre,
+        seed_radius=0.0,
+        seed_resolution=0,
+        seed_type="point_grid",
+        seed_points=layout.points,
+        seed_columns=columns,
+        seed_rows=rows,
+        seed_horizontal_spacing=horizontal_spacing,
+        seed_vertical_spacing=vertical_spacing,
+        seed_plane_z=seed_plane_z,
+        seed_layout_signature=layout_signature,
+        min_step_size=contract.min_step_cell_multiplier,
+        initial_step_size=contract.initial_step_cell_multiplier,
+        max_step_size=contract.max_step_cell_multiplier,
+        max_steps=contract.max_steps,
+        profile_signature=geometry_contract_signature(contract),
+        profile_id=profile_id,
+        seed_section_count=section_count,
+        seeds_per_section=seeds_per_section,
     )
 
 

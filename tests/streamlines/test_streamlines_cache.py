@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
-from digital_twin_runtime_suite.app.streamlines import recompute_runtime
+from digital_twin_runtime_suite.app.streamlines import cache_runtime, recompute_runtime
 from digital_twin_runtime_suite.app.streamlines.cache import (
+    CACHE_PLAYBACK_ROOT_PATH,
+    CACHE_PLAYBACK_SOURCE_PATH,
     CACHE_SCHEMA_VERSION,
     StreamlinesCacheMetadata,
     StreamlinesCacheOwnership,
@@ -195,18 +198,20 @@ def _state(
         time_code=source.sample_time_codes[index],
         source_vti=source.velocity_paths[index].resolve().as_posix(),
         source_vti_identity=vti_file_identity(source.velocity_paths[index]),
-        curve_count=1,
-        point_count=4,
-        topology_signature=topology_signature((4,)),
+        curve_count=256,
+        point_count=51_200,
+        topology_signature=topology_signature((200,) * 256),
         geometry_signature=geometry_signature(
-            curve_count=1,
-            point_count=4,
+            curve_count=256,
+            point_count=51_200,
             bounds=bounds,
             point_head=points[:3],
             point_tail=points[-3:],
         ),
         generation_ms=10.0 + index,
         bounds=bounds,
+        source_point_count=4,
+        source_topology_signature=topology_signature((4,)),
     )
 
 
@@ -641,19 +646,90 @@ def test_cache_startup_inspection_never_starts_a_build(tmp_path: Path) -> None:
 
 
 def test_cache_layer_attach_and_detach_keep_persistence_outside_the_stage(
+    monkeypatch,
     tmp_path: Path,
 ) -> None:
+    pxr = ModuleType("pxr")
+    sdf = ModuleType("pxr.Sdf")
+    sdf.Reference = lambda asset, prim: SimpleNamespace(
+        assetPath=asset,
+        primPath=prim,
+    )
+    sdf.Path = str
+    usd_geom = ModuleType("pxr.UsdGeom")
+    usd_geom.Xform = _CacheXform
+    usd_geom.Tokens = SimpleNamespace(invisible="invisible")
+    pxr.Sdf = sdf
+    pxr.UsdGeom = usd_geom
+    monkeypatch.setitem(sys.modules, "pxr", pxr)
+    monkeypatch.setitem(sys.modules, "pxr.Sdf", sdf)
+    monkeypatch.setitem(sys.modules, "pxr.UsdGeom", usd_geom)
     paths = streamlines_cache_paths(tmp_path, _ownership())
+    target_paths = streamlines_cache_paths(
+        tmp_path,
+        StreamlinesCacheOwnership("Idle", "server/load_idle"),
+    )
+    for cache_paths in (paths, target_paths):
+        cache_paths.geometry_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_paths.geometry_path.write_bytes(b"mesh")
+        cache_paths.metadata_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        cache_runtime,
+        "mesh_cache_paths",
+        lambda geometry_path: (
+            geometry_path,
+            geometry_path.with_suffix(".json"),
+        ),
+    )
+    monkeypatch.setattr(
+        cache_runtime,
+        "load_streamlines_mesh_cache_receipt",
+        lambda path: SimpleNamespace(
+            workload=("Idle" if "idle" in path.as_posix() else "Nominal"),
+            dataset_identity=(
+                "server/load_idle"
+                if "idle" in path.as_posix()
+                else "server/load_normal"
+            ),
+            profile_id="global_flow_path",
+            source_geometry_sha256="geometry",
+        ),
+    )
+    monkeypatch.setattr(
+        cache_runtime,
+        "load_streamlines_cache_metadata",
+        lambda path: SimpleNamespace(
+            workload=("Idle" if "idle" in path.as_posix() else "Nominal"),
+            dataset_identity=(
+                "server/load_idle"
+                if "idle" in path.as_posix()
+                else "server/load_normal"
+            ),
+            profile_id="global_flow_path",
+            geometry_sha256="geometry",
+        ),
+    )
     stage = _CacheStage()
+    stage.GetSessionLayer().subLayerPaths.append("main-session.usda")
+    stage.GetRootLayer().subLayerPaths.append("server-scene.usda")
     runtime = _CacheLayerRuntime(tmp_path)
 
     runtime._attach_streamlines_cache_playback_layer(stage, paths)
 
-    assert stage.GetSessionLayer().subLayerPaths == [
-        paths.geometry_path.resolve().as_posix()
-    ]
+    assert stage.GetSessionLayer().subLayerPaths == ["main-session.usda"]
+    assert stage.GetRootLayer().subLayerPaths == ["server-scene.usda"]
+    assert stage.reference.assetPath == paths.geometry_path.resolve().as_posix()
+    assert stage.reference.primPath == CACHE_PLAYBACK_ROOT_PATH
+    runtime._attach_streamlines_cache_playback_layer(stage, target_paths)
+    assert stage.reference.assetPath == (
+        target_paths.geometry_path.resolve().as_posix()
+    )
+    assert stage.GetSessionLayer().subLayerPaths == ["main-session.usda"]
+    assert stage.GetRootLayer().subLayerPaths == ["server-scene.usda"]
     runtime._detach_streamlines_cache_playback_layer(stage)
-    assert stage.GetSessionLayer().subLayerPaths == []
+    assert stage.GetSessionLayer().subLayerPaths == ["main-session.usda"]
+    assert stage.GetRootLayer().subLayerPaths == ["server-scene.usda"]
+    assert stage.reference is None
 
 
 class _CacheLayerRuntime(StreamlinesCacheRuntimeMixin):
@@ -669,11 +745,16 @@ class _CacheSessionLayer:
 class _CacheStage:
     def __init__(self) -> None:
         self._session_layer = _CacheSessionLayer()
+        self._root_layer = _CacheSessionLayer()
         self._edit_target = object()
         self.removed_prims: list[str] = []
+        self.reference = None
 
     def GetSessionLayer(self) -> _CacheSessionLayer:
         return self._session_layer
+
+    def GetRootLayer(self) -> _CacheSessionLayer:
+        return self._root_layer
 
     def GetEditTarget(self):
         return self._edit_target
@@ -683,3 +764,41 @@ class _CacheStage:
 
     def RemovePrim(self, prim_path: str) -> None:
         self.removed_prims.append(prim_path)
+        if prim_path == CACHE_PLAYBACK_ROOT_PATH:
+            self.reference = None
+
+    def OverridePrim(self, prim_path: str):
+        assert prim_path in (CACHE_PLAYBACK_ROOT_PATH, CACHE_PLAYBACK_SOURCE_PATH)
+        return _CachePresentationPrim(self)
+
+
+class _CachePresentationPrim:
+    def __init__(self, stage: _CacheStage) -> None:
+        self._stage = stage
+
+    def GetReferences(self):
+        return self
+
+    def SetReferences(self, references) -> None:
+        assert len(references) == 1
+        self._stage.reference = references[0]
+
+
+class _CacheVisibilityAttribute:
+    def Set(self, _value) -> bool:
+        return True
+
+
+class _CacheXform:
+    @staticmethod
+    def Define(stage, path):
+        return _CacheXform(stage.OverridePrim(path))
+
+    def __init__(self, prim) -> None:
+        self._prim = prim
+
+    def GetPrim(self):
+        return self._prim
+
+    def CreateVisibilityAttr(self):
+        return _CacheVisibilityAttribute()

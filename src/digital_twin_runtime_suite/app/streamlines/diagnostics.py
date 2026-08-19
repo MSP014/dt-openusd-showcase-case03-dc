@@ -370,7 +370,7 @@ def inspect_streamlines_operator(
         else None
     )
     seed_endpoint, seed_distance = _nearest_seed_endpoint(
-        request.seed_center,
+        request.seed_points or (request.seed_center,),
         first_curve_start,
         first_curve_end,
     )
@@ -670,16 +670,16 @@ def _subtract_points(
 
 
 def _nearest_seed_endpoint(
-    seed_center: tuple[float, float, float],
+    seed_points: tuple[tuple[float, float, float], ...],
     start: tuple[float, float, float] | None,
     end: tuple[float, float, float] | None,
 ) -> tuple[str, float | None]:
-    """State which endpoint begins nearest the authored diagnostic seed."""
+    """State which endpoint lies nearest any authored seed point."""
 
     if start is None or end is None:
         return "UNAVAILABLE", None
-    start_distance = _point_distance(seed_center, start)
-    end_distance = _point_distance(seed_center, end)
+    start_distance = min(_point_distance(seed, start) for seed in seed_points)
+    end_distance = min(_point_distance(seed, end) for seed in seed_points)
     if start_distance <= end_distance:
         return "first_curve_start", start_distance
     return "first_curve_end", end_distance

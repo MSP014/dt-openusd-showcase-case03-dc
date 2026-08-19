@@ -71,6 +71,15 @@ def streamlines_runtime_root_paths(stage) -> tuple[str, ...]:
     return tuple(sorted(paths, key=lambda value: (value.count("/"), value)))
 
 
+def streamlines_duplicate_runtime_prim_count(stage) -> int:
+    """Count only forbidden suffixed DTRS runtime roots while presentation is live."""
+
+    return sum(
+        any(path.startswith(f"{root}_") for root in STREAMLINES_RUNTIME_ROOTS)
+        for path in streamlines_runtime_root_paths(stage)
+    )
+
+
 def remove_streamlines_runtime_roots_from_layers(stage) -> tuple[str, ...]:
     """Remove only DTRS Streamlines roots from session and root layers.
 

@@ -36,9 +36,6 @@ from digital_twin_runtime_suite.app.streamlines.cache_discovery import (
 from digital_twin_runtime_suite.app.streamlines.cache_runtime import (
     StreamlinesCacheRuntimeMixin,
 )
-from digital_twin_runtime_suite.app.streamlines.proof import (
-    build_streamlines_operator_request,
-)
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalVelocitySourceDescriptor,
 )
@@ -46,6 +43,22 @@ from digital_twin_runtime_suite.app.validation_receipts import (
     ValidationReceiptStore,
 )
 from digital_twin_runtime_suite.app.workload_binding import WorkloadAirflowBinding
+
+
+@pytest.fixture(autouse=True)
+def _isolate_receipt_tests_from_usd_speed_payloads(monkeypatch) -> None:
+    """Receipt tests use tiny stand-ins; raw-speed USD has focused coverage."""
+
+    monkeypatch.setattr(
+        cache_runtime,
+        "validate_persisted_constant_topology_cache",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        cache_runtime,
+        "persisted_speed_chunks",
+        lambda *_args, **_kwargs: (),
+    )
 
 
 def _source(
@@ -72,8 +85,8 @@ def _source(
         dataset_prim_path="/DTRS_HoudiniVelocity/VTKImageData",
         velocity_field_prim_path="/DTRS_HoudiniVelocity/PointData/vel",
         world_bounds=((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
-        dimensions=(2, 2, 2),
-        spacing=(0.1, 0.1, 0.1),
+        dimensions=(11, 11, 11),
+        spacing=(0.01, 0.01, 0.01),
         origin=(0.0, 0.0, 0.0),
         source_origin=(0.0, 0.0, 0.0),
         stage_meters_per_unit=1.0,
@@ -106,18 +119,20 @@ def _state(
         time_code=source.sample_time_codes[index],
         source_vti=source.velocity_paths[index].resolve().as_posix(),
         source_vti_identity=vti_file_identity(source.velocity_paths[index]),
-        curve_count=1,
-        point_count=4,
-        topology_signature=topology_signature((4,)),
+        curve_count=256,
+        point_count=51_200,
+        topology_signature=topology_signature((200,) * 256),
         geometry_signature=geometry_signature(
-            curve_count=1,
-            point_count=4,
+            curve_count=256,
+            point_count=51_200,
             bounds=bounds,
             point_head=((0.0, 0.0, 0.0),),
             point_tail=((1.0, 1.0, 1.0),),
         ),
         generation_ms=1.0,
         bounds=bounds,
+        source_point_count=4,
+        source_topology_signature=topology_signature((4,)),
     )
 
 
@@ -133,8 +148,10 @@ def _persist_cache(
     paths = streamlines_cache_paths(repo_root, ownership)
     paths.directory.mkdir(parents=True, exist_ok=True)
     paths.geometry_path.write_bytes(b"derived-usdc")
-    request = request or build_streamlines_operator_request(
-        metadata_source.static_descriptor
+    request = request or StreamlinesCacheRuntimeMixin._build_streamlines_cache_request(
+        None,
+        metadata_source.static_descriptor,
+        profile_id="global_flow_path",
     )
     metadata = build_streamlines_cache_metadata(
         metadata_source,
@@ -162,7 +179,11 @@ def _inspect(
 ):
     ownership = ownership or _ownership(source)
     paths = streamlines_cache_paths(repo_root, ownership)
-    request = build_streamlines_operator_request(source.static_descriptor)
+    request = StreamlinesCacheRuntimeMixin._build_streamlines_cache_request(
+        None,
+        source.static_descriptor,
+        profile_id="global_flow_path",
+    )
     return inspect_streamlines_cache(
         paths,
         ownership,
@@ -196,7 +217,8 @@ def test_all_configured_workloads_have_distinct_ownership_paths(tmp_path: Path) 
 
     assert len({path.ownership.identity for path in paths}) == 4
     assert len({path.geometry_path for path in paths}) == 4
-    assert all(path.directory.name.startswith("server_load_") for path in paths)
+    assert all(path.directory.name == "global_flow_path" for path in paths)
+    assert all(path.directory.parent.name.startswith("server_load_") for path in paths)
 
 
 @pytest.mark.parametrize(
@@ -397,9 +419,14 @@ class _DiscoveryRuntime(StreamlinesCacheRuntimeMixin):
         binding,
         airflow_dataset,
         stage_time_codes_per_second: float,
+        profile_id=None,
     ) -> dict[str, object]:
         source = self._sources[binding.workload_mode]
-        request = build_streamlines_operator_request(source.static_descriptor)
+        request = StreamlinesCacheRuntimeMixin._build_streamlines_cache_request(
+            None,
+            source.static_descriptor,
+            profile_id=profile_id or "global_flow_path",
+        )
         return {
             "source": source,
             "settings_signature": streamlines_settings_signature(request),
@@ -462,10 +489,15 @@ class _ReceiptRuntime(StreamlinesCacheRuntimeMixin):
         binding,
         airflow_dataset,
         stage_time_codes_per_second: float,
+        profile_id=None,
     ) -> dict[str, object]:
         del airflow_dataset, stage_time_codes_per_second
         source = self._sources[binding.workload_mode]
-        request = build_streamlines_operator_request(source.static_descriptor)
+        request = StreamlinesCacheRuntimeMixin._build_streamlines_cache_request(
+            None,
+            source.static_descriptor,
+            profile_id=profile_id or "global_flow_path",
+        )
         return {
             "source": source,
             "settings_signature": (

@@ -353,6 +353,19 @@ class ValidationReceiptReuseConfig:
 
 
 @dataclass(frozen=True)
+class StreamlinesPresentationConfig:
+    """Fixed, cache-independent velocity material configuration."""
+
+    speed_min: float
+    speed_max: float
+    speed_units: str
+    opacity: float
+    emission_intensity: float
+    lighting_influence: float
+    palette: tuple[tuple[float, tuple[float, float, float]], ...]
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Resolved runtime configuration for the current DTRS slice."""
 
@@ -371,6 +384,7 @@ class RuntimeConfig:
     fan_motion_bindings: tuple[FanMotionBindingConfig, ...]
     simulation_cache: SimulationCacheConfig
     validation_receipts: ValidationReceiptReuseConfig
+    streamlines_presentation: StreamlinesPresentationConfig
 
     @property
     def display_version(self) -> str:
@@ -463,6 +477,11 @@ class RuntimeConfig:
         validation_receipts = _parse_validation_receipt_reuse_config(
             data.get("validation_receipts")
         )
+        streamlines_presentation = _parse_streamlines_presentation_config(
+            data.get("streamlines", {}).get("presentation")
+            if isinstance(data.get("streamlines"), dict)
+            else None
+        )
 
         return cls(
             app_name=data["app"]["name"],
@@ -480,6 +499,7 @@ class RuntimeConfig:
             fan_motion_bindings=fan_motion_bindings,
             simulation_cache=simulation_cache,
             validation_receipts=validation_receipts,
+            streamlines_presentation=streamlines_presentation,
         )
 
     @property
@@ -1477,6 +1497,77 @@ def _parse_validation_receipt_reuse_config(
             value = False
         values[key] = value
     return ValidationReceiptReuseConfig(**values)
+
+
+def _parse_streamlines_presentation_config(
+    data: Any,
+) -> StreamlinesPresentationConfig:
+    """Parse one fixed-scale palette without coupling config to Kit/USD."""
+
+    defaults = {
+        "speed_min": 0.0,
+        "speed_max": 1.0,
+        "speed_units": "source velocity units",
+        "opacity": 0.85,
+        "emission_intensity": 1.5,
+        "lighting_influence": 0.2,
+        "palette": (
+            (0.0, (0.015, 0.055, 0.28)),
+            (0.25, (0.0, 0.75, 1.0)),
+            (0.5, (0.05, 0.85, 0.35)),
+            (0.75, (1.0, 0.85, 0.05)),
+            (1.0, (1.0, 0.16, 0.02)),
+        ),
+    }
+    if not isinstance(data, dict):
+        data = {}
+    raw_palette = data.get("palette")
+    palette = defaults["palette"]
+    if isinstance(raw_palette, list):
+        parsed = []
+        for item in raw_palette:
+            if not isinstance(item, dict):
+                raise ValueError("streamlines.presentation.palette entries are tables.")
+            parsed.append(
+                (
+                    float(item["position"]),
+                    tuple(float(value) for value in item["color"]),
+                )
+            )
+        palette = tuple(parsed)
+    result = StreamlinesPresentationConfig(
+        speed_min=float(data.get("speed_min", defaults["speed_min"])),
+        speed_max=float(data.get("speed_max", defaults["speed_max"])),
+        speed_units=str(data.get("speed_units", defaults["speed_units"])).strip(),
+        opacity=float(data.get("opacity", defaults["opacity"])),
+        emission_intensity=float(
+            data.get("emission_intensity", defaults["emission_intensity"])
+        ),
+        lighting_influence=float(
+            data.get("lighting_influence", defaults["lighting_influence"])
+        ),
+        palette=palette,
+    )
+    from digital_twin_runtime_suite.app.streamlines.presentation import (
+        PaletteStop,
+        PhysicalSpeedScale,
+        StreamlinesPresentation,
+    )
+
+    StreamlinesPresentation(
+        speed_scale=PhysicalSpeedScale(
+            result.speed_min,
+            result.speed_max,
+            result.speed_units,
+        ),
+        palette=tuple(
+            PaletteStop(position, color) for position, color in result.palette
+        ),
+        opacity=result.opacity,
+        emission_intensity=result.emission_intensity,
+        lighting_influence=result.lighting_influence,
+    )
+    return result
 
 
 def _parse_simulation_cache_config(data: Any) -> SimulationCacheConfig:

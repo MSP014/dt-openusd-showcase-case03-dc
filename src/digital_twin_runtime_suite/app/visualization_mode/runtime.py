@@ -77,6 +77,7 @@ class VisualizationModeRuntimeMixin:
         """Clear transient mode ownership at reload or shutdown boundaries."""
 
         self._visualization_mode_state = VisualizationModeState()
+        self._visualization_flow_attach_calls = 0
 
     def visualization_snapshot(self):
         """Expose committed and pending primary presentation without UI ownership."""
@@ -172,15 +173,6 @@ class VisualizationModeRuntimeMixin:
         """Request one primary presentation without changing airflow semantics."""
 
         target = VisualizationMode(mode)
-        committed = self._visualization_mode_state.committed
-        if (
-            committed is VisualizationMode.STREAMLINES
-            and target is VisualizationMode.HEATMAP
-        ):
-            return self._result(
-                False,
-                "Heatmap transition from Streamlines is outside Phase 4.2.",
-            )
         if target is VisualizationMode.STREAMLINES:
             readiness = self.visualization_readiness().for_mode(target)
             if readiness.state != "VALID":
@@ -223,6 +215,16 @@ class VisualizationModeRuntimeMixin:
         if result.success and self._visualization_mode_state.commit(
             transition.transition_id
         ):
+            if target is VisualizationMode.STREAMLINES:
+                metadata = getattr(self, "_streamlines_loaded_cache_metadata", None)
+                if metadata is not None:
+                    from digital_twin_runtime_suite.app.streamlines.profile import (
+                        StreamlinesProfileId,
+                    )
+
+                    self._streamlines_profile_preference.mark_loaded(
+                        StreamlinesProfileId(metadata.profile_id)
+                    )
             return self._result(True, result.message)
         if not result.success:
             self._visualization_mode_state.fail(
@@ -307,7 +309,7 @@ class VisualizationModeRuntimeMixin:
         """Attach Flow first, retaining Heatmap override until Smoke is proven."""
 
         if self._flow_lifecycle_state == "DETACHED":
-            attached = await self.attach_simulation_cache_in_kit()
+            attached = await self._attach_flow_for_visualization_mode()
             if not attached.success:
                 return self._result(False, attached.message)
         elif self._flow_lifecycle_state != "ATTACHED":
@@ -330,21 +332,13 @@ class VisualizationModeRuntimeMixin:
         transition,
         status_callback: Callable[[str], None] | None,
     ) -> VisualizationModeResult:
-        """Prepare one persisted cache while proven Smoke remains visible."""
+        """Prepare and prove persisted Streamlines from any committed source."""
 
-        if self._visualization_mode_state.committed is not VisualizationMode.SMOKE:
-            return self._result(
-                False,
-                "Streamlines requires committed Smoke; select Smoke first.",
-            )
-        if not self.flow_source_is_prepared_in_kit():
-            return self._result(False, "Committed Smoke has no prepared Flow source.")
-        if not self.smoke_presentation_is_visible_in_kit():
-            return self._result(
-                False,
-                "Committed Smoke has no visible native Flow renderer.",
-            )
-        context = self._capture_visualization_transition_context()
+        previous_mode = self._visualization_mode_state.committed
+        binding, airflow_dataset, context = (
+            self._capture_visualization_transition_target()
+        )
+        attach_calls_before = self.visualization_flow_attach_call_count()
         try:
             if self._cancel_running_flow_temporal_proof_for_streamlines():
                 self._report_visualization_progress(
@@ -356,8 +350,12 @@ class VisualizationModeRuntimeMixin:
                 status_callback,
                 "Streamlines: resolving the preserved cached source sample.",
             )
-            resolution = await self.prepare_streamlines_cached_presentation_in_kit(
-                context,
+            resolution = await self.prepare_streamlines_cached_target_in_kit(
+                binding,
+                airflow_dataset,
+                context.logical_phase_seconds,
+                expected_sample_index=context.source_sample_index,
+                expected_source_vti=context.source_vti,
                 status_callback=status_callback,
                 cancellation_requested=(
                     lambda: not self._visualization_transition_is_current(transition)
@@ -396,31 +394,80 @@ class VisualizationModeRuntimeMixin:
                 )
             if not self.streamlines_cached_presentation_is_visible_in_kit():
                 raise RuntimeError("Prepared Streamlines visibility proof failed.")
-            hidden_smoke = self.set_smoke_presentation_visible_in_kit(False)
-            if not hidden_smoke.success:
-                raise RuntimeError(hidden_smoke.message)
-            smoke_hidden = await self.await_smoke_presentation_visibility_in_kit(False)
-            if not smoke_hidden:
-                raise RuntimeError(
-                    "Native Flow Smoke renderer remained visible after handoff."
-                )
+            await self._quiesce_previous_mode_for_streamlines(previous_mode)
             if not self._visualization_transition_is_current(transition):
                 raise RuntimeError("Visualization request was superseded.")
+            attach_calls = (
+                self.visualization_flow_attach_call_count() - attach_calls_before
+            )
+            if attach_calls:
+                raise RuntimeError("Streamlines activation unexpectedly attached Flow.")
+            target = self._airflow_state.resolve_target(binding)
+            if not self._airflow_state.commit_target(target):
+                raise RuntimeError(
+                    "Streamlines presentation lost shared-airflow commit authority."
+                )
         except Exception as error:
-            await self.cleanup_streamlines_cached_presentation_in_kit()
-            restored = await self.resume_smoke_presentation_in_kit()
             message = f"Streamlines transition rejected: {error}"
-            if not restored.success:
-                message += f" Smoke restore failed: {restored.message}"
+            try:
+                await self.cleanup_streamlines_cached_presentation_in_kit()
+            except Exception as cleanup_error:
+                message += f" Candidate cleanup failed: {cleanup_error}"
+            rollback = await self._restore_previous_after_streamlines_failure(
+                previous_mode
+            )
+            if rollback is not None:
+                message += f" Rollback failed: {rollback}"
             return self._result(False, message)
         return self._result(
             True,
             "Streamlines visualization is active; cache_build=0; KitCAE=0; "
-            "RuntimePreview=0; VTI_import=0; rebuild=0; "
+            "RuntimePreview=0; VTI_import=0; rebuild=0; flow_attach_calls=0; "
             f"initial_sample={advance_proof.initial_sample_identity}; "
             f"advanced_sample={advance_proof.advanced_sample_identity}; "
             f"scheduler_tasks={advance_proof.scheduler_tasks}.",
         )
+
+    async def _quiesce_previous_mode_for_streamlines(self, previous_mode) -> None:
+        """Remove only the previous primary presentation after target proof."""
+
+        if previous_mode is VisualizationMode.SMOKE:
+            hidden_smoke = self.set_smoke_presentation_visible_in_kit(False)
+            if not hidden_smoke.success:
+                raise RuntimeError(hidden_smoke.message)
+            if not await self.await_smoke_presentation_visibility_in_kit(False):
+                raise RuntimeError(
+                    "Native Flow Smoke renderer remained visible after handoff."
+                )
+            return
+        if previous_mode is VisualizationMode.HEATMAP:
+            released = self.release_heatmap_xray_override_in_kit()
+            if not released.success:
+                raise RuntimeError(released.message)
+
+    async def _restore_previous_after_streamlines_failure(
+        self,
+        previous_mode,
+    ) -> str | None:
+        """Prove rollback to the prior committed presentation after target failure."""
+
+        if previous_mode is VisualizationMode.SMOKE:
+            restored = await self.resume_smoke_presentation_in_kit()
+            if not restored.success or not self.smoke_presentation_is_visible_in_kit():
+                return restored.message
+            return None
+        if previous_mode is VisualizationMode.HEATMAP:
+            restored = self.restore_heatmap_xray_override_in_kit()
+            if not restored.success:
+                return restored.message
+            override_owner = self.xray_target_snapshot().override_owner
+            if override_owner != _HEATMAP_XRAY_OVERRIDE_OWNER:
+                return "Heatmap X-Ray override was not restored."
+            return None
+        snapshot = self.primary_visualization_presentation_snapshot_in_kit()
+        if snapshot.primary_presentation_active:
+            return "Normal rollback retained a visible primary presentation."
+        return None
 
     async def _activate_smoke_from_streamlines_mode(
         self,
@@ -432,34 +479,49 @@ class VisualizationModeRuntimeMixin:
 
         reused = self._retained_flow_source_matches(context)
         reconstructed = False
+        reconciled = False
         self._report_visualization_progress(
             status_callback,
             "Smoke: checking the retained Flow temporal source.",
         )
         if not reused:
-            if self._flow_lifecycle_state != "DETACHED":
-                return self._result(
-                    False,
-                    "Retained Flow source is incompatible with the current dataset.",
+            target_binding = self._airflow_state.resolve_binding(context.workload)
+            target = self._airflow_state.resolve_target(target_binding)
+            if self._flow_lifecycle_state == "ATTACHED":
+                repaired = await self.request_attached_workload_transition_in_kit(
+                    context.workload,
+                    status_callback=status_callback,
                 )
-            reconstructed = True
-            self._report_visualization_progress(
-                status_callback,
-                "Smoke: reconstructing Flow because no compatible source remains.",
-            )
-            attached = await self.attach_simulation_cache_in_kit()
-            if not attached.success:
-                return self._result(
-                    False,
-                    "Smoke reconstruction failed: " + attached.message,
+                if not repaired.success:
+                    return await self._restore_streamlines_after_smoke_resume_failure(
+                        "Stale retained Flow source reconciliation failed: "
+                        + repaired.message
+                    )
+                reconciled = True
+            elif self._flow_lifecycle_state != "DETACHED":
+                return await self._restore_streamlines_after_smoke_resume_failure(
+                    "Retained Flow lifecycle is busy and cannot be reconciled."
                 )
-            hidden = self.set_smoke_presentation_visible_in_kit(False)
-            if not hidden.success or self.smoke_presentation_is_visible_in_kit():
-                await self.detach_simulation_cache_in_kit()
-                return self._result(
-                    False,
-                    "Reconstructed Flow Smoke presentation could not be quiesced.",
+            else:
+                reconstructed = True
+                self._report_visualization_progress(
+                    status_callback,
+                    "Smoke: reconstructing Flow because no source remains.",
                 )
+                attached = await self._attach_flow_for_visualization_mode()
+                if not attached.success:
+                    self._airflow_state.commit_target(target)
+                    return await self._restore_streamlines_after_smoke_resume_failure(
+                        "Smoke reconstruction failed: " + attached.message
+                    )
+                hidden = self.set_smoke_presentation_visible_in_kit(False)
+                if not hidden.success or self.smoke_presentation_is_visible_in_kit():
+                    await self.detach_simulation_cache_in_kit()
+                    return self._result(
+                        False,
+                        "Reconstructed Flow Smoke presentation could not be "
+                        "quiesced.",
+                    )
         if not self._visualization_transition_is_current(transition):
             return self._result(False, "Visualization request was superseded.")
         if not self._retained_flow_source_matches(context):
@@ -543,6 +605,7 @@ class VisualizationModeRuntimeMixin:
             True,
             "Smoke visualization is active; "
             f"reused={reused}; reconstructed={reconstructed}; "
+            f"reconciled={reconciled}; "
             "streamlines_scheduler_tasks=0; "
             f"timeline_playing={smoke_proof.timeline_playing}; "
             f"flow_source_0={smoke_proof.source_0}; "
@@ -589,9 +652,15 @@ class VisualizationModeRuntimeMixin:
     ) -> VisualizationTransitionContext:
         """Capture shared workload and phase exactly once for one handoff."""
 
+        _binding, _dataset, context = self._capture_visualization_transition_target()
+        return context
+
+    def _capture_visualization_transition_target(self):
+        """Capture exact target binding, dataset and canonical phase once."""
+
         binding, dataset = self.resolve_current_airflow_dataset()
         resolution = self._airflow_state.resolve_phase(dataset)
-        return VisualizationTransitionContext(
+        context = VisualizationTransitionContext(
             workload=binding.workload_mode,
             dataset_identity=binding.dataset_identity,
             logical_phase_seconds=resolution.phase_seconds,
@@ -600,6 +669,7 @@ class VisualizationModeRuntimeMixin:
             source_time_seconds=resolution.sample.source_time_seconds,
             source_vti=resolution.sample.source_vti,
         )
+        return binding, dataset, context
 
     def _cancel_running_flow_temporal_proof_for_streamlines(self) -> bool:
         """Cancel only a competing Flow observer before cache composition.
@@ -632,15 +702,19 @@ class VisualizationModeRuntimeMixin:
             raise RuntimeError("Prepared Streamlines cache identity proof failed.")
 
     def _retained_flow_source_matches(self, context) -> bool:
-        """Recognise a prepared Flow source without changing its lifecycle."""
+        """Verify the actual live Flow source, never shared logical intent alone."""
 
         if self._flow_lifecycle_state != "ATTACHED":
             return False
-        target = self._airflow_state.committed or self._airflow_state.resolve_current()
-        return (
-            target.workload_mode == context.workload
-            and target.binding.dataset_identity == context.dataset_identity
-        )
+        try:
+            binding = self._airflow_state.resolve_binding(context.workload)
+            target = self._airflow_state.resolve_target(binding)
+        except Exception:
+            return False
+        if binding.dataset_identity != context.dataset_identity:
+            return False
+        matches, _source = self._live_flow_consumer_matches_dataset(target.dataset)
+        return matches
 
     def _visualization_transition_is_current(self, transition) -> bool:
         """Guard irreversible handoff steps against a newer mode generation."""
@@ -649,8 +723,9 @@ class VisualizationModeRuntimeMixin:
         return bool(pending and pending.transition_id == transition.transition_id)
 
     async def _activate_heatmap_preview_mode(self) -> VisualizationModeResult:
-        """Apply all configured X-Ray targets before releasing primary Smoke."""
+        """Prove Heatmap preview, then release any previous primary consumer."""
 
+        previous_mode = self._visualization_mode_state.committed
         applied = self.apply_heatmap_xray_override_in_kit()
         if not applied.success:
             return self._result(False, applied.message)
@@ -659,10 +734,62 @@ class VisualizationModeRuntimeMixin:
             if not detached.success:
                 self.release_heatmap_xray_override_in_kit()
                 return self._result(False, detached.message)
+        if previous_mode is VisualizationMode.STREAMLINES:
+            try:
+                await self.release_streamlines_timeline_control_in_kit()
+                if (
+                    self._active_streamlines_playback_task_count() != 0
+                    or self.streamlines_controls_timeline_in_kit()
+                ):
+                    raise RuntimeError(
+                        "Streamlines temporal ownership did not release cleanly."
+                    )
+                await self.cleanup_streamlines_cached_presentation_in_kit()
+                presentation = self.primary_visualization_presentation_snapshot_in_kit()
+                if (
+                    presentation.streamlines_presentation_visible
+                    or presentation.streamlines_scheduler_tasks
+                ):
+                    raise RuntimeError(
+                        "Streamlines presentation remained active after cleanup."
+                    )
+            except Exception as error:
+                self.release_heatmap_xray_override_in_kit()
+                rollback = await self._restore_streamlines_after_target_failure(
+                    str(error)
+                )
+                return self._result(False, rollback)
         return self._result(
             True,
             "Heatmap X-Ray preview is active; thermal presentation is pending.",
         )
+
+    async def _restore_streamlines_after_target_failure(self, reason: str) -> str:
+        """Restore one visible scheduled Streamlines presentation after handoff."""
+
+        self.set_streamlines_cached_presentation_visible_in_kit(True)
+        try:
+            if self._active_streamlines_playback_task_count() != 1:
+                await self.start_streamlines_cached_playback_in_kit()
+        except Exception as error:
+            return f"{reason} Streamlines rollback failed: {error}"
+        if (
+            self._active_streamlines_playback_task_count() != 1
+            or not self.streamlines_cached_presentation_is_visible_in_kit()
+        ):
+            return f"{reason} Streamlines rollback could not be proven."
+        return reason
+
+    async def _attach_flow_for_visualization_mode(self):
+        """Count only Flow attach attempts owned by primary-mode activation."""
+
+        self._visualization_flow_attach_calls += 1
+        return await self.attach_simulation_cache_in_kit()
+
+    def visualization_flow_attach_call_count(self) -> int:
+        """Expose cumulative mode-owned Flow attach attempts for acceptance."""
+
+        return getattr(self, "_visualization_flow_attach_calls", 0)
 
     def _result(self, success: bool, message: str) -> VisualizationModeResult:
         """Build a result against the current committed state after any rollback."""

@@ -26,6 +26,9 @@ from digital_twin_runtime_suite.app.streamlines.cadence_probe import (
     select_cadence_candidate_or_fallback,
     select_shortest_acceptable_candidate,
 )
+from digital_twin_runtime_suite.app.streamlines.mesh_playback_runtime import (
+    StreamlinesMeshPlaybackRuntimeMixin,
+)
 from digital_twin_runtime_suite.app.streamlines.playback import (
     CachedPlaybackContract,
     resolve_cached_playback_state,
@@ -101,21 +104,25 @@ class StreamlinesPlaybackAdvanceProof:
 
 
 @dataclass(frozen=True)
-class StreamlinesTimelineOwnership:
-    """Timeline state captured when cached playback takes temporal control."""
+class StreamlinesStateReplacementProof:
+    """Prove one tick replaced the active temporal state in the stable prim."""
 
-    was_playing: bool
-    current_time_seconds: float
+    requested_sample_index: int
+    active_sample_index: int | None
+
+    @property
+    def passed(self) -> bool:
+        return self.active_sample_index == self.requested_sample_index
 
 
-class StreamlinesPlaybackRuntimeMixin:
+class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
     """Own persisted-geometry switching; never import VTI or execute Kit-CAE."""
 
     async def select_streamlines_cache_state_in_kit(
         self,
         phase_seconds: float,
     ) -> TemporalSampleResolution:
-        """Switch to the exact real cached state resolved from the current phase."""
+        """Safely select from the cache owned by committed shared airflow state."""
 
         contract = self._streamlines_cache_playback_contract
         if not isinstance(contract, CachedPlaybackContract):
@@ -132,6 +139,25 @@ class StreamlinesPlaybackRuntimeMixin:
             raise RuntimeError(
                 "Validated Streamlines cache does not match shared airflow state."
             )
+        return await self.select_streamlines_cached_contract_state_in_kit(
+            contract,
+            phase_seconds,
+        )
+
+    async def select_streamlines_cached_contract_state_in_kit(
+        self,
+        contract: CachedPlaybackContract,
+        phase_seconds: float,
+    ) -> TemporalSampleResolution:
+        """Select an exact persisted state from one explicitly proven contract.
+
+        The caller owns target identity proof.  This lower-level seam deliberately
+        does not inspect committed workload or visualization state, allowing a
+        pending target cache to be proved before its future owner commits it.
+        """
+
+        if not isinstance(contract, CachedPlaybackContract):
+            raise TypeError("Cached playback selection requires an explicit contract.")
         resolution = resolve_cached_playback_state(
             contract,
             phase_seconds,
@@ -140,26 +166,7 @@ class StreamlinesPlaybackRuntimeMixin:
         if resolution.is_no_op:
             return resolution
 
-        import omni.kit.app
-        import omni.timeline
-        import omni.usd
-
-        from digital_twin_runtime_suite.app.streamlines.cache import (
-            CACHE_PLAYBACK_CURVES_PATH,
-        )
-
-        stage = omni.usd.get_context().get_stage()
-        curves_prim = stage.GetPrimAtPath(CACHE_PLAYBACK_CURVES_PATH) if stage else None
-        if not curves_prim or not curves_prim.IsValid():
-            raise RuntimeError("Validated Streamlines cache geometry is not attached.")
-        timeline = omni.timeline.get_timeline_interface()
-        self._acquire_streamlines_timeline_control_in_kit(timeline)
-        timeline.pause()
-        timeline.set_current_time(resolution.sample.source_time_seconds)
-        app = omni.kit.app.get_app()
-        await app.next_update_async()
-        await app.next_update_async()
-        self._streamlines_cache_active_sample_index = resolution.sample.sample_index
+        await self.select_streamlines_mesh_state_in_kit(resolution.sample)
         return resolution
 
     async def start_streamlines_cached_playback_in_kit(
@@ -175,6 +182,62 @@ class StreamlinesPlaybackRuntimeMixin:
             CachedPlaybackContract,
         ):
             raise RuntimeError("Load a valid Streamlines cache before playback.")
+        await self._start_streamlines_playback_scheduler_in_kit(
+            state_selector=self.select_streamlines_cache_state_in_kit,
+            period_seconds=period_seconds,
+            status_callback=status_callback,
+        )
+
+    async def start_streamlines_cached_contract_playback_in_kit(
+        self,
+        contract: CachedPlaybackContract,
+        *,
+        authorization: Callable[[], bool],
+        period_seconds: float | None = None,
+        status_callback: StatusCallback | None = None,
+    ) -> None:
+        """Schedule one pending target without bypassing caller authorization."""
+
+        if contract is not self._streamlines_cache_playback_contract:
+            raise RuntimeError("Pending playback contract is not the loaded cache.")
+
+        async def select_authorized_state(
+            phase_seconds: float,
+        ) -> TemporalSampleResolution:
+            if authorization():
+                return await self.select_streamlines_cached_contract_state_in_kit(
+                    contract,
+                    phase_seconds,
+                )
+            active_index = self._streamlines_cache_active_sample_index
+            if active_index is None:
+                active_index = contract.samples[0].sample_index
+            active_sample = next(
+                sample
+                for sample in contract.samples
+                if sample.sample_index == active_index
+            )
+            return resolve_cached_playback_state(
+                contract,
+                active_sample.source_time_seconds,
+                active_sample_index=active_index,
+            )
+
+        await self._start_streamlines_playback_scheduler_in_kit(
+            state_selector=select_authorized_state,
+            period_seconds=period_seconds,
+            status_callback=status_callback,
+        )
+
+    async def _start_streamlines_playback_scheduler_in_kit(
+        self,
+        *,
+        state_selector,
+        period_seconds: float | None,
+        status_callback: StatusCallback | None,
+    ) -> None:
+        """Start the sole scheduler after its selection owner is explicit."""
+
         configured_period = (
             self.config.simulation_cache.streamlines_presentation_period_seconds
         )
@@ -186,13 +249,62 @@ class StreamlinesPlaybackRuntimeMixin:
                 "No accepted Streamlines presentation period is configured."
             )
         await self.stop_streamlines_cached_playback_in_kit()
+        await self.release_streamlines_mesh_timeline_control_in_kit()
+        self.acquire_streamlines_timeline_control_in_kit()
         self._streamlines_cached_playback_advanced = False
         self._streamlines_cached_playback_last_sample = None
+        self._streamlines_state_replacement_proofs = []
         started_at = time.monotonic()
+
+        async def select_without_losing_scheduler(phase_seconds: float):
+            try:
+                resolution = await state_selector(phase_seconds)
+                self._streamlines_cached_state_failure = None
+                return resolution
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                contract = self._streamlines_cache_playback_contract
+                active_index = self._streamlines_cache_active_sample_index
+                if (
+                    not isinstance(contract, CachedPlaybackContract)
+                    or active_index is None
+                ):
+                    raise
+                target_index = resolve_cached_playback_state(
+                    contract,
+                    phase_seconds,
+                    active_sample_index=active_index,
+                ).sample.sample_index
+                reason = " ".join(str(error).splitlines()) or type(error).__name__
+                failure = (target_index, reason)
+                if failure != getattr(self, "_streamlines_cached_state_failure", None):
+                    self._streamlines_cached_state_failure = failure
+                    self._report_streamlines_cached_playback(
+                        event="FAIL",
+                        message=(
+                            "Cached state update rejected; previous visible state "
+                            f"remains authoritative: target_sample={target_index}; "
+                            f"active_sample={active_index}; "
+                            f"reason={reason}"
+                        ),
+                        status_callback=status_callback,
+                    )
+                active_sample = next(
+                    sample
+                    for sample in contract.samples
+                    if sample.sample_index == active_index
+                )
+                return resolve_cached_playback_state(
+                    contract,
+                    active_sample.source_time_seconds,
+                    active_sample_index=active_index,
+                )
+
         scheduler = CachedPlaybackScheduler(
             period_seconds=active_period,
             phase_source=self._airflow_state.phase_seconds,
-            state_selector=self.select_streamlines_cache_state_in_kit,
+            state_selector=select_without_losing_scheduler,
             tick_observer=self._record_streamlines_cached_playback_tick,
         )
         self._streamlines_cached_playback_scheduler = scheduler
@@ -209,6 +321,8 @@ class StreamlinesPlaybackRuntimeMixin:
     async def await_streamlines_cached_playback_advancement_in_kit(
         self,
         initial_sample,
+        *,
+        cancellation_requested: Callable[[], bool] | None = None,
     ) -> StreamlinesPlaybackAdvanceProof:
         """Require a later 200 ms tick to select a different real cache sample."""
 
@@ -218,6 +332,10 @@ class StreamlinesPlaybackRuntimeMixin:
         initial_identity = self._streamlines_cached_sample_identity(initial_sample)
         advanced_identity = None
         for _ in range(480):
+            if cancellation_requested and cancellation_requested():
+                raise RuntimeError(
+                    "Streamlines playback advancement proof was superseded."
+                )
             await app.next_update_async()
             scheduler = getattr(self, "_streamlines_cached_playback_scheduler", None)
             tick_count = len(scheduler.ticks) if scheduler is not None else 0
@@ -265,6 +383,23 @@ class StreamlinesPlaybackRuntimeMixin:
         """Keep the scheduler's resolved sample without altering its cadence."""
 
         self._streamlines_cached_playback_last_sample = tick.resolution.sample
+        proofs = getattr(self, "_streamlines_state_replacement_proofs", None)
+        if proofs is None:
+            proofs = []
+            self._streamlines_state_replacement_proofs = proofs
+        proofs.append(
+            StreamlinesStateReplacementProof(
+                requested_sample_index=tick.resolution.sample.sample_index,
+                active_sample_index=self._streamlines_cache_active_sample_index,
+            )
+        )
+
+    def streamlines_state_replacement_proofs(
+        self,
+    ) -> tuple[StreamlinesStateReplacementProof, ...]:
+        """Return per-tick replacement evidence without reading large point arrays."""
+
+        return tuple(getattr(self, "_streamlines_state_replacement_proofs", ()))
 
     @staticmethod
     def _streamlines_cached_sample_identity(sample) -> str:
@@ -286,30 +421,18 @@ class StreamlinesPlaybackRuntimeMixin:
             return None
         return await scheduler.stop()
 
-    def _acquire_streamlines_timeline_control_in_kit(self, timeline) -> None:
-        """Capture timeline state once before Streamlines begins selecting samples."""
-
-        if getattr(self, "_streamlines_timeline_ownership", None) is not None:
-            return
-        self._streamlines_timeline_ownership = StreamlinesTimelineOwnership(
-            was_playing=bool(timeline.is_playing()),
-            current_time_seconds=float(timeline.get_current_time()),
-        )
-
     def streamlines_controls_timeline_in_kit(self) -> bool:
-        """Report whether cached Streamlines still owns global timeline updates."""
+        """Report whether cached Mesh playback owns the global timeline."""
 
         return getattr(self, "_streamlines_timeline_ownership", None) is not None
 
     async def release_streamlines_timeline_control_in_kit(
         self,
-    ) -> StreamlinesTimelineOwnership | None:
-        """Stop all selectors before releasing global timeline ownership."""
+    ) -> None:
+        """Stop the selector before restoring pre-Streamlines timeline state."""
 
-        ownership = getattr(self, "_streamlines_timeline_ownership", None)
         await self.stop_streamlines_cached_playback_in_kit()
-        self._streamlines_timeline_ownership = None
-        return ownership
+        await self.release_streamlines_mesh_timeline_control_in_kit()
 
     def cancel_streamlines_cached_playback(self) -> None:
         """Request immediate task cancellation during synchronous stage teardown."""
@@ -319,7 +442,7 @@ class StreamlinesPlaybackRuntimeMixin:
             scheduler.cancel()
         self._streamlines_cached_playback_scheduler = None
         self._streamlines_cached_playback_started_at = None
-        self._streamlines_timeline_ownership = None
+        self.cancel_streamlines_mesh_timeline_control()
 
     async def run_streamlines_production_cache_sanity_in_kit(
         self,

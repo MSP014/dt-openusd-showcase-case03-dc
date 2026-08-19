@@ -102,6 +102,31 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._reuse_vti_receipts_model = None
         self._reuse_streamlines_receipts_model = None
         self._validation_receipt_status_label = None
+        self._streamlines_preview_button = None
+        self._streamlines_accept_candidate_button = None
+        self._streamlines_preview_status_label = None
+        self._streamlines_preview_task = None
+        self._streamlines_profile_combo = None
+        self._streamlines_profile_task = None
+        self._streamlines_speed_distribution_task = None
+        self._updating_streamlines_profile_combo = False
+        self._streamlines_global_tuning_combos = {}
+        self._streamlines_volume_tuning_combos = {}
+        self._streamlines_global_tuning_frame = None
+        self._streamlines_volume_tuning_frame = None
+        self._streamlines_material_tuning_combos = {}
+        self._streamlines_material_status_label = None
+        self._streamlines_material_preview_task = None
+        self._streamlines_xform_probe_task = None
+        self._streamlines_xform_probe_button = None
+        self._streamlines_xform_probe_ready_emitted = False
+        self._streamlines_real_curve_ab_probe_task = None
+        self._streamlines_real_curve_ab_probe_button = None
+        self._streamlines_real_curve_ab_probe_ready_emitted = False
+        self._streamlines_real_curve_ab_probe_active = False
+        self._streamlines_full_state_ab_probe_task = None
+        self._streamlines_full_state_ab_probe_button = None
+        self._streamlines_full_state_ab_probe_ready_emitted = False
         self._view_task = None
         self._auxiliary_windows_task = None
         self._smoke_tuning_combos = {}
@@ -130,6 +155,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._visualization_readiness_labels = {}
         self._updating_visualization_mode = False
         self._visualization_acceptance = None
+        self._phase43_flow_attach_baseline = 0
         self._face_panel_open_model = None
         self._face_panel_action_label = None
         self._face_panel_open_state = False
@@ -205,6 +231,20 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         if self._controller:
             self._controller.stop_background_airflow_validation()
             self._controller.cancel_visualization_transition()
+            cancel_preview = getattr(
+                self._controller,
+                "cancel_streamlines_profile_preview_measurement",
+                None,
+            )
+            if cancel_preview:
+                cancel_preview()
+            cancel_material = getattr(
+                self._controller,
+                "cancel_streamlines_material_preview_measurement",
+                None,
+            )
+            if cancel_material:
+                cancel_material()
         for task_name in (
             "_load_task",
             "_reload_task",
@@ -217,6 +257,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             "_streamlines_receipt_sweep_task",
             "_validation_receipt_summary_task",
             "_validation_receipt_acceptance_task",
+            "_streamlines_preview_task",
+            "_streamlines_profile_task",
+            "_streamlines_speed_distribution_task",
+            "_streamlines_material_preview_task",
+            "_streamlines_xform_probe_task",
+            "_streamlines_real_curve_ab_probe_task",
+            "_streamlines_full_state_ab_probe_task",
             "_view_task",
             "_auxiliary_windows_task",
         ):
@@ -231,6 +278,22 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._telemetry_task.cancel()
             self._telemetry_task = None
         if self._controller:
+            try:
+                from digital_twin_runtime_suite.app.streamlines import (
+                    real_curve_ab_probe,
+                )
+
+                real_curve_ab_probe.cleanup_real_curve_ab_probe_in_kit()
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
+                carb.log_error(f"DTRS real-curve A/B cleanup failed: {error}")
+            try:
+                from digital_twin_runtime_suite.app.streamlines import (
+                    full_state_ab_probe,
+                )
+
+                full_state_ab_probe.cleanup_full_state_ab_probe_in_kit()
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
+                carb.log_error(f"DTRS full-state A/B cleanup failed: {error}")
             try:
                 receipt = (
                     self._controller.clear_streamlines_static_runtime_from_open_stage()
@@ -335,15 +398,11 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             task = self._airflow_background_validation_task
             if task is None or task.done():
                 self._start_background_airflow_validation()
-        preferences = self._controller.config.validation_receipts
-        if preferences.reuse_verified_streamlines_cache_receipts:
-            task = self._streamlines_receipt_sweep_task
-            if task is None or task.done():
-                self._streamlines_receipt_sweep_task = asyncio.ensure_future(
-                    self._run_streamlines_receipt_sweep()
-                )
-        else:
-            self._schedule_current_streamlines_cache_validation()
+        task = self._streamlines_receipt_sweep_task
+        if task is None or task.done():
+            self._streamlines_receipt_sweep_task = asyncio.ensure_future(
+                self._run_streamlines_receipt_sweep()
+            )
         summary = self._validation_receipt_summary_task
         if summary is None or summary.done():
             self._validation_receipt_summary_task = asyncio.ensure_future(
@@ -1050,6 +1109,10 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     self._build_visualization_controls,
                 )
                 self._build_config_section(
+                    "Streamlines",
+                    self._build_streamlines_profile_controls,
+                )
+                self._build_config_section(
                     "Development validation",
                     self._build_validation_receipt_controls,
                     collapsed=True,
@@ -1071,7 +1134,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             )
 
     def _build_validation_receipt_controls(self) -> None:
-        """Expose independent persisted-evidence preferences in the View tab."""
+        """Build developer-only validation and geometry-preview controls."""
 
         with ui.VStack(spacing=6, content_clipping=True):
             with ui.HStack(height=24, spacing=6, content_clipping=True):
@@ -1094,6 +1157,519 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 height=32,
                 word_wrap=True,
             )
+            ui.Button(
+                "Run RTX Mesh Time-Sample Probe",
+                height=28,
+                clicked_fn=self._run_rtx_mesh_time_sample_probe,
+            )
+
+    @staticmethod
+    def _run_rtx_mesh_time_sample_probe() -> None:
+        """Run the isolated renderer probe from one explicit user action."""
+
+        from digital_twin_runtime_suite.app.renderer_diagnostic import (
+            run_time_sampled_mesh_probe_in_kit,
+        )
+
+        run_time_sampled_mesh_probe_in_kit()
+
+    def _build_streamlines_profile_controls(self) -> None:
+        """Build production profile preference and shared material tuning."""
+
+        from digital_twin_runtime_suite.app.streamlines.profile import (
+            STREAMLINES_PROFILE_LABELS,
+            StreamlinesProfileId,
+        )
+
+        with ui.VStack(spacing=6, content_clipping=True):
+            profiles = tuple(StreamlinesProfileId)
+            snapshot = self._controller.streamlines_profile_preference_snapshot()
+            preferred = snapshot.preferred_profile
+            with ui.HStack(height=24, spacing=6, content_clipping=True):
+                ui.Label("Profile", width=SERVER_VIEW_LABEL_WIDTH)
+                self._streamlines_profile_combo = ui.ComboBox(
+                    profiles.index(preferred),
+                    *(STREAMLINES_PROFILE_LABELS[item] for item in profiles),
+                    width=ui.Fraction(1),
+                )
+            ui.Button(
+                "Confirm Mesh Playback",
+                height=28,
+                clicked_fn=self._confirm_streamlines_mesh_playback,
+            )
+            ui.Button(
+                "Report Mesh Playback Failure",
+                height=28,
+                clicked_fn=self._reject_streamlines_mesh_playback,
+            )
+            self._streamlines_xform_probe_button = ui.Button(
+                "Run Streamlines Xform Probe",
+                height=28,
+                clicked_fn=self._schedule_streamlines_xform_probe,
+            )
+            self._streamlines_real_curve_ab_probe_button = ui.Button(
+                "Run Real Curve A/B Probe",
+                height=28,
+                clicked_fn=self._schedule_real_curve_ab_probe,
+            )
+            self._streamlines_real_curve_ab_probe_button.enabled = False
+            self._streamlines_full_state_ab_probe_button = ui.Button(
+                "Run Full 80-State Streamlines Probe",
+                height=28,
+                clicked_fn=self._schedule_full_state_ab_probe,
+            )
+            self._streamlines_full_state_ab_probe_button.enabled = False
+            ui.Button(
+                "Analyze Fixed Speed Scale",
+                height=28,
+                clicked_fn=self._schedule_streamlines_speed_distribution,
+            )
+            ui.Button(
+                "Accept Proposed Speed Scale",
+                height=28,
+                clicked_fn=self._accept_streamlines_speed_scale,
+            )
+            self._streamlines_global_tuning_frame = None
+            self._streamlines_volume_tuning_frame = None
+            self._streamlines_preview_button = None
+            self._streamlines_accept_candidate_button = None
+            ui.Label("Material Tuning", height=18)
+            self._streamlines_material_tuning_combos = {
+                "opacity": self._build_streamlines_tuning_combo(
+                    "Opacity", 3, (0.40, 0.55, 0.70, 0.85, 1.00)
+                ),
+                "emission": self._build_streamlines_tuning_combo(
+                    "Emission", 2, (0.5, 1.0, 1.5, 2.0, 3.0)
+                ),
+                "lighting": self._build_streamlines_tuning_combo(
+                    "Lighting Influence", 2, (0.0, 0.1, 0.2, 0.35, 0.5)
+                ),
+            }
+            ui.Button(
+                "Apply Material Preview",
+                height=28,
+                clicked_fn=self._apply_streamlines_material_preview,
+            )
+            ui.Button(
+                "Accept Material Candidate",
+                height=28,
+                clicked_fn=self._accept_streamlines_material_candidate,
+            )
+            self._streamlines_material_status_label = ui.Label(
+                "Material preview changes no cache, workload, profile, or scheduler.",
+                height=32,
+                word_wrap=True,
+            )
+        profile_model = self._combo_index_model(self._streamlines_profile_combo)
+        if profile_model:
+            profile_model.add_value_changed_fn(
+                self._on_streamlines_profile_preference_changed
+            )
+
+    def _build_streamlines_tuning_combo(
+        self,
+        label: str,
+        default_index: int,
+        values,
+    ):
+        with ui.HStack(height=24, spacing=6, content_clipping=True):
+            ui.Label(label, width=SERVER_VIEW_LABEL_WIDTH)
+            return ui.ComboBox(
+                default_index,
+                *(str(value) for value in values),
+                width=ui.Fraction(1),
+            )
+
+    def _on_streamlines_profile_preference_changed(self, model) -> None:
+        from digital_twin_runtime_suite.app.streamlines.profile import (
+            StreamlinesProfileId,
+        )
+
+        if self._updating_streamlines_profile_combo:
+            return
+        self._cancel_streamlines_material_preview()
+        profiles = tuple(StreamlinesProfileId)
+        index = self._model_int(model)
+        if not 0 <= index < len(profiles):
+            return
+        profile_id = profiles[index]
+        visualization = self._controller.visualization_snapshot()
+        if visualization.committed.value != "Streamlines":
+            self._controller.set_streamlines_profile_preference(profile_id)
+            return
+        start_acceptance = getattr(
+            self._controller,
+            "phase44b_cache_playback_start_profile",
+            None,
+        )
+        if start_acceptance:
+            start_acceptance(profile_id)
+        task = self._streamlines_profile_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._streamlines_profile_task = asyncio.ensure_future(
+            self._run_streamlines_profile_transition(profile_id)
+        )
+
+    async def _run_streamlines_profile_transition(self, profile_id) -> None:
+        """Contain one production cached-profile transaction at the UI edge."""
+
+        try:
+            result = (
+                await self._controller.request_streamlines_profile_transition_in_kit(
+                    profile_id,
+                    status_callback=self._set_streamlines_status,
+                )
+            )
+            self._set_streamlines_status(result.message)
+            observe_acceptance = getattr(
+                self._controller,
+                "phase44b_cache_playback_observe_profile_result",
+                None,
+            )
+            if observe_acceptance:
+                observe_acceptance(profile_id, result)
+            if result.success:
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._set_streamlines_status(f"Streamlines profile switch failed: {error}")
+        finally:
+            if self._streamlines_profile_task is asyncio.current_task():
+                self._streamlines_profile_task = None
+        committed = (
+            self._controller.streamlines_profile_preference_snapshot().committed_profile
+        )
+        if committed is None or self._streamlines_profile_combo is None:
+            return
+        profiles = tuple(type(committed))
+        self._updating_streamlines_profile_combo = True
+        try:
+            model = self._combo_index_model(self._streamlines_profile_combo)
+            if model is not None:
+                model.set_value(profiles.index(committed))
+        finally:
+            self._updating_streamlines_profile_combo = False
+
+    def _apply_streamlines_material_preview(self) -> None:
+        """Schedule one cancellable material-only preview and performance gate."""
+
+        task = self._streamlines_material_preview_task
+        if task is not None and not task.done():
+            task.cancel()
+            self._controller.cancel_streamlines_material_preview_measurement()
+        self._streamlines_material_preview_task = asyncio.ensure_future(
+            self._run_streamlines_material_preview()
+        )
+
+    async def _run_streamlines_material_preview(self) -> None:
+        """Read current presets once, then await stabilized material evidence."""
+
+        options = {
+            "opacity": (0.40, 0.55, 0.70, 0.85, 1.00),
+            "emission": (0.5, 1.0, 1.5, 2.0, 3.0),
+            "lighting": (0.0, 0.1, 0.2, 0.35, 0.5),
+        }
+        selected = {
+            name: values[
+                self._model_int(
+                    self._combo_index_model(
+                        self._streamlines_material_tuning_combos[name]
+                    )
+                )
+            ]
+            for name, values in options.items()
+        }
+        try:
+            presentation = self._controller.streamlines_presentation_contract(
+                opacity=selected["opacity"],
+                emission_intensity=selected["emission"],
+                lighting_influence=selected["lighting"],
+            )
+            receipt = await self._controller.apply_streamlines_material_preview_in_kit(
+                presentation,
+                status_callback=self._set_streamlines_status,
+            )
+            message = (
+                "Material preview complete: bound=True; cache_build=0; "
+                "cache_rebuild=0; "
+                f"fps_avg={receipt.viewport_fps_average}; "
+                f"signature={receipt.material.presentation_signature[:12]}."
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            message = f"Material preview failed: {error}"
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        finally:
+            if self._streamlines_material_preview_task is asyncio.current_task():
+                self._streamlines_material_preview_task = None
+        if self._streamlines_material_status_label is not None:
+            self._streamlines_material_status_label.text = message
+
+    def _schedule_build_constant_topology_prototype(self) -> None:
+        """Launch only the Volume Coverage / Nominal prototype build."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_cache_buttons_enabled(False)
+        self._airflow_task = asyncio.ensure_future(
+            self._build_constant_topology_prototype()
+        )
+
+    def _schedule_streamlines_speed_distribution(self) -> None:
+        task = self._streamlines_speed_distribution_task
+        if task is not None and not task.done():
+            return
+        self._streamlines_speed_distribution_task = asyncio.ensure_future(
+            self._collect_streamlines_speed_distribution()
+        )
+
+    async def _collect_streamlines_speed_distribution(self) -> None:
+        try:
+            proposal = await self._controller.collect_streamlines_speed_scale_proposal(
+                status_callback=self._set_streamlines_status,
+            )
+            message = (
+                "Fixed speed scale proposed: 0.."
+                f"{proposal.scale.maximum:.6g} {proposal.scale.units}."
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            message = f"Speed distribution failed: {error}"
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        finally:
+            self._streamlines_speed_distribution_task = None
+        if self._streamlines_material_status_label is not None:
+            self._streamlines_material_status_label.text = message
+
+    def _accept_streamlines_speed_scale(self) -> None:
+        try:
+            scale = self._controller.accept_streamlines_speed_scale_proposal()
+            message = f"Fixed speed scale accepted: 0..{scale.maximum:.6g}."
+        except Exception as error:
+            message = f"Speed scale acceptance failed: {error}"
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        if self._streamlines_material_status_label is not None:
+            self._streamlines_material_status_label.text = message
+
+    async def _build_constant_topology_prototype(self) -> None:
+        """Contain one prototype build without touching the other seven caches."""
+
+        try:
+            build_prototype = getattr(
+                self._controller,
+                "build_validate_constant_topology_prototype_in_kit",
+            )
+            result = await build_prototype(
+                status_callback=self._set_streamlines_status,
+            )
+            if not result.success:
+                raise RuntimeError(result.message)
+            message = result.message
+            self._set_streamlines_status(message)
+            if self._streamlines_material_status_label is not None:
+                self._streamlines_material_status_label.text = message
+            self._update_visualization_controls()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            message = f"Constant-topology prototype build failed: {error}"
+            self._set_streamlines_status(message)
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
+
+    def _accept_streamlines_material_candidate(self) -> None:
+        """Accept the last applied immutable session presentation snapshot."""
+
+        try:
+            candidate = self._controller.accept_streamlines_material_candidate()
+            message = (
+                "Material candidate accepted for this session: "
+                f"signature={candidate.signature[:12]}."
+            )
+        except Exception as error:
+            message = f"Material candidate acceptance failed: {error}"
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        if self._streamlines_material_status_label is not None:
+            self._streamlines_material_status_label.text = message
+
+    def _schedule_streamlines_phase44a_preview(
+        self,
+    ) -> None:
+        """Read current production workload and launch one disposable preview."""
+
+        task = getattr(self, "_streamlines_preview_task", None)
+        if task is not None and not task.done():
+            self._cancel_streamlines_profile_preview()
+
+        workload_model = self._combo_index_model(self._workload_combo)
+        profile_id, tuning = self._selected_streamlines_profile_tuning()
+        workload_index = self._model_int(workload_model)
+        if not 0 <= workload_index < len(self._workload_modes):
+            raise ValueError("Telemetry workload selection is out of range.")
+        workload = self._workload_modes[workload_index]
+        if self._streamlines_preview_button is not None:
+            self._streamlines_preview_button.enabled = False
+        accept_button = getattr(self, "_streamlines_accept_candidate_button", None)
+        if accept_button is not None:
+            accept_button.enabled = False
+        self._streamlines_preview_task = asyncio.ensure_future(
+            self._run_streamlines_phase44a_preview(
+                workload,
+                profile_id,
+                tuning,
+            )
+        )
+
+    def _selected_streamlines_profile_tuning(self):
+        """Translate visible developer controls without geometry calculations."""
+
+        from digital_twin_runtime_suite.app.streamlines.profile import (
+            StreamlinesProfileId,
+        )
+        from digital_twin_runtime_suite.app.streamlines.tuning import (
+            global_tuning_from_indices,
+            volume_tuning_from_indices,
+        )
+
+        profiles = tuple(StreamlinesProfileId)
+        profile_index = self._model_int(
+            self._combo_index_model(self._streamlines_profile_combo)
+        )
+        profile_id = profiles[profile_index]
+        if profile_id is StreamlinesProfileId.GLOBAL_FLOW_PATH:
+            models = self._streamlines_global_tuning_combos
+            selection = global_tuning_from_indices(
+                self._model_int(self._combo_index_model(models["seed_count"])),
+                self._model_int(self._combo_index_model(models["max_steps"])),
+                self._model_int(self._combo_index_model(models["step_scale"])),
+            )
+        else:
+            models = self._streamlines_volume_tuning_combos
+            selection = volume_tuning_from_indices(
+                self._model_int(self._combo_index_model(models["section_count"])),
+                self._model_int(self._combo_index_model(models["seeds_per_section"])),
+                self._model_int(self._combo_index_model(models["max_steps"])),
+                self._model_int(self._combo_index_model(models["step_scale"])),
+            )
+        return profile_id, selection
+
+    async def _run_streamlines_phase44a_preview(
+        self,
+        workload: str,
+        profile_id,
+        tuning,
+    ) -> None:
+        """Keep preview execution and UI recovery inside one task boundary."""
+
+        self._set_streamlines_preview_status(
+            f"Preparing {profile_id.value} / {workload} preview: "
+            f"max_steps={tuning.max_steps}; "
+            f"step_scale={tuning.step_scale_label}."
+        )
+        from digital_twin_runtime_suite.app.streamlines.tuning import (
+            StreamlinesPreviewSelectionMismatchError,
+            StreamlinesPreviewWorkloadMismatchError,
+        )
+
+        completed = False
+        try:
+            results = await self._controller.run_streamlines_profile_preview(
+                status_callback=self._set_streamlines_preview_status,
+                profile_id=profile_id,
+                workload=workload,
+                tuning_selection=tuning,
+            )
+            result = results[0]
+            self._set_streamlines_preview_status(
+                f"{workload} preview ready: "
+                f"curves={result.curve_count}; points={result.point_count}."
+            )
+            completed = True
+        except asyncio.CancelledError:
+            raise
+        except (
+            StreamlinesPreviewSelectionMismatchError,
+            StreamlinesPreviewWorkloadMismatchError,
+        ) as error:
+            message = str(error)
+            self._set_streamlines_preview_status(message)
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        except Exception as error:
+            message = f"{workload} Streamlines preview failed: {error}"
+            self._set_streamlines_preview_status(message)
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        finally:
+            current_task = asyncio.current_task()
+            owner_task = getattr(self, "_streamlines_preview_task", None)
+            if owner_task is None or owner_task is current_task:
+                self._streamlines_preview_task = None
+                if self._streamlines_preview_button is not None:
+                    self._streamlines_preview_button.enabled = True
+                accept_button = getattr(
+                    self,
+                    "_streamlines_accept_candidate_button",
+                    None,
+                )
+                if accept_button is not None:
+                    accept_button.enabled = completed
+
+    def _cancel_streamlines_profile_preview(self) -> None:
+        """Cancel the one authoritative preview and its delayed measurement."""
+
+        task = getattr(self, "_streamlines_preview_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        self._streamlines_preview_task = None
+        controller = getattr(self, "_controller", None)
+        if controller:
+            cancel_preview = getattr(
+                controller,
+                "cancel_streamlines_profile_preview_measurement",
+                None,
+            )
+            if cancel_preview:
+                cancel_preview()
+        preview_button = getattr(self, "_streamlines_preview_button", None)
+        if preview_button is not None:
+            preview_button.enabled = True
+        accept_button = getattr(self, "_streamlines_accept_candidate_button", None)
+        if accept_button is not None:
+            accept_button.enabled = False
+
+    def _cancel_streamlines_material_preview(self) -> None:
+        """Cancel delayed material evidence after profile/workload supersession."""
+
+        task = getattr(self, "_streamlines_material_preview_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        self._streamlines_material_preview_task = None
+        controller = getattr(self, "_controller", None)
+        if controller:
+            controller.cancel_streamlines_material_preview_measurement()
+
+    def _accept_current_streamlines_candidate(self) -> None:
+        accepted = self._controller.accept_current_streamlines_profile_candidate()
+        message = (
+            "Current profile candidate accepted for this session."
+            if accepted
+            else "Run the expected profile preview before accepting it."
+        )
+        self._set_streamlines_preview_status(message)
+
+    def _set_streamlines_preview_status(self, message: str) -> None:
+        """Publish bounded preview progress without changing primary mode."""
+
+        label = self._streamlines_preview_status_label
+        if label is None:
+            return
+        label.text = _compact_text(message)
+        label.tooltip = message
 
     def _on_validation_receipt_reuse_changed(self, _model) -> None:
         """Persist preferences immediately; validation remains background-owned."""
@@ -2141,6 +2717,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         return int(model.get_value_as_int())
 
     def _on_workload_mode_changed(self, model) -> None:
+        self._cancel_streamlines_profile_preview()
+        self._cancel_streamlines_material_preview()
         if not self._telemetry_provider:
             return
         index = self._model_int(model)
@@ -2150,7 +2728,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             self._log_workload_cache_mapping(workload_mode)
             self._schedule_current_streamlines_cache_validation()
             self._refresh_airflow_cache_selector_label()
-            self._schedule_attached_workload_transition(workload_mode)
+            self._schedule_workload_transition(workload_mode)
             self._next_telemetry_ui_update = 0.0
 
     def _airflow_cache_selector_text(self) -> str:
@@ -2320,6 +2898,9 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                     label.text = _compact_text(text)
                     label.tooltip = text
             self._announce_visualization_acceptance_when_ready(readiness)
+            self._announce_streamlines_xform_probe_when_ready()
+            self._sync_real_curve_ab_probe_action()
+            self._sync_full_state_ab_probe_action()
         else:
             for label in self._visualization_readiness_labels.values():
                 label.text = _compact_text(message)
@@ -2355,51 +2936,197 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 checkbox.enabled = not override_active
 
     def _announce_visualization_acceptance_when_ready(self, readiness) -> None:
-        """Offer the real selector only when the first manual action is valid."""
+        """Offer only the prebaked Mesh prototype playback action."""
 
         if getattr(self, "_validation_receipt_acceptance_owns_actions", False):
             return
-        if self._visualization_acceptance is not None:
-            return
-        snapshot = self._controller.visualization_snapshot()
-        smoke = next(
-            entry for entry in readiness.entries if entry.mode.value == "Smoke"
+        announce = getattr(
+            self._controller,
+            "announce_streamlines_phase44b_mesh_playback_when_ready",
+            None,
         )
-        streamlines = next(
-            entry for entry in readiness.entries if entry.mode.value == "Streamlines"
+        if announce:
+            announce()
+
+    def _confirm_streamlines_mesh_playback(self) -> None:
+        """Forward explicit Mesh viewport approval to the guided owner."""
+
+        confirm = getattr(
+            self._controller,
+            "confirm_streamlines_mesh_playback",
+            None,
         )
-        if (
-            snapshot.committed.value != "Normal"
-            or snapshot.pending
-            or smoke.state != "READY"
-            or streamlines.state != "VALID"
-        ):
+        if not confirm or not confirm():
+            self._set_streamlines_status(
+                "Complete the Mesh playback technical loop before confirming."
+            )
+
+    def _announce_streamlines_xform_probe_when_ready(self) -> None:
+        """Offer the one-shot probe only after its existing Mesh is visible."""
+
+        if self._streamlines_xform_probe_ready_emitted:
             return
-        from digital_twin_runtime_suite.app.manual_acceptance import (
-            GuidedAcceptanceSession,
-            format_manual_acceptance_event,
+        if not self._controller.streamlines_cached_presentation_is_visible_in_kit():
+            return
+        carb.log_warn(
+            "DTRS STREAMLINES | XFORM_PROBE | READY\n"
+            'NEXT_ACTION | Press "Run Streamlines Xform Probe".'
+        )
+        self._streamlines_xform_probe_ready_emitted = True
+
+    def _schedule_streamlines_xform_probe(self) -> None:
+        """Schedule at most one temporary Session Layer Xform probe."""
+
+        full_task = self._streamlines_full_state_ab_probe_task
+        if full_task and not full_task.done():
+            return
+        task = self._streamlines_xform_probe_task
+        if task and not task.done():
+            return
+        from digital_twin_runtime_suite.app.streamlines.xform_probe import (
+            run_streamlines_xform_probe_in_kit,
         )
 
-        self._visualization_acceptance = GuidedAcceptanceSession(
-            ("Smoke", "Streamlines", "Smoke", "Streamlines", "Smoke", "Normal")
+        self._streamlines_xform_probe_task = asyncio.ensure_future(
+            run_streamlines_xform_probe_in_kit(self._controller)
         )
-        self._visualization_acceptance.begin()
-        carb.log_warn(
-            _with_dtrs_local_timestamp(
-                format_manual_acceptance_event(
-                    area="VISUALIZATION | PHASE_4_2",
-                    event="READY",
-                    status=(
-                        "Current workload Smoke readiness and Streamlines cache "
-                        "are valid; committed=Normal."
-                    ),
-                    next_action='Select "Smoke" in "Visualization".',
-                )
+
+    def _sync_real_curve_ab_probe_action(self) -> None:
+        """Enable the static switch while Streamlines is visible."""
+
+        from digital_twin_runtime_suite.app.streamlines.real_curve_ab_probe import (
+            real_curve_ab_probe_ready_in_kit,
+        )
+
+        available = real_curve_ab_probe_ready_in_kit()
+        full_task = self._streamlines_full_state_ab_probe_task
+        full_running = bool(full_task and not full_task.done())
+        if self._streamlines_real_curve_ab_probe_button:
+            self._streamlines_real_curve_ab_probe_button.enabled = (
+                available and not full_running
             )
+        if not available or self._streamlines_real_curve_ab_probe_ready_emitted:
+            return
+        carb.log_warn(
+            "DTRS STREAMLINES | REAL_CURVE_STATIC_SWITCH | READY\n"
+            'NEXT_ACTION | Press "Run Real Curve A/B Probe" to start; '
+            "press it again to stop."
         )
+        self._streamlines_real_curve_ab_probe_ready_emitted = True
+
+    def _schedule_real_curve_ab_probe(self) -> None:
+        """Start or stop the sole repeating real-curve comparison."""
+
+        task = self._streamlines_real_curve_ab_probe_task
+        full_task = self._streamlines_full_state_ab_probe_task
+        if full_task and not full_task.done():
+            return
+        if task and not task.done():
+            from digital_twin_runtime_suite.app.streamlines.real_curve_ab_probe import (
+                request_stop_real_curve_ab_probe,
+            )
+
+            if request_stop_real_curve_ab_probe():
+                self._streamlines_real_curve_ab_probe_button.enabled = False
+            return
+        self._streamlines_real_curve_ab_probe_task = asyncio.ensure_future(
+            self._run_real_curve_ab_probe()
+        )
+
+    async def _run_real_curve_ab_probe(self) -> None:
+        from digital_twin_runtime_suite.app.streamlines.real_curve_ab_probe import (
+            run_real_curve_ab_probe_in_kit,
+        )
+
+        result = await run_real_curve_ab_probe_in_kit(self._controller)
+        self._streamlines_real_curve_ab_probe_active = result == "ACTIVE"
+        self._sync_real_curve_ab_probe_action()
+
+    def _sync_full_state_ab_probe_action(self) -> None:
+        """Enable the full-density switch while Streamlines is visible."""
+
+        from digital_twin_runtime_suite.app.streamlines.full_state_ab_probe import (
+            full_state_ab_probe_ready_in_kit,
+        )
+
+        task = self._streamlines_full_state_ab_probe_task
+        running = bool(task and not task.done())
+        available = full_state_ab_probe_ready_in_kit()
+        if self._streamlines_full_state_ab_probe_button:
+            self._streamlines_full_state_ab_probe_button.enabled = (
+                available and not running
+            )
+        if not available or self._streamlines_full_state_ab_probe_ready_emitted:
+            return
+        carb.log_warn(
+            "DTRS STREAMLINES | FULL_80_STATE_PROBE | READY\n"
+            'NEXT_ACTION | Press "Run Full 80-State Streamlines Probe".'
+        )
+        self._streamlines_full_state_ab_probe_ready_emitted = True
+
+    def _schedule_full_state_ab_probe(self) -> None:
+        """Schedule the sole bounded full-density 80-state comparison."""
+
+        task = self._streamlines_full_state_ab_probe_task
+        if task and not task.done():
+            return
+        self._streamlines_full_state_ab_probe_button.enabled = False
+        self._streamlines_full_state_ab_probe_task = asyncio.ensure_future(
+            self._run_full_state_ab_probe()
+        )
+
+    async def _run_full_state_ab_probe(self) -> None:
+        reset_mesh_acceptance = getattr(
+            self._controller,
+            "reset_streamlines_mesh_playback_acceptance_state",
+            None,
+        )
+        if reset_mesh_acceptance:
+            reset_mesh_acceptance()
+        xform_task = self._streamlines_xform_probe_task
+        if xform_task and not xform_task.done():
+            xform_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await xform_task
+        self._streamlines_xform_probe_task = None
+        if self._streamlines_xform_probe_button:
+            self._streamlines_xform_probe_button.enabled = False
+        if self._streamlines_real_curve_ab_probe_button:
+            self._streamlines_real_curve_ab_probe_button.enabled = False
+        real_curve_task = self._streamlines_real_curve_ab_probe_task
+        if real_curve_task and not real_curve_task.done():
+            from digital_twin_runtime_suite.app.streamlines.real_curve_ab_probe import (
+                request_stop_real_curve_ab_probe,
+            )
+
+            request_stop_real_curve_ab_probe()
+            await real_curve_task
+        from digital_twin_runtime_suite.app.streamlines.real_curve_ab_probe import (
+            cleanup_real_curve_ab_probe_in_kit,
+        )
+
+        cleanup_real_curve_ab_probe_in_kit()
+        self._streamlines_real_curve_ab_probe_active = False
+        from digital_twin_runtime_suite.app.streamlines.full_state_ab_probe import (
+            run_full_state_ab_probe_in_kit,
+        )
+
+        await run_full_state_ab_probe_in_kit(self._controller)
+        self._sync_full_state_ab_probe_action()
+
+    def _reject_streamlines_mesh_playback(self) -> None:
+        """Forward a manual Mesh visual/performance defect as terminal."""
+
+        reject = getattr(
+            self._controller,
+            "reject_streamlines_mesh_playback",
+            None,
+        )
+        if reject and reject():
+            self._set_streamlines_status("Mesh playback visual check failed.")
 
     def _report_visualization_acceptance_start(self, mode) -> None:
-        """Record a Phase 4.2 selection only after its action becomes valid."""
+        """Record the Phase 4.3 baseline or final visualization selection."""
 
         try:
             self._announce_visualization_acceptance_when_ready(
@@ -2438,16 +3165,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         session = self._visualization_acceptance
         if session is None or session.failed or session.terminal_emitted:
             return
-        if session.expected_milestone != mode.value:
+        milestone = mode.value if hasattr(mode, "value") else str(mode)
+        if session.expected_milestone != milestone:
             return
         self._report_visualization_acceptance_event(
             "WAITING",
             "Production visualization transition remains active: "
-            f"{mode.value}; elapsed={elapsed_seconds} s.",
+            f"{milestone}; elapsed={elapsed_seconds} s.",
         )
 
     def _report_visualization_acceptance_result(self, mode, result) -> None:
-        """Advance Phase 4.2 evidence only after real mode postconditions."""
+        """Advance Phase 4.3 visualization milestones after backend proof."""
 
         session = self._visualization_acceptance
         if session is None or session.failed or session.terminal_emitted:
@@ -2480,8 +3208,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
                 carb.log_warn(
                     _with_dtrs_local_timestamp(
                         format_manual_acceptance_test_complete(
-                            "Phase 4.2 transactional Smoke/Streamlines transitions "
-                            "passed."
+                            "Phase 4.3 workload-aware Streamlines runtime passed."
                         )
                     )
                 )
@@ -2500,34 +3227,35 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
         if mode.value == "Streamlines":
             proof = self._controller.streamlines_cached_playback_advance_proof_in_kit()
+            composition = self._controller.streamlines_presentation_reference_snapshot()
+            attach_calls = (
+                self._controller.visualization_flow_attach_call_count()
+                - self._phase43_flow_attach_baseline
+            )
+            airflow = self._controller._airflow_state.snapshot
+            committed = airflow.committed
             return (
+                f"committed_workload={committed.workload_mode}; "
+                f"dataset={committed.binding.dataset_identity}; "
                 f"smoke_renderer_visible={presentation.smoke_presentation_visible}; "
                 "streamlines_visible="
                 f"{presentation.streamlines_presentation_visible}; "
                 f"scheduler_tasks={presentation.streamlines_scheduler_tasks}; "
                 f"initial_sample={proof.initial_sample_identity}; "
                 f"advanced_sample={proof.advanced_sample_identity}; "
-                f"sample_advanced={proof.sample_advanced}"
+                f"sample_advanced={proof.sample_advanced}; "
+                f"Flow={self._controller._flow_lifecycle_state}; "
+                "streamlines_reference_swap="
+                f"{'PASS' if composition.reference_swap_passed else 'FAIL'}; "
+                "session_sublayers_unchanged="
+                f"{composition.session_sublayers_unchanged}; "
+                "root_sublayers_unchanged="
+                f"{composition.root_sublayers_unchanged}; "
+                "server_scene_composition_mutations="
+                f"{composition.server_scene_composition_mutations}; "
+                f"flow_attach_calls={attach_calls}; cache_build=0; KitCAE=0; "
+                "RuntimePreview=0; VTI_import=0; rebuild=0"
             )
-        flow_is_attached = self._controller._flow_lifecycle_state == "ATTACHED"
-        if mode.value == "Smoke" and flow_is_attached:
-            proof = self._controller.smoke_resume_advance_proof_in_kit()
-            if proof is not None:
-                return (
-                    "streamlines_scheduler_tasks="
-                    f"{presentation.streamlines_scheduler_tasks}; "
-                    "timeline_playing="
-                    f"{self._controller.flow_timeline_is_playing_in_kit()}; "
-                    f"flow_source_0={proof.source_0}; "
-                    f"flow_source_1={proof.source_1}; "
-                    f"flow_source_2={proof.source_2}; "
-                    "sustained_flow_playback="
-                    f"{proof.sustained_flow_playback}; "
-                    "smoke_renderer_visible="
-                    f"{presentation.smoke_presentation_visible}; "
-                    "streamlines_visible="
-                    f"{presentation.streamlines_presentation_visible}"
-                )
         return (
             "smoke_renderer_visible="
             f"{presentation.smoke_presentation_visible}; "
@@ -2537,79 +3265,56 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         )
 
     def _visualization_acceptance_failure_reason(self, mode, result) -> str | None:
-        """Verify only the Phase 4.2 production postconditions for one selection."""
+        """Verify peer-mode activation and exclusive primary presentation truth."""
 
         if not result.success:
             return result.message
-        proof = self._controller.temporal_proof_progress()
-        if proof.state.value == "FAILED":
-            return (
-                "Flow temporal proof failed unexpectedly: "
-                f"{proof.failure_reason or 'inspect Flow temporal diagnostics'}."
-            )
         snapshot = self._controller.visualization_snapshot()
         if snapshot.committed is not mode or snapshot.pending is not None:
             return "Visualization transaction did not commit the requested mode."
         presentation = (
             self._controller.primary_visualization_presentation_snapshot_in_kit()
         )
-        xray = self._controller.xray_target_snapshot()
-        if (
-            mode.value == "Smoke"
-            and self._controller._flow_lifecycle_state != "ATTACHED"
-        ):
-            return "Smoke committed without an attached Flow presentation."
-        if mode.value == "Heatmap":
-            configured = frozenset(
-                group.group_id
-                for group in (
-                    self._controller.config.chassis_presentation.xray_target_groups
-                )
-            )
-            if (
-                self._controller._flow_lifecycle_state != "DETACHED"
-                or xray.effective_target_ids != configured
-                or xray.override_owner != "heatmap_preview"
-            ):
-                return "Heatmap preview did not retain the expected X-Ray override."
         if mode.value == "Streamlines":
             streamlines_proof = (
                 self._controller.streamlines_cached_playback_advance_proof_in_kit()
             )
+            composition = self._controller.streamlines_presentation_reference_snapshot()
             if (
-                self._controller._flow_lifecycle_state != "ATTACHED"
-                or presentation.streamlines_scheduler_tasks != 1
+                presentation.streamlines_scheduler_tasks != 1
                 or not presentation.streamlines_presentation_visible
                 or presentation.smoke_presentation_visible
                 or not self._controller.streamlines_cached_playback_advanced_in_kit()
                 or streamlines_proof is None
                 or not streamlines_proof.sample_advanced
+                or composition is None
+                or not composition.reference_swap_passed
             ):
                 return "Streamlines committed without its exclusive prepared playback."
-        if mode.value == "Smoke" and "reused=" in result.message:
-            smoke_proof = self._controller.smoke_resume_advance_proof_in_kit()
+            airflow = self._controller._airflow_state.snapshot
+            committed = airflow.committed
+            attach_calls = (
+                self._controller.visualization_flow_attach_call_count()
+                - self._phase43_flow_attach_baseline
+            )
             if (
-                not presentation.smoke_presentation_visible
-                or presentation.streamlines_presentation_visible
-                or presentation.streamlines_scheduler_tasks != 0
-                or self._controller.streamlines_controls_timeline_in_kit()
-                or not self._controller.smoke_resume_source_advanced_in_kit()
-                or not self._controller.flow_timeline_is_playing_in_kit()
-                or smoke_proof is None
-                or not smoke_proof.timeline_playing
-                or not smoke_proof.sustained_flow_playback
+                self._controller._flow_lifecycle_state != "DETACHED"
+                or presentation.flow_source_prepared
+                or attach_calls != 0
+                or committed is None
+                or committed.workload_mode != "Nominal"
+                or committed.binding.dataset_identity != "server/load_normal"
+                or airflow.pending is not None
             ):
-                return (
-                    "Smoke committed without sustained post-Streamlines Flow "
-                    "playback proof."
-                )
+                return "Nominal Streamlines baseline did not satisfy Phase 4.3."
         if mode.value == "Normal" and (
             self._controller._flow_lifecycle_state != "DETACHED"
-            or xray.override_owner is not None
             or presentation.flow_source_prepared
             or presentation.smoke_presentation_visible
             or presentation.streamlines_scheduler_tasks != 0
             or presentation.streamlines_presentation_visible
+            or self._controller.streamlines_controls_timeline_in_kit()
+            or self._controller._airflow_state.pending is not None
         ):
             return (
                 "Normal committed with a primary presentation still active: "
@@ -2628,7 +3333,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         status: str,
         next_action: str | None = None,
     ) -> None:
-        """Use the generic formatter without creating a Phase-4-specific framework."""
+        """Use the generic formatter without creating a gate-specific framework."""
 
         from digital_twin_runtime_suite.app.manual_acceptance import (
             format_manual_acceptance_event,
@@ -2637,7 +3342,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         carb.log_warn(
             _with_dtrs_local_timestamp(
                 format_manual_acceptance_event(
-                    area="VISUALIZATION | PHASE_4_2",
+                    area="STREAMLINES | PHASE_4_3",
                     event=event,
                     status=status,
                     next_action=next_action,
@@ -2723,6 +3428,7 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._reload_task = asyncio.ensure_future(self._reload_config_and_stage())
 
     async def _reload_config_and_stage(self) -> None:
+        self._cancel_streamlines_profile_preview()
         try:
             cleanup = self._controller.clear_xray_material_in_kit()
         except RuntimeError as error:
@@ -2920,6 +3626,13 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
     async def _request_visualization_mode(self, mode) -> None:
         """Contain one production mode transition at the OmniUI task boundary."""
 
+        start_acceptance = getattr(
+            self._controller,
+            "phase44b_mesh_playback_start_visualization",
+            None,
+        )
+        if start_acceptance:
+            start_acceptance(mode)
         self._report_visualization_acceptance_start(mode)
         waiting_task = self._start_visualization_acceptance_waiting(mode)
         try:
@@ -2939,6 +3652,17 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._update_visualization_controls()
         self._complete_validation_receipt_consumer_action(mode, result)
         self._report_visualization_acceptance_result(mode, result)
+        observe_acceptance = getattr(
+            self._controller,
+            "phase44b_mesh_playback_observe_visualization_result",
+            None,
+        )
+        if observe_acceptance:
+            await observe_acceptance(
+                mode,
+                result,
+                status_callback=self._set_streamlines_status,
+            )
 
     def _report_visualization_mode_progress(self, message: str) -> None:
         """Mirror bounded runtime milestones into the active generic scenario."""
@@ -2994,8 +3718,8 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
         self._set_streamlines_cache_buttons_enabled(False)
         self._airflow_task = asyncio.ensure_future(self._load_streamlines_cache())
 
-    def _schedule_attached_workload_transition(self, workload_mode: str) -> None:
-        """Forward a semantic workload change without owning Flow arbitration."""
+    def _schedule_workload_transition(self, workload_mode: str) -> None:
+        """Forward one semantic request through the product controller path."""
 
         if not self._controller:
             return
@@ -3004,21 +3728,185 @@ class DigitalTwinRuntimeSuiteExtension(omni.ext.IExt):
             # The controller owns generation-based supersession.  Do not drop a
             # newer workload request merely because an older transition awaits.
             self._airflow_transition_task = asyncio.ensure_future(
-                self._run_attached_workload_transition(workload_mode)
+                self._run_workload_transition(workload_mode)
             )
             return
         self._airflow_transition_task = asyncio.ensure_future(
-            self._run_attached_workload_transition(workload_mode)
+            self._run_workload_transition(workload_mode)
         )
 
-    async def _run_attached_workload_transition(self, workload_mode: str) -> None:
+    async def _run_workload_transition(self, workload_mode: str) -> None:
+        """Contain one workload transition and its guided evidence at the UI edge."""
+
         def report_progress(message: str) -> None:
             self._set_airflow_status(message)
+            self._report_phase43_workload_progress(workload_mode, message)
 
-        await self._controller.request_attached_workload_transition_in_kit(
-            workload_mode,
-            status_callback=report_progress,
+        start_acceptance = getattr(
+            self._controller,
+            "phase44b_cache_playback_start_workload",
+            None,
         )
+        if start_acceptance:
+            start_acceptance(workload_mode)
+        self._report_phase43_workload_start(workload_mode)
+        waiting_task = self._start_visualization_acceptance_waiting(workload_mode)
+        try:
+            result = await self._controller.request_workload_transition_in_kit(
+                workload_mode,
+                status_callback=report_progress,
+            )
+        finally:
+            if waiting_task is not None:
+                waiting_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await waiting_task
+        self._set_airflow_status(result.message)
+        self._refresh_airflow_cache_selector_label()
+        self._update_visualization_controls()
+        self._report_phase43_workload_result(workload_mode, result)
+        observe_acceptance = getattr(
+            self._controller,
+            "phase44b_cache_playback_observe_workload_result",
+            None,
+        )
+        if observe_acceptance:
+            observe_acceptance(workload_mode, result)
+
+    def _report_phase43_workload_start(self, workload_mode: str) -> None:
+        """Emit START immediately after the expected production selection."""
+
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        if session.expected_milestone != workload_mode:
+            session.mark_failed()
+            self._report_visualization_acceptance_event(
+                "FAIL",
+                "Unexpected workload selection: "
+                f"expected {session.expected_milestone}, got {workload_mode}.",
+            )
+            return
+        self._report_visualization_acceptance_event(
+            "START",
+            f"Requested Streamlines workload: {workload_mode}.",
+        )
+
+    def _report_phase43_workload_progress(
+        self,
+        workload_mode: str,
+        message: str,
+    ) -> None:
+        """Forward bounded owner milestones into the active Phase 4.3 session."""
+
+        session = self._visualization_acceptance
+        if (
+            session is None
+            or session.failed
+            or session.terminal_emitted
+            or session.expected_milestone != workload_mode
+        ):
+            return
+        self._report_visualization_acceptance_event("PROGRESS", message)
+
+    def _report_phase43_workload_result(self, workload_mode: str, result) -> None:
+        """Advance workload guidance only after identity and liveness proof."""
+
+        session = self._visualization_acceptance
+        if session is None or session.failed or session.terminal_emitted:
+            return
+        reason = self._phase43_workload_failure_reason(workload_mode, result)
+        if reason is not None:
+            session.mark_failed()
+            self._report_visualization_acceptance_event("FAIL", reason)
+            return
+        if not session.record(workload_mode):
+            session.mark_failed()
+            self._report_visualization_acceptance_event(
+                "FAIL",
+                "Phase 4.3 workload milestone could not be recorded in order.",
+            )
+            return
+        evidence = self._controller.streamlines_workload_transition_evidence()
+        next_milestone = session.expected_milestone
+        status = (
+            f"requested_workload={workload_mode}; "
+            f"previous_committed={evidence.previous_workload}; "
+            f"target_dataset={evidence.target_dataset}; "
+            f"target_cache={evidence.target_cache}; "
+            f"selected_sample={evidence.selected_sample_identity}; "
+            f"initial_sample={evidence.initial_sample_identity}; "
+            f"advanced_sample={evidence.advanced_sample_identity}; "
+            f"committed_workload={evidence.committed_workload}; pending=None; "
+            f"loaded_cache_workload={evidence.committed_workload}; "
+            f"loaded_cache_dataset={evidence.target_dataset}; "
+            f"streamlines_visible={evidence.streamlines_visible}; "
+            f"scheduler_tasks={evidence.scheduler_tasks}; "
+            f"sample_advanced={evidence.sample_advanced}; "
+            "streamlines_reference_swap="
+            f"{'PASS' if evidence.streamlines_reference_swap else 'FAIL'}; "
+            "session_sublayers_unchanged="
+            f"{evidence.session_sublayers_unchanged}; "
+            "root_sublayers_unchanged="
+            f"{evidence.root_sublayers_unchanged}; "
+            "server_scene_composition_mutations="
+            f"{evidence.server_scene_composition_mutations}; cache_build=0; "
+            "recompute=0; KitCAE=0; VTI_import=0; "
+            f"Flow_attach_due_to_transition={evidence.flow_attach_calls}"
+        )
+        self._report_visualization_acceptance_event(
+            "COMPLETE",
+            status,
+            next_action=(
+                'Select "Normal" in "Visualization".'
+                if next_milestone == "Normal"
+                else f'Select "{next_milestone}" in "Workload".'
+            ),
+        )
+
+    def _phase43_workload_failure_reason(
+        self,
+        workload_mode: str,
+        result,
+    ) -> str | None:
+        """Require current shared, cache, and presentation truth to agree."""
+
+        if not result.success:
+            return result.message
+        session = self._visualization_acceptance
+        if session is None or session.expected_milestone != workload_mode:
+            return "Phase 4.3 workload result arrived outside its expected step."
+        evidence = self._controller.streamlines_workload_transition_evidence()
+        airflow = self._controller._airflow_state.snapshot
+        visualization = self._controller.visualization_snapshot()
+        presentation = (
+            self._controller.primary_visualization_presentation_snapshot_in_kit()
+        )
+        contract = self._controller._streamlines_cache_playback_contract
+        if evidence is None or evidence.requested_workload != workload_mode:
+            return "Streamlines workload transition published no target evidence."
+        if (
+            airflow.committed is None
+            or airflow.committed.workload_mode != workload_mode
+            or airflow.pending is not None
+            or visualization.committed.value != "Streamlines"
+            or visualization.pending is not None
+            or getattr(contract, "workload", None) != workload_mode
+            or getattr(contract, "dataset_identity", None) != evidence.target_dataset
+            or not presentation.streamlines_presentation_visible
+            or presentation.streamlines_scheduler_tasks != 1
+            or not evidence.sample_advanced
+            or evidence.flow_attach_calls != 0
+            or not evidence.streamlines_reference_swap
+            or not evidence.session_sublayers_unchanged
+            or not evidence.root_sublayers_unchanged
+            or evidence.server_scene_composition_mutations != 0
+        ):
+            return (
+                "Streamlines workload target did not satisfy shared identity "
+                "and playback liveness proof."
+            )
+        return None
 
     def _build_visualization_controls(self) -> None:
         """Build the one primary-presentation selector and read-only readiness."""

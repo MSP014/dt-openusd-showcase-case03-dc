@@ -36,16 +36,17 @@ def test_cached_playback_switches_persisted_geometry_without_cae_or_vti(
     resolution = asyncio.run(runtime.select_streamlines_cache_state_in_kit(0.21))
 
     assert resolution.sample.sample_index == 1
-    assert timeline.pauses == 1
-    assert timeline.current_time == 0.2
-    assert app.update_count == 2
+    assert timeline.pauses == 0
+    assert timeline.current_time is None
+    assert app.update_count == 0
+    assert runtime.applied_samples == [1]
     assert runtime._streamlines_cache_active_sample_index == 1
-    assert runtime.streamlines_controls_timeline_in_kit() is True
+    assert runtime.streamlines_controls_timeline_in_kit() is False
 
     asyncio.run(runtime.release_streamlines_timeline_control_in_kit())
 
     assert runtime.streamlines_controls_timeline_in_kit() is False
-    assert timeline.pauses == 1
+    assert timeline.pauses == 0
 
 
 def test_cached_playback_same_state_is_no_op_without_kit_updates(
@@ -82,6 +83,66 @@ def test_cached_playback_rejects_a_cache_outside_shared_airflow_identity() -> No
         asyncio.run(runtime.select_streamlines_cache_state_in_kit(0.0))
 
 
+def test_contract_explicit_selection_does_not_require_committed_target_identity(
+    monkeypatch,
+) -> None:
+    timeline = _Timeline()
+    app = _App()
+    _install_playback_modules(monkeypatch, timeline, app)
+    contract = _contract()
+    runtime = _PlaybackRuntime(contract)
+    runtime._airflow_state = _airflow_state(
+        workload_mode="Critical",
+        dataset_identity="server/load_critical",
+    )
+
+    resolution = asyncio.run(
+        runtime.select_streamlines_cached_contract_state_in_kit(contract, 0.21)
+    )
+
+    assert resolution.sample.sample_index == 1
+    assert timeline.current_time is None
+    assert app.update_count == 0
+    assert runtime.applied_samples == [1]
+
+
+def test_pending_contract_scheduler_mutates_only_while_exactly_authorized(
+    monkeypatch,
+) -> None:
+    timeline = _Timeline()
+    app = _App()
+    _install_playback_modules(monkeypatch, timeline, app)
+    contract = _contract()
+    runtime = _PlaybackRuntime(contract, presentation_period_seconds=0.2)
+    runtime._streamlines_cache_active_sample_index = 0
+    authorized = False
+    selected = {}
+
+    async def capture_scheduler(*, state_selector, **_kwargs):
+        selected["selector"] = state_selector
+
+    runtime._start_streamlines_playback_scheduler_in_kit = capture_scheduler
+
+    async def exercise():
+        nonlocal authorized
+        await runtime.start_streamlines_cached_contract_playback_in_kit(
+            contract,
+            authorization=lambda: authorized,
+        )
+        blocked = await selected["selector"](0.21)
+        authorized = True
+        allowed = await selected["selector"](0.21)
+        return blocked, allowed
+
+    blocked, allowed = asyncio.run(exercise())
+
+    assert blocked.is_no_op is True
+    assert allowed.sample.sample_index == 1
+    assert timeline.pauses == 0
+    assert app.update_count == 0
+    assert runtime.applied_samples == [1]
+
+
 def test_production_scheduler_reads_phase_from_shared_airflow_state(
     monkeypatch,
 ) -> None:
@@ -104,6 +165,43 @@ def test_production_scheduler_reads_phase_from_shared_airflow_state(
     asyncio.run(runtime.start_streamlines_cached_playback_in_kit())
 
     assert captured["phase_source"]() == 3.25
+
+
+def test_failed_tick_keeps_previous_state_and_scheduler_selector_alive(
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    class _Scheduler:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        async def start(self) -> None:
+            return None
+
+        async def stop(self):
+            return None
+
+    monkeypatch.setattr(playback_runtime, "CachedPlaybackScheduler", _Scheduler)
+    runtime = _PlaybackRuntime(_contract(), presentation_period_seconds=0.2)
+    runtime._streamlines_cache_active_sample_index = 0
+
+    async def fail_state(_phase_seconds):
+        raise RuntimeError("bad point count")
+
+    asyncio.run(
+        runtime._start_streamlines_playback_scheduler_in_kit(
+            state_selector=fail_state,
+            period_seconds=0.2,
+            status_callback=None,
+        )
+    )
+    first = asyncio.run(captured["state_selector"](0.21))
+    second = asyncio.run(captured["state_selector"](0.41))
+
+    assert first.is_no_op is True
+    assert second.is_no_op is True
+    assert runtime._streamlines_cache_active_sample_index == 0
 
 
 def test_production_cache_sanity_uses_only_the_accepted_200_ms_scheduler(
@@ -330,6 +428,17 @@ class _PlaybackRuntime(StreamlinesPlaybackRuntimeMixin):
             )
         )
         self._airflow_state = _airflow_state()
+        self.applied_samples: list[int] = []
+
+    async def apply_streamlines_cached_state_in_kit(self, sample) -> None:
+        self.applied_samples.append(sample.sample_index)
+        self._streamlines_cache_active_sample_index = sample.sample_index
+
+    async def select_streamlines_mesh_state_in_kit(self, sample) -> None:
+        await self.apply_streamlines_cached_state_in_kit(sample)
+
+    def acquire_streamlines_timeline_control_in_kit(self) -> None:
+        return None
 
     def _streamlines_carb_logger(self):
         return None

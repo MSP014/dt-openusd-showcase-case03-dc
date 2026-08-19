@@ -60,6 +60,7 @@ from digital_twin_runtime_suite.app.streamlines.runtime import (
     StreamlinesRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.visualization_mode import (
+    VisualizationMode,
     VisualizationModeRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.xray import XRayRuntimeMixin, XRayTargetState
@@ -743,6 +744,24 @@ class RuntimeController(
             "failure_stage": failure.failure_stage,
             "action": failure.action,
         }
+
+    async def request_workload_transition_in_kit(
+        self,
+        workload_mode: str,
+        status_callback: StatusCallback | None = None,
+    ):
+        """Route one semantic workload request to the active primary consumer."""
+
+        mode = self.visualization_snapshot().committed
+        if mode is VisualizationMode.STREAMLINES:
+            return await self.request_streamlines_workload_transition_in_kit(
+                workload_mode,
+                status_callback=status_callback,
+            )
+        return await self.request_attached_workload_transition_in_kit(
+            workload_mode,
+            status_callback=status_callback,
+        )
 
     def _workload_binding_runtime(self) -> WorkloadBindingRuntime:
         """Build the binding coordinator from current runtime configuration."""

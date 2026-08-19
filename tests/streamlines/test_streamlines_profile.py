@@ -7,9 +7,12 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
+from digital_twin_runtime_suite.app.streamlines import cache_runtime
 from digital_twin_runtime_suite.app.streamlines.cache import (
     StreamlinesCacheOwnership,
     StreamlinesCacheState,
@@ -29,6 +32,7 @@ from digital_twin_runtime_suite.app.streamlines.cache_runtime import (
 from digital_twin_runtime_suite.app.streamlines.profile import (
     PRODUCTION_STREAMLINES_PROFILE,
     ProductionStreamlinesProfileState,
+    StreamlinesProfileId,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     build_streamlines_operator_request,
@@ -36,6 +40,22 @@ from digital_twin_runtime_suite.app.streamlines.proof import (
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalVelocitySourceDescriptor,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_profile_tests_from_usd_speed_payloads(monkeypatch) -> None:
+    """Profile tests use tiny stand-ins; raw-speed USD has focused coverage."""
+
+    monkeypatch.setattr(
+        cache_runtime,
+        "validate_persisted_speed_cache",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        cache_runtime,
+        "validate_persisted_constant_topology_cache",
+        lambda *_args, **_kwargs: None,
+    )
 
 
 def _source(tmp_path: Path) -> TemporalVelocitySourceDescriptor:
@@ -224,10 +244,18 @@ def test_frozen_profile_reuses_four_independently_valid_caches(
     assert result.success is True
     assert [item.workload for item in result.results] == [
         "Idle",
+        "Idle",
+        "Nominal",
         "Nominal",
         "Surge",
+        "Surge",
+        "Critical",
         "Critical",
     ]
+    assert {item.profile_id for item in result.results} == {
+        "volume_coverage",
+        "global_flow_path",
+    }
     assert all(item.reused for item in result.results)
     assert runtime.build_calls == []
 
@@ -241,7 +269,7 @@ def test_one_invalid_workload_stops_before_rebuilding_later_workloads(
 
     assert result.success is False
     assert result.failed_workload == "Nominal"
-    assert [item.workload for item in result.results] == ["Idle"]
+    assert [item.workload for item in result.results] == ["Idle", "Idle"]
     assert runtime.build_calls == ["Nominal"]
 
 
@@ -273,18 +301,21 @@ class _CacheSetRuntime(StreamlinesCacheRuntimeMixin):
             sample_count=1,
         )
         for target in self.targets:
-            paths = streamlines_cache_paths(
-                repo_root,
-                self._streamlines_cache_ownership(target.binding),
-            )
-            paths.directory.mkdir(parents=True, exist_ok=True)
-            paths.geometry_path.write_bytes(b"geometry")
-            paths.metadata_path.write_bytes(b"metadata")
+            for profile_id in StreamlinesProfileId:
+                paths = streamlines_cache_paths(
+                    repo_root,
+                    self._streamlines_cache_ownership(target.binding, profile_id),
+                )
+                paths.directory.mkdir(parents=True, exist_ok=True)
+                paths.geometry_path.write_bytes(b"geometry")
+                paths.metadata_path.write_bytes(b"metadata")
 
     def resolve_configured_airflow_targets(self):
         return self.targets
 
-    def _inspect_streamlines_cache_for_target(self, binding, _dataset):
+    def _inspect_streamlines_cache_for_target(
+        self, binding, _dataset, *, profile_id=None
+    ):
         valid = binding.workload_mode != self.failed_workload
         return SimpleNamespace(valid=valid, metadata=self.metadata)
 

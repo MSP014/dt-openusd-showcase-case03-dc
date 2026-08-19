@@ -321,6 +321,34 @@ z = 0.0
 reuse_verified_vti_receipts = false
 reuse_verified_streamlines_cache_receipts = false
 
+[streamlines.presentation]
+speed_min = 0.0
+speed_max = 1.0
+speed_units = "source velocity units"
+opacity = 0.85
+emission_intensity = 1.5
+lighting_influence = 0.2
+
+[[streamlines.presentation.palette]]
+position = 0.0
+color = [0.015, 0.055, 0.28]
+
+[[streamlines.presentation.palette]]
+position = 0.25
+color = [0.0, 0.75, 1.0]
+
+[[streamlines.presentation.palette]]
+position = 0.5
+color = [0.05, 0.85, 0.35]
+
+[[streamlines.presentation.palette]]
+position = 0.75
+color = [1.0, 0.85, 0.05]
+
+[[streamlines.presentation.palette]]
+position = 1.0
+color = [1.0, 0.16, 0.02]
+
 [simulation_cache]
 enabled = true
 runtime_mode = "kit_cae"

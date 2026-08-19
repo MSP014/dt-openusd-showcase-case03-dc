@@ -11,8 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from digital_twin_runtime_suite.app.streamlines.constant_topology import (
+    SOURCE_CURVE_VERTEX_COUNTS_ATTRIBUTE,
+    renderer_topology_for_profile,
+)
 from digital_twin_runtime_suite.app.streamlines.lifecycle import (
     STREAMLINES_CACHE_PLAYBACK_ROOT,
+)
+from digital_twin_runtime_suite.app.streamlines.profile import (
+    StreamlinesProfileId,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     StreamlinesOperatorRequest,
@@ -21,42 +28,50 @@ from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalVelocitySourceDescriptor,
 )
 
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 5
 CACHE_DIRECTORY_NAME = "streamlines"
 CACHE_PLAYBACK_ROOT_PATH = STREAMLINES_CACHE_PLAYBACK_ROOT
+CACHE_PLAYBACK_SOURCE_PATH = f"{CACHE_PLAYBACK_ROOT_PATH}/Source"
+CACHE_PLAYBACK_SOURCE_CURVES_PATH = f"{CACHE_PLAYBACK_SOURCE_PATH}/Geometry"
 CACHE_PLAYBACK_CURVES_PATH = f"{CACHE_PLAYBACK_ROOT_PATH}/Geometry"
 CACHE_BUILD_OPERATOR_PATH = "/DTRS_KitCAE/Streamlines/CacheBuilder"
-CACHE_BUILD_SEED_PATH = "/DTRS_KitCAE/StreamlineSeeds/CacheBuildSphere"
+CACHE_BUILD_SEED_PATH = "/DTRS_KitCAE/StreamlineSeeds/CacheBuildProfileGrid"
 
 
 @dataclass(frozen=True)
 class StreamlinesCacheOwnership:
-    """Stable workload and dataset identity for one derived cache artifact."""
+    """Stable workload, dataset, and geometry-profile cache ownership."""
 
     workload: str
     dataset_identity: str
+    profile_id: str = StreamlinesProfileId.GLOBAL_FLOW_PATH.value
 
     def __post_init__(self) -> None:
         """Reject a cache path that cannot identify its authoritative owner."""
 
-        if not self.workload.strip() or not self.dataset_identity.strip():
+        if (
+            not self.workload.strip()
+            or not self.dataset_identity.strip()
+            or not self.profile_id.strip()
+        ):
             raise ValueError(
-                "Streamlines cache ownership requires workload and dataset."
+                "Streamlines cache ownership requires workload, dataset, and profile."
             )
 
     @property
     def identity(self) -> str:
         """Return the human-readable ownership key persisted in metadata."""
 
-        return f"{self.workload}|{self.dataset_identity}"
+        return f"{self.workload}|{self.dataset_identity}|{self.profile_id}"
 
     @property
-    def path_components(self) -> tuple[str, str]:
+    def path_components(self) -> tuple[str, str, str]:
         """Return filesystem-safe components derived only from ownership."""
 
         return (
             _cache_path_component(self.workload),
             _cache_path_component(self.dataset_identity),
+            _cache_path_component(self.profile_id),
         )
 
 
@@ -91,7 +106,9 @@ class StreamlinesCacheSettings:
     width: float
     seed_resolution: int
     profile_name: str
+    profile_id: str
     profile_signature: str
+    seed_layout_signature: str
     persisted_attributes: tuple[str, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -111,7 +128,9 @@ class StreamlinesCacheSettings:
             "width": self.width,
             "seed_resolution": self.seed_resolution,
             "profile_name": self.profile_name,
+            "profile_id": self.profile_id,
             "profile_signature": self.profile_signature,
+            "seed_layout_signature": self.seed_layout_signature,
             "persisted_attributes": list(self.persisted_attributes),
         }
 
@@ -138,7 +157,9 @@ class StreamlinesCacheSettings:
             width=_normalise_float(data["width"]),
             seed_resolution=int(data["seed_resolution"]),
             profile_name=_normalise_token(data["profile_name"]),
+            profile_id=_normalise_token(data["profile_id"]),
             profile_signature=_normalise_token(data["profile_signature"]),
+            seed_layout_signature=_normalise_token(data["seed_layout_signature"]),
             persisted_attributes=_normalise_persisted_attributes(
                 data["persisted_attributes"]
             ),
@@ -160,6 +181,8 @@ class StreamlinesCacheState:
     geometry_signature: str
     generation_ms: float
     bounds: tuple[tuple[float, float, float], tuple[float, float, float]]
+    source_point_count: int = 0
+    source_topology_signature: str = ""
 
     def to_dict(self) -> dict[str, object]:
         """Return JSON-safe state metadata without duplicating curve points."""
@@ -176,6 +199,8 @@ class StreamlinesCacheState:
             "geometry_signature": self.geometry_signature,
             "generation_ms": self.generation_ms,
             "bounds": [list(bound) for bound in self.bounds],
+            "source_point_count": self.source_point_count,
+            "source_topology_signature": self.source_topology_signature,
         }
 
     @classmethod
@@ -197,6 +222,10 @@ class StreamlinesCacheState:
             geometry_signature=str(data["geometry_signature"]),
             generation_ms=float(data["generation_ms"]),
             bounds=bounds,
+            source_point_count=int(data.get("source_point_count", data["point_count"])),
+            source_topology_signature=str(
+                data.get("source_topology_signature", data["topology_signature"])
+            ),
         )
 
 
@@ -218,6 +247,7 @@ class StreamlinesCacheMetadata:
     geometry_file_name: str
     geometry_sha256: str
     states: tuple[StreamlinesCacheState, ...]
+    profile_id: str = StreamlinesProfileId.GLOBAL_FLOW_PATH.value
 
     @property
     def valid(self) -> bool:
@@ -233,6 +263,7 @@ class StreamlinesCacheMetadata:
             "state": self.state,
             "workload": self.workload,
             "dataset_identity": self.dataset_identity,
+            "profile_id": self.profile_id,
             "source_signature": self.source_signature,
             "settings_signature": self.settings_signature,
             "settings": self.settings.to_dict() if self.settings else None,
@@ -259,6 +290,7 @@ class StreamlinesCacheMetadata:
             state=str(data["state"]),
             workload=str(data["workload"]),
             dataset_identity=str(data["dataset_identity"]),
+            profile_id=str(data["profile_id"]),
             source_signature=str(data["source_signature"]),
             settings_signature=str(data["settings_signature"]),
             settings=(
@@ -293,13 +325,14 @@ def streamlines_cache_paths(
 ) -> StreamlinesCachePaths:
     """Return one stable ownership-derived cache path without creating it."""
 
-    workload_component, dataset_component = ownership.path_components
+    workload_component, dataset_component, profile_component = ownership.path_components
     directory = (
         repo_root
         / "cache"
         / CACHE_DIRECTORY_NAME
         / workload_component
         / dataset_component
+        / profile_component
     )
     stem = "streamlines_cache"
     return StreamlinesCachePaths(
@@ -380,7 +413,9 @@ def streamlines_cache_settings(
         width=_normalise_float(request.width),
         seed_resolution=int(request.seed_resolution),
         profile_name=_normalise_token(request.profile_name),
+        profile_id=_normalise_token(request.profile_id),
         profile_signature=_normalise_token(request.profile_signature),
+        seed_layout_signature=_normalise_token(request.seed_layout_signature),
         persisted_attributes=_normalise_persisted_attributes(
             request.persisted_attributes
         ),
@@ -421,6 +456,7 @@ def build_streamlines_cache_metadata(
         state="VALID",
         workload=source.workload,
         dataset_identity=source.dataset_identity,
+        profile_id=request.profile_id,
         source_signature=source_signature_from_temporal_source(source),
         settings_signature=streamlines_settings_signature(request),
         settings=streamlines_cache_settings(request),
@@ -460,6 +496,8 @@ def validate_streamlines_cache(
             "Cache canonical settings provenance is unavailable; "
             "explicit rebuild required.",
         )
+    if metadata.profile_id != metadata.settings.profile_id:
+        return StreamlinesCacheValidation(False, "Cache profile identity differs.")
     if _signature(metadata.settings.to_dict()) != metadata.settings_signature:
         return StreamlinesCacheValidation(
             False,
@@ -476,6 +514,28 @@ def validate_streamlines_cache(
         return StreamlinesCacheValidation(False, "Cache sample timing is stale.")
     if metadata.time_codes_per_second != source.time_codes_per_second:
         return StreamlinesCacheValidation(False, "Cache time-code rate is stale.")
+    topology = renderer_topology_for_profile(metadata.profile_id)
+    expected_topology_signature = topology_signature(topology.curve_vertex_counts)
+    if not metadata.topology_consistent or any(
+        state.curve_count != topology.curve_count
+        or state.point_count != topology.point_count
+        or state.topology_signature != expected_topology_signature
+        or state.source_point_count <= 0
+        or state.source_point_count > topology.point_count
+        or not state.source_topology_signature
+        for state in metadata.states
+    ):
+        return StreamlinesCacheValidation(
+            False,
+            "Cache renderer topology is incompatible.",
+        )
+    if SOURCE_CURVE_VERTEX_COUNTS_ATTRIBUTE.lower() not in (
+        metadata.settings.persisted_attributes
+    ):
+        return StreamlinesCacheValidation(
+            False,
+            "Cache source topology provenance is unavailable.",
+        )
     if geometry_path.name != metadata.geometry_file_name:
         return StreamlinesCacheValidation(False, "Cache geometry path is unexpected.")
     if not geometry_path.is_file():
