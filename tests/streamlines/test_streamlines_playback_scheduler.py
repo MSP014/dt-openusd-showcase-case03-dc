@@ -59,6 +59,23 @@ def test_second_tick_cannot_precede_the_accepted_200ms_period() -> None:
     assert second_tick.started_at_seconds >= first_tick.deadline_seconds + 0.2
 
 
+def test_scheduler_supports_one_phase_aligned_initial_deadline() -> None:
+    clock = _Clock()
+    phases: list[float] = []
+    scheduler = _scheduler(
+        clock,
+        phases,
+        target_ticks=2,
+        period_seconds=0.5,
+        initial_delay_seconds=0.25,
+    )
+
+    asyncio.run(_start_and_stop(scheduler))
+
+    assert phases == [0.25, 0.75]
+    assert tuple(tick.deadline_seconds for tick in scheduler.ticks) == (0.25, 0.75)
+
+
 def test_scheduler_counts_repeated_no_ops_without_queueing() -> None:
     clock = _Clock()
     phases: list[float] = []
@@ -317,6 +334,7 @@ def _scheduler(
     period_seconds: float,
     sample_count: int = 3,
     first_switch_delay_seconds: float = 0.0,
+    initial_delay_seconds: float = 0.0,
 ) -> CachedPlaybackScheduler:
     samples = tuple(
         TemporalSourceSample(
@@ -350,6 +368,7 @@ def _scheduler(
 
     scheduler = CachedPlaybackScheduler(
         period_seconds=period_seconds,
+        initial_delay_seconds=initial_delay_seconds,
         phase_source=lambda: clock.now,
         state_selector=select,
         monotonic=lambda: clock.now,

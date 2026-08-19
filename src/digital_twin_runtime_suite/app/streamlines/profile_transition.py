@@ -34,10 +34,6 @@ class StreamlinesProfileTransitionEvidence:
     normalized_phase_preserved: bool
     sample_advanced: bool
     scheduler_tasks: int
-    reference_swap_passed: bool
-    session_sublayers_unchanged: bool
-    root_sublayers_unchanged: bool
-    server_scene_composition_mutations: int
 
 
 class StreamlinesProfileTransitionMixin:
@@ -144,9 +140,6 @@ class StreamlinesProfileTransitionMixin:
                 raise RuntimeError(
                     "Target profile cache failed playback liveness proof."
                 )
-            composition = self.streamlines_presentation_reference_snapshot()
-            if composition is None or not composition.reference_swap_passed:
-                raise RuntimeError("Target profile cache reference swap was not local.")
             self.apply_streamlines_presentation_in_kit()
             if not self._streamlines_profile_preference.commit(transition):
                 raise RuntimeError("Streamlines profile commit was superseded.")
@@ -183,12 +176,6 @@ class StreamlinesProfileTransitionMixin:
                 ),
                 sample_advanced=proof.sample_advanced,
                 scheduler_tasks=proof.scheduler_tasks,
-                reference_swap_passed=composition.reference_swap_passed,
-                session_sublayers_unchanged=(composition.session_sublayers_unchanged),
-                root_sublayers_unchanged=composition.root_sublayers_unchanged,
-                server_scene_composition_mutations=(
-                    composition.server_scene_composition_mutations
-                ),
             )
         )
         return self._streamlines_profile_transition_result(

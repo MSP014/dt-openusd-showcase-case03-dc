@@ -334,7 +334,6 @@ class StreamlinesOperatorRuntimeMixin:
         UsdGeom,
         UsdGeomRT,
         wp,
-        timeline,
         execute_command,
         preview_path: str | None,
         Sdf,
@@ -376,7 +375,6 @@ class StreamlinesOperatorRuntimeMixin:
                     UsdGeom=UsdGeom,
                     UsdGeomRT=UsdGeomRT,
                     wp=wp,
-                    timeline=timeline,
                 )
             )
             speed_magnitudes = None
@@ -517,7 +515,6 @@ class StreamlinesOperatorRuntimeMixin:
         UsdGeom,
         UsdGeomRT,
         wp,
-        timeline,
     ) -> tuple[
         float,
         StreamlinesOperatorEvidence,
@@ -548,7 +545,6 @@ class StreamlinesOperatorRuntimeMixin:
             UsdGeom=UsdGeom,
             UsdGeomRT=UsdGeomRT,
             wp=wp,
-            timeline=timeline,
             operator_completion_count_before=completion_before,
             operator_completion_count=execution_receipt.completion_count_after,
             fresh_execution=execution_receipt.fresh_execution,

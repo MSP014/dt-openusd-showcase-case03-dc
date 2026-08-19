@@ -70,7 +70,6 @@ class StreamlinesRecomputeRuntimeMixin:
 
         import carb
         import omni.kit.app
-        import omni.timeline
         import omni.usd
         import warp as wp
         from omni.cae.data import usd_utils as cae_usd_utils
@@ -122,10 +121,8 @@ class StreamlinesRecomputeRuntimeMixin:
                 new_scale=[request.seed_radius] * 3,
             )
             await app.next_update_async()
-            timeline = omni.timeline.get_timeline_interface()
             selected_asset = await self._select_temporal_source_in_kit(
                 app,
-                timeline=timeline,
                 field_prim=field_prim,
                 sample=resolution.sample,
                 cae_vtk=cae_vtk,
@@ -147,7 +144,6 @@ class StreamlinesRecomputeRuntimeMixin:
                 UsdGeom=UsdGeom,
                 UsdGeomRT=UsdGeomRT,
                 wp=wp,
-                timeline=timeline,
                 execute_command=execute_command,
                 preview_path=STREAMLINES_RUNTIME_PREVIEW_PATH,
                 Sdf=Sdf,

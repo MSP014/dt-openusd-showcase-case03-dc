@@ -41,7 +41,7 @@ class StaticSourceRuntimeEvidence:
             and self.smoke_injectors == "ABSENT"
             and self.streamlines_operator == "ABSENT"
             and self.temporal_sequence == "ABSENT"
-            and self.timeline_playback == "INACTIVE"
+            and self.timeline_playback == "NOT_OWNED"
         )
 
 
@@ -136,7 +136,7 @@ class StreamlinesOperatorEvidence:
             and self.boundary_emitter == "ABSENT"
             and self.smoke_injectors == "ABSENT"
             and self.temporal_sequence == "ABSENT"
-            and self.timeline_playback == "INACTIVE"
+            and self.timeline_playback == "NOT_OWNED"
         )
 
 
@@ -228,7 +228,6 @@ def inspect_static_source_runtime(
     import_root_path: str,
     field_prim,
     cae_vtk,
-    timeline,
 ) -> StaticSourceRuntimeEvidence:
     """Collect the static-source acceptance state from live DTRS-owned paths.
 
@@ -251,7 +250,7 @@ def inspect_static_source_runtime(
         ),
         streamlines_operator=_prim_state(stage, "/DTRS_KitCAE/Streamlines"),
         temporal_sequence=temporal_sequence,
-        timeline_playback="ACTIVE" if timeline.is_playing() else "INACTIVE",
+        timeline_playback="NOT_OWNED",
     )
 
 
@@ -317,7 +316,6 @@ def inspect_streamlines_operator(
     UsdGeom,
     UsdGeomRT,
     wp,
-    timeline,
     operator_completion_count_before: int,
     operator_completion_count: int,
     fresh_execution: bool,
@@ -444,7 +442,7 @@ def inspect_streamlines_operator(
             "/DTRS_KitCAE/AirflowTracerEmitters",
         ),
         temporal_sequence=_temporal_sequence_state(field_prim, cae_vtk),
-        timeline_playback="ACTIVE" if timeline.is_playing() else "INACTIVE",
+        timeline_playback="NOT_OWNED",
     )
 
 

@@ -33,10 +33,6 @@ class StreamlinesWorkloadTransitionEvidence:
     streamlines_visible: bool
     sample_advanced: bool
     flow_attach_calls: int
-    streamlines_reference_swap: bool
-    session_sublayers_unchanged: bool
-    root_sublayers_unchanged: bool
-    server_scene_composition_mutations: int
     requested_normalized_phase_seconds: float
     selected_normalized_phase_seconds: float
     normalized_phase_preserved: bool
@@ -267,11 +263,6 @@ class StreamlinesWorkloadTransitionMixin:
                     "Target Streamlines presentation could not be shown."
                 )
             self._verify_streamlines_workload_presentation(target_binding, proof)
-            composition = self.streamlines_presentation_reference_snapshot()
-            if composition is None or not composition.reference_swap_passed:
-                raise RuntimeError(
-                    "Target Streamlines cache was not isolated to its reference prim."
-                )
             flow_attach_calls = (
                 self.visualization_flow_attach_call_count() - flow_attach_calls_before
             )
@@ -311,12 +302,6 @@ class StreamlinesWorkloadTransitionMixin:
             streamlines_visible=True,
             sample_advanced=proof.sample_advanced,
             flow_attach_calls=0,
-            streamlines_reference_swap=composition.reference_swap_passed,
-            session_sublayers_unchanged=(composition.session_sublayers_unchanged),
-            root_sublayers_unchanged=composition.root_sublayers_unchanged,
-            server_scene_composition_mutations=(
-                composition.server_scene_composition_mutations
-            ),
             requested_normalized_phase_seconds=(
                 target_resolution.normalized_phase_seconds
             ),
@@ -334,9 +319,6 @@ class StreamlinesWorkloadTransitionMixin:
             f"Streamlines workload committed: {previous.workload_mode} -> "
             f"{requested}; dataset={target_binding.dataset_identity}; "
             f"selected_sample={selected_identity}; scheduler_tasks=1; "
-            "reference_swap=PASS; session_sublayers_unchanged=True; "
-            "root_sublayers_unchanged=True; "
-            "server_scene_composition_mutations=0; "
             "cache_build=0; recompute=0; KitCAE=0; VTI_import=0; "
             "Flow_attach_due_to_transition=0."
         )

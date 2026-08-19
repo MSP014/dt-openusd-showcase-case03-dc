@@ -53,6 +53,10 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._streamlines_scheduler_count = 0
         self._streamlines_prepare_count = 0
         self._streamlines_start_count = 0
+        self._streamlines_snapshot_prepare_count = 0
+        self._streamlines_snapshot_selected_count = 0
+        self._mesh_selector_calls = 0
+        self._timeline_set_current_time_calls = 0
         self._streamlines_visible = False
         self._streamlines_advances = True
         self._streamlines_later_tick = True
@@ -195,6 +199,8 @@ class _Runtime(VisualizationModeRuntimeMixin):
             dataset_identity=binding.dataset_identity,
         )
         self._streamlines_root_count = 1
+        self._streamlines_snapshot_prepare_count += 1
+        self._streamlines_snapshot_selected_count = 1
         self._maximum_streamlines_root_count = max(
             self._maximum_streamlines_root_count,
             self._streamlines_root_count,
@@ -212,17 +218,17 @@ class _Runtime(VisualizationModeRuntimeMixin):
         return self._airflow_state.resolve_phase(self._dataset)
 
     async def cleanup_streamlines_cached_presentation_in_kit(self):
-        await self.release_streamlines_timeline_control_in_kit()
+        await self.stop_streamlines_cached_playback_in_kit()
         self._streamlines_visible = False
         self._streamlines_root_count = 0
+        self._streamlines_snapshot_selected_count = 0
 
     async def start_streamlines_cached_playback_in_kit(self, **_kwargs):
         self._lifecycle_events.append("streamlines_start")
         self._streamlines_start_count += 1
         self._streamlines_scheduler_count = 1
         self._streamlines_scheduler_tick_count = 1
-        self._streamlines_controls_timeline = True
-        self._timeline_playing = False
+        self._streamlines_controls_timeline = False
 
     async def await_streamlines_cached_playback_advancement_in_kit(
         self,
@@ -253,16 +259,6 @@ class _Runtime(VisualizationModeRuntimeMixin):
     async def stop_streamlines_cached_playback_in_kit(self):
         self._lifecycle_events.append("streamlines_stop")
         self._streamlines_scheduler_count = 0
-
-    async def release_streamlines_timeline_control_in_kit(self):
-        if self._streamlines_release_failure:
-            raise RuntimeError("Streamlines timeline release failed.")
-        await self.stop_streamlines_cached_playback_in_kit()
-        self._streamlines_controls_timeline = False
-        self._lifecycle_events.append("streamlines_timeline_released")
-
-    def streamlines_controls_timeline_in_kit(self):
-        return self._streamlines_controls_timeline
 
     def _active_streamlines_playback_task_count(self):
         return self._streamlines_scheduler_count
@@ -741,11 +737,16 @@ def test_direct_normal_to_streamlines_uses_only_persisted_cache_playback():
     assert runtime.visualization_flow_attach_call_count() == 0
     assert runtime._streamlines_prepare_count == 1
     assert runtime._streamlines_scheduler_count == 1
+    assert runtime._streamlines_snapshot_prepare_count == 1
+    assert runtime._streamlines_snapshot_selected_count == 1
     assert runtime._streamlines_advancement_proved is True
     assert runtime._cache_mutations == 0
     assert runtime._kit_cae_executions == 0
     assert runtime._runtime_preview_rebuilds == 0
     assert runtime._vti_imports == 0
+    assert runtime._mesh_selector_calls == 0
+    assert runtime._timeline_set_current_time_calls == 0
+    assert runtime._streamlines_controls_timeline is False
 
 
 def test_broken_smoke_target_does_not_block_streamlines_or_heatmap():
@@ -822,6 +823,27 @@ def test_smoke_streamlines_round_trip_returns_to_normal_cleanly():
     assert runtime._smoke_resume_advanced is True
     assert "reused=True; reconstructed=False" in results[2].message
     assert "reused=True; reconstructed=False" in results[4].message
+
+
+def test_normal_streamlines_normal_reentry_retains_one_snapshot_owner():
+    runtime = _Runtime()
+
+    async def _run_sequence():
+        return [
+            await runtime.request_visualization_mode_in_kit(mode)
+            for mode in ("Streamlines", "Normal", "Streamlines")
+        ]
+
+    results = asyncio.run(_run_sequence())
+
+    assert all(result.success for result in results)
+    assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
+    assert runtime._streamlines_root_count == 1
+    assert runtime._maximum_streamlines_root_count == 1
+    assert runtime._streamlines_scheduler_count == 1
+    assert runtime._streamlines_snapshot_selected_count == 1
+    assert runtime._mesh_selector_calls == 0
+    assert runtime._timeline_set_current_time_calls == 0
 
 
 def test_hidden_prepared_streamlines_root_is_not_a_primary_presentation():
@@ -996,12 +1018,12 @@ def test_one_flow_source_advancement_is_not_sustained_smoke_liveness():
     assert result.success is False
     assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
     assert runtime._streamlines_scheduler_count == 1
-    assert runtime._streamlines_controls_timeline is True
+    assert runtime._streamlines_controls_timeline is False
     assert runtime._streamlines_visible is True
     assert runtime._smoke_visible is False
 
 
-def test_streamlines_releases_timeline_before_sustained_flow_proof():
+def test_streamlines_stops_its_scheduler_before_sustained_flow_proof():
     runtime = _Runtime()
     assert asyncio.run(runtime.request_visualization_mode_in_kit("Smoke")).success
     assert asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines")).success
@@ -1010,7 +1032,7 @@ def test_streamlines_releases_timeline_before_sustained_flow_proof():
     result = asyncio.run(runtime.request_visualization_mode_in_kit("Smoke"))
 
     assert result.success is True
-    assert runtime._lifecycle_events.index("streamlines_timeline_released") < (
+    assert runtime._lifecycle_events.index("streamlines_stop") < (
         runtime._lifecycle_events.index("flow_resume_proof")
     )
     assert runtime._streamlines_scheduler_count == 0
@@ -1252,19 +1274,31 @@ def test_rapid_supersession_cleans_streamlines_candidate_without_orphan():
     assert runtime._streamlines_start_count == 0
 
 
-def test_streamlines_release_failure_preserves_committed_streamlines():
+def test_normal_supersedes_pending_streamlines_without_a_late_commit():
     runtime = _Runtime()
-    assert asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines")).success
-    runtime._streamlines_release_failure = True
 
-    result = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
+    async def _supersede():
+        runtime._prepare_started = asyncio.Event()
+        runtime._prepare_release = asyncio.Event()
+        streamlines = asyncio.create_task(
+            runtime.request_visualization_mode_in_kit("Streamlines")
+        )
+        await runtime._prepare_started.wait()
+        normal = asyncio.create_task(
+            runtime.request_visualization_mode_in_kit("Normal")
+        )
+        runtime._prepare_release.set()
+        return await streamlines, await normal
 
-    assert result.success is False
-    assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
+    streamlines, normal = asyncio.run(_supersede())
+
+    assert streamlines.success is False
+    assert normal.success is True
+    assert runtime.visualization_snapshot().committed is VisualizationMode.NORMAL
     assert runtime.visualization_snapshot().pending is None
-    assert runtime._streamlines_visible is True
-    assert runtime._streamlines_scheduler_count == 1
-    assert runtime.xray_target_snapshot().override_owner is None
+    assert runtime._streamlines_scheduler_count == 0
+    assert runtime._streamlines_root_count == 0
+    assert runtime._streamlines_start_count == 0
 
 
 async def _yield_update_cycles() -> None:

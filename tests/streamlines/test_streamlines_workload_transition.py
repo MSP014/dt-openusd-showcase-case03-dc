@@ -201,16 +201,6 @@ class _Runtime(StreamlinesWorkloadTransitionMixin):
     def visualization_flow_attach_call_count(self):
         return self.flow_attach_calls
 
-    def streamlines_presentation_reference_snapshot(self):
-        return SimpleNamespace(
-            asset_path=self.reference_asset,
-            referenced_prim_path="/DTRS_StreamlinesCachePlayback",
-            reference_swap_passed=self.reference_asset is not None,
-            session_sublayers_unchanged=True,
-            root_sublayers_unchanged=True,
-            server_scene_composition_mutations=0,
-        )
-
     @staticmethod
     def _streamlines_cached_sample_identity(sample) -> str:
         return f"index={sample.sample_index}; source={sample.source_vti.name}"
@@ -240,12 +230,6 @@ def test_target_commits_only_after_identity_visibility_and_advancement_proof():
     assert runtime._streamlines_cache_playback_contract.workload == "Critical"
     assert runtime.visible is True
     assert runtime.scheduler_tasks == 1
-    assert runtime.reference_asset == ("server/load_critical/streamlines_cache.usdc")
-    evidence = runtime.streamlines_workload_transition_evidence()
-    assert evidence.streamlines_reference_swap is True
-    assert evidence.session_sublayers_unchanged is True
-    assert evidence.root_sublayers_unchanged is True
-    assert evidence.server_scene_composition_mutations == 0
     assert runtime.cache_builds == runtime.recomputes == 0
     assert runtime.kit_cae_executions == runtime.vti_imports == 0
     assert runtime.flow_attach_calls == 0

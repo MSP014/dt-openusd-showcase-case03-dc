@@ -6,7 +6,7 @@ import asyncio
 import math
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
 from digital_twin_runtime_suite.app.diagnostics import with_dtrs_yerevan_timestamp
 from digital_twin_runtime_suite.app.flow.performance import (
@@ -26,9 +26,6 @@ from digital_twin_runtime_suite.app.streamlines.cadence_probe import (
     select_cadence_candidate_or_fallback,
     select_shortest_acceptable_candidate,
 )
-from digital_twin_runtime_suite.app.streamlines.mesh_playback_runtime import (
-    StreamlinesMeshPlaybackRuntimeMixin,
-)
 from digital_twin_runtime_suite.app.streamlines.playback import (
     CachedPlaybackContract,
     resolve_cached_playback_state,
@@ -44,6 +41,7 @@ from digital_twin_runtime_suite.app.streamlines.temporal import (
 StatusCallback = Callable[[str], None]
 PRODUCTION_CACHE_SANITY_PERIOD_SECONDS = 0.2
 PRODUCTION_CACHE_SANITY_DURATION_SECONDS = 4.0
+_PHASE_BOUNDARY_MARGIN_SECONDS = 0.001
 
 
 @dataclass(frozen=True)
@@ -115,7 +113,7 @@ class StreamlinesStateReplacementProof:
         return self.active_sample_index == self.requested_sample_index
 
 
-class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
+class StreamlinesPlaybackRuntimeMixin:
     """Own persisted-geometry switching; never import VTI or execute Kit-CAE."""
 
     async def select_streamlines_cache_state_in_kit(
@@ -166,8 +164,36 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
         if resolution.is_no_op:
             return resolution
 
-        await self.select_streamlines_mesh_state_in_kit(resolution.sample)
+        self._require_streamlines_snapshot_contract_ownership(contract)
+        self.select_streamlines_snapshot_state_in_kit(resolution.sample.sample_index)
+        if (
+            self._streamlines_cache_active_sample_index
+            != resolution.sample.sample_index
+            or self.streamlines_snapshot_visible_count_in_kit() != 1
+        ):
+            raise RuntimeError(
+                "Static snapshot selection did not commit one resolved cache " "state."
+            )
         return resolution
+
+    def _require_streamlines_snapshot_contract_ownership(
+        self,
+        contract: CachedPlaybackContract,
+    ) -> None:
+        """Reject a prepared snapshot set from a different validated cache."""
+
+        snapshots = getattr(self, "_streamlines_snapshot_set_ownership", None)
+        if (
+            snapshots is None
+            or snapshots.workload != contract.workload
+            or snapshots.dataset_identity != contract.dataset_identity
+            or snapshots.profile_id != contract.profile_id
+            or snapshots.cache_identity != contract.cache_identity
+        ):
+            raise RuntimeError(
+                "Prepared Streamlines snapshots do not match the cached "
+                "playback contract."
+            )
 
     async def start_streamlines_cached_playback_in_kit(
         self,
@@ -182,6 +208,9 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
             CachedPlaybackContract,
         ):
             raise RuntimeError("Load a valid Streamlines cache before playback.")
+        self._require_streamlines_snapshot_contract_ownership(
+            self._streamlines_cache_playback_contract
+        )
         await self._start_streamlines_playback_scheduler_in_kit(
             state_selector=self.select_streamlines_cache_state_in_kit,
             period_seconds=period_seconds,
@@ -200,6 +229,7 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
 
         if contract is not self._streamlines_cache_playback_contract:
             raise RuntimeError("Pending playback contract is not the loaded cache.")
+        self._require_streamlines_snapshot_contract_ownership(contract)
 
         async def select_authorized_state(
             phase_seconds: float,
@@ -249,12 +279,18 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
                 "No accepted Streamlines presentation period is configured."
             )
         await self.stop_streamlines_cached_playback_in_kit()
-        await self.release_streamlines_mesh_timeline_control_in_kit()
-        self.acquire_streamlines_timeline_control_in_kit()
         self._streamlines_cached_playback_advanced = False
         self._streamlines_cached_playback_last_sample = None
+        self._streamlines_cached_state_failure_count = 0
         self._streamlines_state_replacement_proofs = []
         started_at = time.monotonic()
+        contract = self._streamlines_cache_playback_contract
+        if not isinstance(contract, CachedPlaybackContract):
+            raise RuntimeError("Load a valid Streamlines cache before playback.")
+        initial_delay_seconds = streamlines_phase_aligned_initial_delay_seconds(
+            self._airflow_state.phase_seconds(),
+            sample_interval_seconds=contract.sample_interval_seconds,
+        )
 
         async def select_without_losing_scheduler(phase_seconds: float):
             try:
@@ -264,6 +300,7 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                self._streamlines_cached_state_failure_count += 1
                 contract = self._streamlines_cache_playback_contract
                 active_index = self._streamlines_cache_active_sample_index
                 if (
@@ -303,9 +340,11 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
 
         scheduler = CachedPlaybackScheduler(
             period_seconds=active_period,
+            initial_delay_seconds=initial_delay_seconds,
             phase_source=self._airflow_state.phase_seconds,
             state_selector=select_without_losing_scheduler,
             tick_observer=self._record_streamlines_cached_playback_tick,
+            sleep=self._wait_for_streamlines_playback_deadline_in_kit,
         )
         self._streamlines_cached_playback_scheduler = scheduler
         self._streamlines_cached_playback_started_at = started_at
@@ -316,6 +355,19 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
                 "Cached playback started: " f"period_ms={active_period * 1000.0:.0f}."
             ),
             status_callback=status_callback,
+        )
+
+    async def _wait_for_streamlines_playback_deadline_in_kit(
+        self,
+        delay_seconds: float,
+    ) -> None:
+        """Wait through Kit frames so production ticks retain their 5 Hz cadence."""
+
+        import omni.kit.app
+
+        await wait_for_streamlines_kit_frame_deadline(
+            delay_seconds,
+            next_update=omni.kit.app.get_app().next_update_async,
         )
 
     async def await_streamlines_cached_playback_advancement_in_kit(
@@ -421,28 +473,14 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
             return None
         return await scheduler.stop()
 
-    def streamlines_controls_timeline_in_kit(self) -> bool:
-        """Report whether cached Mesh playback owns the global timeline."""
-
-        return getattr(self, "_streamlines_timeline_ownership", None) is not None
-
-    async def release_streamlines_timeline_control_in_kit(
-        self,
-    ) -> None:
-        """Stop the selector before restoring pre-Streamlines timeline state."""
-
-        await self.stop_streamlines_cached_playback_in_kit()
-        await self.release_streamlines_mesh_timeline_control_in_kit()
-
     def cancel_streamlines_cached_playback(self) -> None:
-        """Request immediate task cancellation during synchronous stage teardown."""
+        """Cancel only the owned snapshot scheduler during synchronous teardown."""
 
         scheduler = getattr(self, "_streamlines_cached_playback_scheduler", None)
         if isinstance(scheduler, CachedPlaybackScheduler):
             scheduler.cancel()
         self._streamlines_cached_playback_scheduler = None
         self._streamlines_cached_playback_started_at = None
-        self.cancel_streamlines_mesh_timeline_control()
 
     async def run_streamlines_production_cache_sanity_in_kit(
         self,
@@ -461,9 +499,8 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
             self._streamlines_cache_playback_contract,
             CachedPlaybackContract,
         ):
-            await self.load_streamlines_cache_in_kit(
-                status_callback=status_callback,
-                start_playback=False,
+            raise RuntimeError(
+                "Production cache sanity requires a prepared snapshot contract."
             )
         await self.stop_streamlines_cached_playback_in_kit()
         self._report_streamlines_cached_playback(
@@ -1023,3 +1060,49 @@ class StreamlinesPlaybackRuntimeMixin(StreamlinesMeshPlaybackRuntimeMixin):
             f"playback_vti_imports={result.playback_vti_imports}; "
             f"acceptable={result.acceptable}."
         )
+
+
+def streamlines_phase_aligned_initial_delay_seconds(
+    phase_seconds: float,
+    *,
+    sample_interval_seconds: float,
+) -> float:
+    """Delay the first scheduler tick until just after the next real cache state.
+
+    Preparation already selects the state valid at activation. Starting the
+    periodic scheduler at an arbitrary fractional phase can otherwise observe
+    just before one boundary and just after the following one, repeating a
+    state and skipping the next real cache identity. The scheduler still
+    resolves every tick from the authoritative shared phase source.
+    """
+
+    if not math.isfinite(phase_seconds):
+        raise ValueError("Streamlines playback phase must be finite.")
+    if not math.isfinite(sample_interval_seconds) or sample_interval_seconds <= 0.0:
+        raise ValueError("Streamlines sample interval must be positive and finite.")
+    remainder = phase_seconds % sample_interval_seconds
+    if math.isclose(remainder, 0.0, rel_tol=0.0, abs_tol=1e-9):
+        remaining = sample_interval_seconds
+    else:
+        remaining = sample_interval_seconds - remainder
+    return remaining + _PHASE_BOUNDARY_MARGIN_SECONDS
+
+
+async def wait_for_streamlines_kit_frame_deadline(
+    delay_seconds: float,
+    *,
+    next_update: Callable[[], Awaitable[object]],
+    monotonic: Callable[[], float] = time.monotonic,
+) -> None:
+    """Yield to Kit frames until a positive monotonic deadline is reached.
+
+    The scheduler still owns the only task and resolves one authoritative phase
+    per deadline. Frame yielding avoids the delayed generic asyncio timer that
+    can silently cross a real cache-state boundary in Kit.
+    """
+
+    if delay_seconds <= 0.0:
+        return
+    deadline = monotonic() + delay_seconds
+    while monotonic() < deadline:
+        await next_update()

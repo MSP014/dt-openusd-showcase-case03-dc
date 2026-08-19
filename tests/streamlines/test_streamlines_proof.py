@@ -259,7 +259,7 @@ def _runtime_evidence(
         boundary_emitter="ABSENT",
         smoke_injectors="ABSENT",
         temporal_sequence="ABSENT",
-        timeline_playback="INACTIVE",
+        timeline_playback="NOT_OWNED",
         authored_usd_fallback_visibility="invisible",
         runtime_usdrt_visibility="inherited",
         viewport_preview_path=STREAMLINES_RUNTIME_PREVIEW_PATH,

@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import sys
 from dataclasses import replace
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
-from digital_twin_runtime_suite.app.streamlines import cache_runtime, recompute_runtime
+from digital_twin_runtime_suite.app.streamlines import recompute_runtime
 from digital_twin_runtime_suite.app.streamlines.cache import (
-    CACHE_PLAYBACK_ROOT_PATH,
-    CACHE_PLAYBACK_SOURCE_PATH,
     CACHE_SCHEMA_VERSION,
     StreamlinesCacheMetadata,
     StreamlinesCacheOwnership,
@@ -36,9 +31,6 @@ from digital_twin_runtime_suite.app.streamlines.cache import (
     topology_signature,
     validate_streamlines_cache,
     vti_file_identity,
-)
-from digital_twin_runtime_suite.app.streamlines.cache_runtime import (
-    StreamlinesCacheRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
     build_streamlines_operator_request,
@@ -78,110 +70,9 @@ def _source(tmp_path: Path) -> TemporalVelocitySourceDescriptor:
     )
 
 
-def test_cache_load_requires_detached_flow_before_importing_kit() -> None:
-    runtime = _AttachedCacheLoadRuntime()
-
-    with pytest.raises(
-        RuntimeError,
-        match="Load Streamlines Cache requires Flow DETACHED.",
-    ):
-        asyncio.run(runtime.load_streamlines_cache_in_kit())
-
-
-def test_cache_readiness_messages_preserve_utf8_punctuation() -> None:
-    runtime = _CacheReadinessRuntime()
-
-    assert runtime.announce_streamlines_cache_build_ready() == (
-        'Ready — Press "Build Streamlines Cache".'
-    )
-    assert runtime.announce_streamlines_cache_load_ready() == (
-        'Ready — Press "Load Streamlines Cache".'
-    )
-
-    assert runtime.announce_streamlines_cache_build_ready() == (
-        'Ready \u2014 Press "Build Streamlines Cache".'
-    )
-    assert runtime.announce_streamlines_cache_load_ready() == (
-        'Ready \u2014 Press "Load Streamlines Cache".'
-    )
-
-
-def test_cache_load_progress_reports_to_ui_and_kit_log() -> None:
-    runtime = _CacheLoadProgressRuntime()
-    statuses: list[str] = []
-
-    runtime._report_streamlines_cache_load(
-        event="PROGRESS",
-        message="Loading Streamlines cache: attaching persisted geometry.",
-        status_callback=statuses.append,
-    )
-
-    assert statuses == ["Loading Streamlines cache: attaching persisted geometry."]
-    assert runtime.logger.messages == [
-        "DTRS STREAMLINES | CACHE_LOAD | PROGRESS\n"
-        "status=Loading Streamlines cache: attaching persisted geometry."
-    ]
-
-
-def test_cache_load_waiting_heartbeat_reports_stalled_kit_frame() -> None:
-    runtime = _CacheLoadProgressRuntime()
-    statuses: list[str] = []
-
-    async def delayed_frame() -> None:
-        await asyncio.sleep(0.01)
-
-    async def wait_for_delayed_frame() -> None:
-        await runtime._await_streamlines_cache_update(
-            _CacheLoadApp(delayed_frame()),
-            status_callback=statuses.append,
-            started_at=0.0,
-            heartbeat_seconds=0.001,
-        )
-
-    asyncio.run(wait_for_delayed_frame())
-
-    assert statuses
-    assert statuses[0].startswith(
-        "Loading Streamlines cache: waiting for Kit composition "
-    )
-    assert all("CACHE_LOAD | WAITING" in message for message in runtime.logger.messages)
-
-
-class _AttachedCacheLoadRuntime(StreamlinesCacheRuntimeMixin):
-    _flow_lifecycle_state = "ATTACHED"
-
-
-class _CacheReadinessRuntime(StreamlinesCacheRuntimeMixin):
-    def _streamlines_carb_logger(self):
-        return None
-
-
-class _CacheLoadLogger:
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-
-    def log_warn(self, message: str) -> None:
-        self.messages.append(message.split("] ", maxsplit=1)[1])
-
-
-class _CacheLoadProgressRuntime(StreamlinesCacheRuntimeMixin):
-    def __init__(self) -> None:
-        self.logger = _CacheLoadLogger()
-
-    def _streamlines_carb_logger(self):
-        return self.logger
-
-
-class _CacheLoadApp:
-    def __init__(self, update) -> None:
-        self._update = update
-
-    def next_update_async(self):
-        return self._update
-
-
 def _state(
-    source: TemporalVelocitySourceDescriptor, index: int
+    source: TemporalVelocitySourceDescriptor,
+    index: int,
 ) -> StreamlinesCacheState:
     points = (
         (float(index), 0.0, 0.0),
@@ -643,162 +534,3 @@ def test_cache_startup_inspection_never_starts_a_build(tmp_path: Path) -> None:
 
     assert streamlines_cache_build_mode(paths) == "NEW"
     assert paths.directory.exists() is False
-
-
-def test_cache_layer_attach_and_detach_keep_persistence_outside_the_stage(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    pxr = ModuleType("pxr")
-    sdf = ModuleType("pxr.Sdf")
-    sdf.Reference = lambda asset, prim: SimpleNamespace(
-        assetPath=asset,
-        primPath=prim,
-    )
-    sdf.Path = str
-    usd_geom = ModuleType("pxr.UsdGeom")
-    usd_geom.Xform = _CacheXform
-    usd_geom.Tokens = SimpleNamespace(invisible="invisible")
-    pxr.Sdf = sdf
-    pxr.UsdGeom = usd_geom
-    monkeypatch.setitem(sys.modules, "pxr", pxr)
-    monkeypatch.setitem(sys.modules, "pxr.Sdf", sdf)
-    monkeypatch.setitem(sys.modules, "pxr.UsdGeom", usd_geom)
-    paths = streamlines_cache_paths(tmp_path, _ownership())
-    target_paths = streamlines_cache_paths(
-        tmp_path,
-        StreamlinesCacheOwnership("Idle", "server/load_idle"),
-    )
-    for cache_paths in (paths, target_paths):
-        cache_paths.geometry_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_paths.geometry_path.write_bytes(b"mesh")
-        cache_paths.metadata_path.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(
-        cache_runtime,
-        "mesh_cache_paths",
-        lambda geometry_path: (
-            geometry_path,
-            geometry_path.with_suffix(".json"),
-        ),
-    )
-    monkeypatch.setattr(
-        cache_runtime,
-        "load_streamlines_mesh_cache_receipt",
-        lambda path: SimpleNamespace(
-            workload=("Idle" if "idle" in path.as_posix() else "Nominal"),
-            dataset_identity=(
-                "server/load_idle"
-                if "idle" in path.as_posix()
-                else "server/load_normal"
-            ),
-            profile_id="global_flow_path",
-            source_geometry_sha256="geometry",
-        ),
-    )
-    monkeypatch.setattr(
-        cache_runtime,
-        "load_streamlines_cache_metadata",
-        lambda path: SimpleNamespace(
-            workload=("Idle" if "idle" in path.as_posix() else "Nominal"),
-            dataset_identity=(
-                "server/load_idle"
-                if "idle" in path.as_posix()
-                else "server/load_normal"
-            ),
-            profile_id="global_flow_path",
-            geometry_sha256="geometry",
-        ),
-    )
-    stage = _CacheStage()
-    stage.GetSessionLayer().subLayerPaths.append("main-session.usda")
-    stage.GetRootLayer().subLayerPaths.append("server-scene.usda")
-    runtime = _CacheLayerRuntime(tmp_path)
-
-    runtime._attach_streamlines_cache_playback_layer(stage, paths)
-
-    assert stage.GetSessionLayer().subLayerPaths == ["main-session.usda"]
-    assert stage.GetRootLayer().subLayerPaths == ["server-scene.usda"]
-    assert stage.reference.assetPath == paths.geometry_path.resolve().as_posix()
-    assert stage.reference.primPath == CACHE_PLAYBACK_ROOT_PATH
-    runtime._attach_streamlines_cache_playback_layer(stage, target_paths)
-    assert stage.reference.assetPath == (
-        target_paths.geometry_path.resolve().as_posix()
-    )
-    assert stage.GetSessionLayer().subLayerPaths == ["main-session.usda"]
-    assert stage.GetRootLayer().subLayerPaths == ["server-scene.usda"]
-    runtime._detach_streamlines_cache_playback_layer(stage)
-    assert stage.GetSessionLayer().subLayerPaths == ["main-session.usda"]
-    assert stage.GetRootLayer().subLayerPaths == ["server-scene.usda"]
-    assert stage.reference is None
-
-
-class _CacheLayerRuntime(StreamlinesCacheRuntimeMixin):
-    def __init__(self, repo_root: Path) -> None:
-        self.config = SimpleNamespace(repo_root=repo_root)
-
-
-class _CacheSessionLayer:
-    def __init__(self) -> None:
-        self.subLayerPaths: list[str] = []
-
-
-class _CacheStage:
-    def __init__(self) -> None:
-        self._session_layer = _CacheSessionLayer()
-        self._root_layer = _CacheSessionLayer()
-        self._edit_target = object()
-        self.removed_prims: list[str] = []
-        self.reference = None
-
-    def GetSessionLayer(self) -> _CacheSessionLayer:
-        return self._session_layer
-
-    def GetRootLayer(self) -> _CacheSessionLayer:
-        return self._root_layer
-
-    def GetEditTarget(self):
-        return self._edit_target
-
-    def SetEditTarget(self, edit_target) -> None:
-        self._edit_target = edit_target
-
-    def RemovePrim(self, prim_path: str) -> None:
-        self.removed_prims.append(prim_path)
-        if prim_path == CACHE_PLAYBACK_ROOT_PATH:
-            self.reference = None
-
-    def OverridePrim(self, prim_path: str):
-        assert prim_path in (CACHE_PLAYBACK_ROOT_PATH, CACHE_PLAYBACK_SOURCE_PATH)
-        return _CachePresentationPrim(self)
-
-
-class _CachePresentationPrim:
-    def __init__(self, stage: _CacheStage) -> None:
-        self._stage = stage
-
-    def GetReferences(self):
-        return self
-
-    def SetReferences(self, references) -> None:
-        assert len(references) == 1
-        self._stage.reference = references[0]
-
-
-class _CacheVisibilityAttribute:
-    def Set(self, _value) -> bool:
-        return True
-
-
-class _CacheXform:
-    @staticmethod
-    def Define(stage, path):
-        return _CacheXform(stage.OverridePrim(path))
-
-    def __init__(self, prim) -> None:
-        self._prim = prim
-
-    def GetPrim(self):
-        return self._prim
-
-    def CreateVisibilityAttr(self):
-        return _CacheVisibilityAttribute()

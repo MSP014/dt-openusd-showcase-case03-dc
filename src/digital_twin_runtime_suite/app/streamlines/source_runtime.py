@@ -140,7 +140,6 @@ class StreamlinesSourceRuntimeMixin:
     async def _select_temporal_source_in_kit(
         app,
         *,
-        timeline,
         field_prim,
         sample: TemporalSourceSample,
         cae_vtk,
@@ -148,10 +147,8 @@ class StreamlinesSourceRuntimeMixin:
     ):
         """Select and verify one real manifest VTI before touching its consumer."""
 
-        timeline.pause()
-        timeline.set_current_time(sample.source_time_seconds)
-        # Selection is authored on the same temporal ``vel`` field as Stage 6.
-        # Yield twice before reading it so Kit has composed the new time code.
+        # The persisted manifest is read at its explicit source time code; this
+        # source helper never owns Kit's global timeline.
         await app.next_update_async()
         await app.next_update_async()
         selected_asset = flow_temporal.kit_cae_selected_velocity_asset(
@@ -204,7 +201,6 @@ class StreamlinesSourceRuntimeMixin:
 
         import carb
         import omni.kit.app
-        import omni.timeline
         import omni.usd
         from omni.cae.importer.vtk import import_to_stage
         from omni.cae.schema import cae
@@ -232,7 +228,6 @@ class StreamlinesSourceRuntimeMixin:
         stage = omni.usd.get_context().get_stage()
         if not stage:
             raise RuntimeError("Static source preparation requires an open stage.")
-        timeline = omni.timeline.get_timeline_interface()
         velocity_field_name = sample.velocity_field_name
         field_path = f"{self.STATIC_IMPORT_ROOT}/PointData/{velocity_field_name}"
         cleanup = clear_static_velocity_source_from_stage(
@@ -301,7 +296,6 @@ class StreamlinesSourceRuntimeMixin:
                 import_root_path=self.STATIC_IMPORT_ROOT,
                 field_prim=field_prim,
                 cae_vtk=cae_vtk,
-                timeline=timeline,
             )
             require_clean_static_source_runtime(evidence)
             try:

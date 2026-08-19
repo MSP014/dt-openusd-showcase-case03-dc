@@ -1,11 +1,10 @@
-"""Kit-facing persistent cache build, validation, attachment, and state selection."""
+"""Kit-facing persistent centerline-cache build, validation, and preparation."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import time
-from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from statistics import median
@@ -72,12 +71,6 @@ from digital_twin_runtime_suite.app.streamlines.constant_topology import (
 )
 from digital_twin_runtime_suite.app.streamlines.lifecycle import (
     StreamlinesCleanupReceipt,
-)
-from digital_twin_runtime_suite.app.streamlines.mesh_cache import (
-    MESH_CACHE_GEOMETRY_PATH,
-    MESH_SPEED_ATTRIBUTE,
-    load_streamlines_mesh_cache_receipt,
-    mesh_cache_paths,
 )
 from digital_twin_runtime_suite.app.streamlines.playback import (
     cached_playback_contract_from_validated_cache,
@@ -279,52 +272,6 @@ class StreamlinesConstantTopologyPrototypeResult:
     message: str
     metadata: StreamlinesCacheMetadata | None = None
     sample_proofs: tuple[object, ...] = ()
-
-
-@dataclass(frozen=True)
-class StreamlinesCacheLoadResult:
-    """Outcome of attaching one validated persisted cache state."""
-
-    metadata: StreamlinesCacheMetadata
-    active_sample_index: int
-    load_ms: float
-
-
-@dataclass(frozen=True)
-class StreamlinesPresentationReferenceSnapshot:
-    """Prove one cache swap was isolated to the DTRS presentation prim."""
-
-    asset_path: str | None
-    referenced_prim_path: str
-    session_sublayers_before: tuple[str, ...]
-    session_sublayers_after: tuple[str, ...]
-    root_sublayers_before: tuple[str, ...]
-    root_sublayers_after: tuple[str, ...]
-    server_scene_composition_mutations: int = 0
-
-    @property
-    def session_sublayers_unchanged(self) -> bool:
-        """Report whether the Session Layer stack survived the local swap."""
-
-        return self.session_sublayers_before == self.session_sublayers_after
-
-    @property
-    def root_sublayers_unchanged(self) -> bool:
-        """Report whether the Root Layer stack survived the local swap."""
-
-        return self.root_sublayers_before == self.root_sublayers_after
-
-    @property
-    def reference_swap_passed(self) -> bool:
-        """Require an explicit target plus unchanged surrounding layer stacks."""
-
-        return bool(
-            self.asset_path
-            and self.referenced_prim_path == CACHE_PLAYBACK_ROOT_PATH
-            and self.session_sublayers_unchanged
-            and self.root_sublayers_unchanged
-            and self.server_scene_composition_mutations == 0
-        )
 
 
 @dataclass(frozen=True)
@@ -1016,18 +963,6 @@ class StreamlinesCacheRuntimeMixin:
             carb.log_warn(with_dtrs_yerevan_timestamp(message))
         return f'Ready — Press "{action}".'
 
-    def announce_streamlines_cache_load_ready(self) -> str:
-        """Publish cache-load readiness without measuring presentation cadence."""
-
-        action = "Load Streamlines Cache"
-        message = (
-            "DTRS STREAMLINES | CACHE_LOAD | READY\n" f'NEXT_ACTION | Press "{action}"'
-        )
-        carb = self._streamlines_carb_logger()
-        if carb:
-            carb.log_warn(with_dtrs_yerevan_timestamp(message))
-        return f'Ready — Press "{action}".'
-
     def inspect_existing_streamlines_cache(self) -> StreamlinesCacheValidation:
         """Inspect persisted cache provenance without creating a Kit operator."""
 
@@ -1061,7 +996,7 @@ class StreamlinesCacheRuntimeMixin:
         VTI, or rebuild a cache merely to enable the action.
         """
 
-        if not self.is_streamlines_cache_load_allowed():
+        if self._flow_lifecycle_state != "DETACHED":
             return False
         try:
             inspections = self.inspect_streamlines_caches()
@@ -1174,7 +1109,6 @@ class StreamlinesCacheRuntimeMixin:
         """Show one exact source sample through the profile without persistence."""
 
         import omni.kit.app
-        import omni.timeline
         import omni.usd
         import warp as wp
         from omni.cae.data import usd_utils as cae_usd_utils
@@ -1248,7 +1182,6 @@ class StreamlinesCacheRuntimeMixin:
             sample = manifest_samples(source)[0]
             selected_asset = await self._select_temporal_source_in_kit(
                 app,
-                timeline=omni.timeline.get_timeline_interface(),
                 field_prim=field_prim,
                 sample=sample,
                 cae_vtk=cae_vtk,
@@ -1270,7 +1203,6 @@ class StreamlinesCacheRuntimeMixin:
                 UsdGeom=UsdGeom,
                 UsdGeomRT=UsdGeomRT,
                 wp=wp,
-                timeline=omni.timeline.get_timeline_interface(),
                 execute_command=execute_command,
                 preview_path="/DTRS_KitCAE/Streamlines/ProductionProfilePreview",
                 Sdf=Sdf,
@@ -1615,12 +1547,6 @@ class StreamlinesCacheRuntimeMixin:
             message="Cache build complete and atomically persisted.",
             status_callback=status_callback,
         )
-        if emit_next_action:
-            self._report_streamlines_cache_build(
-                event="NEXT_ACTION",
-                message='Press "Load Streamlines Cache".',
-                status_callback=status_callback,
-            )
         self._streamlines_cache_build_active_sample_index = None
         return StreamlinesCacheBuildResult(True, message, metadata)
 
@@ -1860,7 +1786,6 @@ class StreamlinesCacheRuntimeMixin:
         """Persist every real manifest sample without creating a RuntimePreview."""
 
         import omni.kit.app
-        import omni.timeline
         import omni.usd
         import warp as wp
         from omni.cae.data import usd_utils as cae_usd_utils
@@ -1949,7 +1874,6 @@ class StreamlinesCacheRuntimeMixin:
             )
             await app.next_update_async()
             self._start_kit_cae_operator_tracking()
-            timeline = omni.timeline.get_timeline_interface()
             for sample in manifest_samples(source):
                 index = sample.sample_index
                 source_vti = sample.source_vti
@@ -1957,7 +1881,6 @@ class StreamlinesCacheRuntimeMixin:
                 sample_started_at = time.monotonic()
                 selected_asset = await self._select_temporal_source_in_kit(
                     app,
-                    timeline=timeline,
                     field_prim=field_prim,
                     sample=sample,
                     cae_vtk=cae_vtk,
@@ -1980,7 +1903,6 @@ class StreamlinesCacheRuntimeMixin:
                     UsdGeom=UsdGeom,
                     UsdGeomRT=UsdGeomRT,
                     wp=wp,
-                    timeline=timeline,
                     execute_command=execute_command,
                     preview_path=None,
                     Sdf=Sdf,
@@ -2141,101 +2063,6 @@ class StreamlinesCacheRuntimeMixin:
         )
         return metadata, tuple(generation_ms)
 
-    async def load_streamlines_cache_in_kit(
-        self,
-        status_callback: StatusCallback | None = None,
-        *,
-        start_playback: bool = True,
-        allow_attached_flow: bool = False,
-        presentation_hidden: bool = False,
-        validated_receipt: StreamlinesCacheValidationReceipt | None = None,
-        cancellation_requested: Callable[[], bool] | None = None,
-    ) -> StreamlinesCacheLoadResult:
-        """Attach and select a validated persisted cache without cadence tests.
-
-        ``start_playback`` remains enabled for normal production loading. The
-        bounded sanity workflow disables it so its one measured scheduler is
-        the only cached-playback start in that workflow.
-        """
-
-        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        if not allow_attached_flow and not self.is_streamlines_cache_load_allowed():
-            raise RuntimeError("Load Streamlines Cache requires Flow DETACHED.")
-
-        import omni.kit.app
-        import omni.usd
-        from pxr import Usd, UsdGeom
-
-        started_at = time.monotonic()
-        self._report_streamlines_cache_load(
-            event="START",
-            message="Loading Streamlines cache: checking persisted artifacts.",
-            status_callback=status_callback,
-        )
-        stage = omni.usd.get_context().get_stage()
-        if not stage:
-            raise RuntimeError("Cache load requires an open stage.")
-        receipt = (
-            validated_receipt
-            or await self.ensure_current_streamlines_cache_validation_in_background()
-        )
-        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        inspection = receipt.inspection
-        if inspection.classification != "VALID" or receipt.source is None:
-            raise RuntimeError(
-                "Cache validation failed: "
-                f"{inspection.message} Explicitly rebuild the cache."
-            )
-        await self.release_streamlines_timeline_control_in_kit()
-        self._clear_streamlines_cache_load_state(stage)
-        self._report_streamlines_cache_load(
-            event="PROGRESS",
-            message="Loading Streamlines cache: using validated provenance receipt.",
-            status_callback=status_callback,
-        )
-        metadata = inspection.metadata
-        if metadata is None:
-            raise RuntimeError("Validated Streamlines cache receipt lacks metadata.")
-        if metadata.time_codes_per_second != float(stage.GetTimeCodesPerSecond()):
-            raise RuntimeError(
-                "Cache validation failed: Cache time-code rate is stale. "
-                "Explicitly rebuild the cache."
-            )
-        cache_paths = inspection.paths
-        playback_contract = cached_playback_contract_from_validated_cache(
-            metadata,
-            receipt.source,
-        )
-        app = omni.kit.app.get_app()
-        try:
-            self._report_streamlines_cache_load(
-                event="PROGRESS",
-                message="Loading Streamlines cache: attaching persisted geometry.",
-                status_callback=status_callback,
-            )
-            self._attach_streamlines_cache_playback_layer(stage, cache_paths)
-            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-            if (
-                presentation_hidden
-                and not self.set_streamlines_cached_presentation_visible_in_kit(False)
-            ):
-                raise RuntimeError("Prepared Streamlines cache could not be hidden.")
-            return await self._complete_streamlines_cache_load_in_kit(
-                stage=stage,
-                app=app,
-                metadata=metadata,
-                playback_contract=playback_contract,
-                started_at=started_at,
-                status_callback=status_callback,
-                start_playback=start_playback,
-                cancellation_requested=cancellation_requested,
-                Usd=Usd,
-                UsdGeom=UsdGeom,
-            )
-        except BaseException:
-            self._clear_streamlines_cache_load_state(stage)
-            raise
-
     async def prepare_streamlines_cached_presentation_in_kit(
         self,
         context,
@@ -2268,11 +2095,12 @@ class StreamlinesCacheRuntimeMixin:
         status_callback: StatusCallback | None = None,
         cancellation_requested: Callable[[], bool] | None = None,
     ):
-        """Prepare one target's VALID persisted cache hidden at an exact phase.
+        """Prepare one target's static snapshots at an exact validated phase.
 
-        Binding and dataset identity are explicit.  This owner validates and loads
-        persisted geometry only; it never commits shared state, imports VTI, runs
-        Kit-CAE Streamlines, or rebuilds a cache.
+        This is the normal Visualization -> Streamlines preparation seam.  It
+        reads only the validated centerline receipt and its persisted USDC; it
+        never requires the temporary Mesh prototype, imports VTI, runs Kit-CAE,
+        or rebuilds the cache.
         """
 
         self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
@@ -2289,19 +2117,22 @@ class StreamlinesCacheRuntimeMixin:
                 "Streamlines cache is "
                 f"{inspection.classification}: {inspection.message}"
             )
-        await self.load_streamlines_cache_in_kit(
-            status_callback=status_callback,
-            start_playback=False,
-            allow_attached_flow=True,
-            presentation_hidden=True,
-            validated_receipt=receipt,
-            cancellation_requested=cancellation_requested,
+        metadata = inspection.metadata
+        if metadata is None:
+            raise RuntimeError("Validated Streamlines cache receipt lacks metadata.")
+        if receipt.source is None:
+            raise RuntimeError("Validated Streamlines cache receipt lacks a source.")
+        cache_paths = inspection.paths
+        if not cache_paths.geometry_path.is_file():
+            raise RuntimeError("Validated Streamlines centerline geometry is missing.")
+        contract = cached_playback_contract_from_validated_cache(
+            metadata,
+            receipt.source,
         )
-        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        contract = self._streamlines_cache_playback_contract
         if (
             contract.workload != binding.workload_mode
             or contract.dataset_identity != binding.dataset_identity
+            or contract.profile_id != metadata.profile_id
         ):
             raise RuntimeError("Prepared Streamlines cache target identity drifted.")
         resolution = resolve_cached_playback_state(
@@ -2309,7 +2140,6 @@ class StreamlinesCacheRuntimeMixin:
             phase_seconds,
             active_sample_index=None,
         )
-        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
         sample_index_matches = (
             expected_sample_index is None
             or resolution.sample.sample_index == expected_sample_index
@@ -2323,15 +2153,60 @@ class StreamlinesCacheRuntimeMixin:
                 "Prepared Streamlines sample does not match the requested "
                 "target phase identity."
             )
-        return resolution
+        if status_callback:
+            status_callback(
+                "Valid persisted centerline cache accepted; preparing "
+                "production snapshots."
+            )
+
+        import omni.usd
+
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            raise RuntimeError(
+                "Streamlines snapshot preparation requires an open stage."
+            )
+        await self.stop_streamlines_cached_playback_in_kit()
+        self._clear_streamlines_cache_load_state(stage)
+        try:
+            self._streamlines_loaded_cache_metadata = metadata
+            self._streamlines_loaded_cache_paths = cache_paths
+            self._streamlines_cache_playback_contract = contract
+            self._streamlines_cache_active_sample_index = None
+            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+            self.prepare_streamlines_snapshots_in_kit(
+                metadata,
+                cache_paths.geometry_path,
+            )
+            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+            self._require_streamlines_snapshot_contract_ownership(contract)
+            applied_colours = self.apply_streamlines_snapshot_display_colour_in_kit()
+            if applied_colours != contract.sample_count:
+                raise RuntimeError(
+                    "Static snapshot presentation did not colour every cache state."
+                )
+            if not self.set_streamlines_cached_presentation_visible_in_kit(False):
+                raise RuntimeError(
+                    "Prepared snapshot presentation could not be hidden."
+                )
+            self.select_streamlines_snapshot_state_in_kit(
+                resolution.sample.sample_index
+            )
+            if self.streamlines_snapshot_visible_count_in_kit() != 1:
+                raise RuntimeError("Prepared snapshots did not select one real state.")
+            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
+            return resolution
+        except BaseException:
+            self._clear_streamlines_cache_load_state(stage)
+            raise
 
     async def cleanup_streamlines_cached_presentation_in_kit(self) -> None:
-        """Stop one scheduler and detach only DTRS-owned persisted presentation."""
+        """Stop one scheduler and remove the DTRS-owned snapshot presentation."""
 
         import omni.kit.app
         import omni.usd
 
-        await self.release_streamlines_timeline_control_in_kit()
+        await self.stop_streamlines_cached_playback_in_kit()
         stage = omni.usd.get_context().get_stage()
         if stage:
             self._clear_streamlines_cache_load_state(stage)
@@ -2350,14 +2225,22 @@ class StreamlinesCacheRuntimeMixin:
         self._streamlines_cached_presentation_visible = False
 
     def set_streamlines_cached_presentation_visible_in_kit(self, visible: bool) -> bool:
-        """Show or hide validated cache geometry without changing its scheduler."""
+        """Show or hide the snapshot hierarchy without changing selected state."""
 
         import omni.usd
         from pxr import UsdGeom
 
         stage = omni.usd.get_context().get_stage()
-        root = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH) if stage else None
-        if not root or not root.IsValid():
+        from digital_twin_runtime_suite.app.streamlines.snapshot_runtime import (
+            SNAPSHOTS_ROOT_PATH,
+        )
+
+        root = stage.GetPrimAtPath(SNAPSHOTS_ROOT_PATH) if stage else None
+        if (
+            not root
+            or not root.IsValid()
+            or getattr(self, "_streamlines_snapshot_set_ownership", None) is None
+        ):
             return False
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
@@ -2371,166 +2254,55 @@ class StreamlinesCacheRuntimeMixin:
         return True
 
     def streamlines_cached_presentation_is_visible_in_kit(self) -> bool:
-        """Read visibility from the stable renderer-facing Geometry prim."""
+        """Report root visibility only when one static snapshot remains selected."""
 
         import omni.usd
         from pxr import UsdGeom
 
         stage = omni.usd.get_context().get_stage()
-        geometry = stage.GetPrimAtPath(CACHE_PLAYBACK_CURVES_PATH) if stage else None
-        if not geometry or not geometry.IsValid():
+        from digital_twin_runtime_suite.app.streamlines.snapshot_runtime import (
+            SNAPSHOTS_ROOT_PATH,
+        )
+
+        root = stage.GetPrimAtPath(SNAPSHOTS_ROOT_PATH) if stage else None
+        if not root or not root.IsValid():
             return False
         return (
-            UsdGeom.Imageable(geometry).ComputeVisibility() != UsdGeom.Tokens.invisible
+            UsdGeom.Imageable(root).ComputeVisibility() != UsdGeom.Tokens.invisible
+            and self.streamlines_snapshot_visible_count_in_kit() == 1
         )
 
     def streamlines_cached_presentation_is_prepared_in_kit(self) -> bool:
-        """Report a composed cache root even when its presentation is hidden."""
+        """Report a valid snapshot set even when the presentation root is hidden."""
 
         import omni.usd
 
         stage = omni.usd.get_context().get_stage()
-        root = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH) if stage else None
-        return bool(root and root.IsValid())
+        from digital_twin_runtime_suite.app.streamlines.snapshot_runtime import (
+            SNAPSHOTS_ROOT_PATH,
+        )
 
-    async def _complete_streamlines_cache_load_in_kit(
-        self,
-        *,
-        stage,
-        app,
-        metadata: StreamlinesCacheMetadata,
-        playback_contract,
-        started_at: float,
-        status_callback: StatusCallback | None,
-        start_playback: bool,
-        cancellation_requested: Callable[[], bool] | None,
-        Usd,
-        UsdGeom,
-    ) -> StreamlinesCacheLoadResult:
-        """Verify an attached cache before exposing it to cached playback."""
-
-        self._report_streamlines_cache_load(
-            event="PROGRESS",
-            message="Loading Streamlines cache: composing attached geometry.",
-            status_callback=status_callback,
-        )
-        for _ in range(3):
-            await self._await_streamlines_cache_update(
-                app,
-                status_callback=status_callback,
-                started_at=started_at,
-                cancellation_requested=cancellation_requested,
-            )
-        self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-        mesh_prim = stage.GetPrimAtPath(MESH_CACHE_GEOMETRY_PATH)
-        if (
-            not mesh_prim
-            or not mesh_prim.IsValid()
-            or mesh_prim.GetTypeName() != "Mesh"
-        ):
-            raise RuntimeError("Cache source did not compose its renderer Mesh.")
-        mesh = UsdGeom.Mesh(mesh_prim)
-        self._report_streamlines_cache_load(
-            event="PROGRESS",
-            message="Loading Streamlines cache: verifying manifest time samples.",
-            status_callback=status_callback,
-        )
-        actual_time_codes = tuple(
-            float(value) for value in mesh.GetPointsAttr().GetTimeSamples()
-        )
-        expected_time_codes = tuple(state.time_code for state in metadata.states)
-        if actual_time_codes != expected_time_codes:
-            raise RuntimeError("Cache geometry time samples do not match metadata.")
-        source_time_attribute = mesh_prim.GetAttribute("dtrs:sourceTime")
-        source_time_codes = tuple(
-            float(value) for value in source_time_attribute.GetTimeSamples()
-        )
-        expected_source_times = tuple(
-            state.source_time_seconds for state in metadata.states
-        )
-        actual_source_times = tuple(
-            float(source_time_attribute.Get(time_code))
-            for time_code in expected_time_codes
-        )
-        if (
-            source_time_codes != expected_time_codes
-            or actual_source_times != expected_source_times
-        ):
-            raise RuntimeError(
-                "Cache source-time attributes do not match metadata provenance."
-            )
-        speed_time_codes = tuple(
-            float(value)
-            for value in mesh_prim.GetAttribute(MESH_SPEED_ATTRIBUTE).GetTimeSamples()
-        )
-        if speed_time_codes != expected_time_codes:
-            raise RuntimeError("Mesh speed samples do not match metadata times.")
-        counts_attr = mesh.GetFaceVertexCountsAttr()
-        indices_attr = mesh.GetFaceVertexIndicesAttr()
-        if counts_attr.GetTimeSamples() or indices_attr.GetTimeSamples():
-            raise RuntimeError("Mesh topology is unexpectedly time-sampled.")
-        self._streamlines_mesh_points_time_codes = actual_time_codes
-        self._streamlines_mesh_speed_time_codes = speed_time_codes
-        if stage.GetPrimAtPath(CACHE_BUILD_OPERATOR_PATH).IsValid():
-            raise RuntimeError("Cache load retained a Kit-CAE build operator.")
-        self._streamlines_loaded_cache_metadata = metadata
-        self._streamlines_cache_playback_contract = playback_contract
-        self._streamlines_cache_active_sample_index = None
-        self._report_streamlines_cache_load(
-            event="PROGRESS",
-            message="Loading Streamlines cache: selecting manifest state 1.",
-            status_callback=status_callback,
-        )
-        resolution = resolve_cached_playback_state(
-            playback_contract,
-            0.0,
-            active_sample_index=None,
-        )
-        self._report_streamlines_cache_load(
-            event="COMPLETE",
-            message=(
-                "Streamlines cache loaded: exact manifest state "
-                f"{resolution.sample.ordinal}/{resolution.sample.total}."
-            ),
-            status_callback=status_callback,
-        )
-        if start_playback and (
-            self.config.simulation_cache.streamlines_presentation_period_seconds
-            is not None
-        ):
-            self._raise_if_streamlines_presentation_cancelled(cancellation_requested)
-            await self.start_streamlines_cached_playback_in_kit(
-                status_callback=status_callback,
-            )
-        return StreamlinesCacheLoadResult(
-            metadata=metadata,
-            active_sample_index=resolution.sample.sample_index,
-            load_ms=(time.monotonic() - started_at) * 1000.0,
+        root = stage.GetPrimAtPath(SNAPSHOTS_ROOT_PATH) if stage else None
+        return bool(
+            root
+            and root.IsValid()
+            and getattr(self, "_streamlines_snapshot_set_ownership", None) is not None
         )
 
     def _clear_streamlines_cache_load_state(self, stage) -> None:
-        """Detach an unverified cache and clear every playback-facing reference."""
+        """Remove snapshots before clearing every playback-facing reference."""
 
-        invalidator = getattr(
+        cleanup_snapshots = getattr(
             self,
-            "invalidate_streamlines_mesh_playback_updates",
+            "cleanup_streamlines_snapshots_in_kit",
             None,
         )
-        if callable(invalidator):
-            invalidator()
-        self._detach_streamlines_cache_playback_layer(stage)
+        if callable(cleanup_snapshots):
+            cleanup_snapshots()
         self._streamlines_loaded_cache_metadata = None
         self._streamlines_loaded_cache_paths = None
         self._streamlines_cache_playback_contract = None
         self._streamlines_cache_active_sample_index = None
-        self._streamlines_mesh_cache_receipt = None
-        self._streamlines_mesh_points_time_codes = ()
-        self._streamlines_mesh_speed_time_codes = ()
-
-    def is_streamlines_cache_load_allowed(self) -> bool:
-        """Return whether cache playback can start without contending with Flow."""
-
-        return self._flow_lifecycle_state == "DETACHED"
 
     def _streamlines_cache_expected_contract(
         self,
@@ -2696,25 +2468,6 @@ class StreamlinesCacheRuntimeMixin:
             )
             carb.log_error(with_dtrs_yerevan_timestamp(message))
 
-    def _report_streamlines_cache_load(
-        self,
-        *,
-        event: str,
-        message: str,
-        status_callback: StatusCallback | None,
-    ) -> None:
-        """Expose a cache-load milestone in both OmniUI and the Kit log."""
-
-        if status_callback:
-            status_callback(message)
-        carb = self._streamlines_carb_logger()
-        if carb:
-            carb.log_warn(
-                with_dtrs_yerevan_timestamp(
-                    "DTRS STREAMLINES | CACHE_LOAD | " f"{event}\nstatus={message}"
-                )
-            )
-
     def _report_streamlines_cache_build(
         self,
         *,
@@ -2756,45 +2509,6 @@ class StreamlinesCacheRuntimeMixin:
                 )
             )
 
-    async def _await_streamlines_cache_update(
-        self,
-        app,
-        *,
-        status_callback: StatusCallback | None,
-        started_at: float,
-        heartbeat_seconds: float = 5.0,
-        cancellation_requested: Callable[[], bool] | None = None,
-    ) -> None:
-        """Await one Kit frame while making a stalled composition observable."""
-
-        update = asyncio.ensure_future(app.next_update_async())
-        try:
-            while not update.done():
-                self._raise_if_streamlines_presentation_cancelled(
-                    cancellation_requested
-                )
-                try:
-                    await asyncio.wait_for(
-                        asyncio.shield(update),
-                        timeout=heartbeat_seconds,
-                    )
-                except TimeoutError:
-                    elapsed_seconds = time.monotonic() - started_at
-                    self._report_streamlines_cache_load(
-                        event="WAITING",
-                        message=(
-                            "Loading Streamlines cache: waiting for Kit composition "
-                            f"({elapsed_seconds:.0f} s elapsed)."
-                        ),
-                        status_callback=status_callback,
-                    )
-            await update
-        finally:
-            if not update.done():
-                update.cancel()
-                with suppress(asyncio.CancelledError):
-                    await update
-
     @staticmethod
     def _raise_if_streamlines_presentation_cancelled(
         cancellation_requested: Callable[[], bool] | None,
@@ -2805,85 +2519,6 @@ class StreamlinesCacheRuntimeMixin:
             raise StreamlinesPresentationCancelled(
                 "Streamlines presentation request was superseded or cancelled."
             )
-
-    def _attach_streamlines_cache_playback_layer(
-        self,
-        stage,
-        cache_paths: StreamlinesCachePaths,
-    ) -> None:
-        """Reference the sole prebaked renderer Mesh prototype once."""
-
-        from pxr import Sdf, UsdGeom
-
-        session_layer = stage.GetSessionLayer()
-        root_layer = stage.GetRootLayer()
-        session_before = tuple(session_layer.subLayerPaths)
-        root_before = tuple(root_layer.subLayerPaths)
-        mesh_geometry_path, mesh_metadata_path = mesh_cache_paths(
-            cache_paths.geometry_path
-        )
-        if not mesh_geometry_path.is_file() or not mesh_metadata_path.is_file():
-            raise RuntimeError(
-                "Prebaked Volume Coverage / Nominal Mesh prototype is unavailable."
-            )
-        mesh_receipt = load_streamlines_mesh_cache_receipt(mesh_metadata_path)
-        source_metadata = load_streamlines_cache_metadata(cache_paths.metadata_path)
-        if (
-            mesh_receipt.workload != source_metadata.workload
-            or mesh_receipt.dataset_identity != source_metadata.dataset_identity
-            or mesh_receipt.profile_id != source_metadata.profile_id
-            or mesh_receipt.source_geometry_sha256 != source_metadata.geometry_sha256
-        ):
-            raise RuntimeError(
-                "Prebaked Streamlines Mesh does not match its centerline cache."
-            )
-        asset_path = mesh_geometry_path.resolve().as_posix()
-
-        self._detach_streamlines_cache_playback_layer(stage)
-        previous_target = stage.GetEditTarget()
-        try:
-            stage.SetEditTarget(session_layer)
-            root = UsdGeom.Xform.Define(stage, CACHE_PLAYBACK_ROOT_PATH)
-            root.GetPrim().GetReferences().SetReferences(
-                [Sdf.Reference(asset_path, Sdf.Path(CACHE_PLAYBACK_ROOT_PATH))]
-            )
-        finally:
-            stage.SetEditTarget(previous_target)
-
-        snapshot = StreamlinesPresentationReferenceSnapshot(
-            asset_path=asset_path,
-            referenced_prim_path=CACHE_PLAYBACK_ROOT_PATH,
-            session_sublayers_before=session_before,
-            session_sublayers_after=tuple(session_layer.subLayerPaths),
-            root_sublayers_before=root_before,
-            root_sublayers_after=tuple(root_layer.subLayerPaths),
-        )
-        if not snapshot.reference_swap_passed:
-            self._detach_streamlines_cache_playback_layer(stage)
-            raise RuntimeError(
-                "Streamlines cache reference changed an unrelated layer stack."
-            )
-        self._streamlines_loaded_cache_paths = cache_paths
-        self._streamlines_mesh_cache_receipt = mesh_receipt
-        self._streamlines_presentation_reference_snapshot = snapshot
-
-    def _detach_streamlines_cache_playback_layer(self, stage) -> None:
-        """Remove only the DTRS reference prim; persisted files stay on disk."""
-
-        session_layer = stage.GetSessionLayer()
-        previous_target = stage.GetEditTarget()
-        try:
-            stage.SetEditTarget(session_layer)
-            stage.RemovePrim(CACHE_PLAYBACK_ROOT_PATH)
-        finally:
-            stage.SetEditTarget(previous_target)
-
-    def streamlines_presentation_reference_snapshot(
-        self,
-    ) -> StreamlinesPresentationReferenceSnapshot | None:
-        """Return the latest successfully authored local-reference evidence."""
-
-        return getattr(self, "_streamlines_presentation_reference_snapshot", None)
 
     @staticmethod
     def _format_cache_build_success(
@@ -2925,7 +2560,7 @@ class StreamlinesCacheRuntimeMixin:
                 f"topology_consistent={metadata.topology_consistent}",
                 "failed_samples=()",
                 "state=VALID",
-                'NEXT_ACTION | Press "Load Streamlines Cache" to inspect it.',
+                "Persisted centerline cache validation passed.",
                 f"total_ms={total_ms:.0f}",
             )
         )

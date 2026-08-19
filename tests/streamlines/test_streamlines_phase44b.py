@@ -440,15 +440,6 @@ class _ProfileTransitionRuntime(StreamlinesProfileTransitionMixin):
     def apply_streamlines_presentation_in_kit(self):
         self.events.append("material")
 
-    @staticmethod
-    def streamlines_presentation_reference_snapshot():
-        return SimpleNamespace(
-            reference_swap_passed=True,
-            session_sublayers_unchanged=True,
-            root_sublayers_unchanged=True,
-            server_scene_composition_mutations=0,
-        )
-
 
 def _install_fake_usd_material_runtime(monkeypatch):
     class Attr:
