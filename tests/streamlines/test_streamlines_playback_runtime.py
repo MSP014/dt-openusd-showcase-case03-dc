@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,55 +13,35 @@ from digital_twin_runtime_suite.app.streamlines.playback import (
     CachedPlaybackContract,
 )
 from digital_twin_runtime_suite.app.streamlines.playback_runtime import (
-    PRODUCTION_CACHE_SANITY_PERIOD_SECONDS,
     StreamlinesPlaybackRuntimeMixin,
-)
-from digital_twin_runtime_suite.app.streamlines.playback_scheduler import (
-    CachedPlaybackSchedulerReport,
+    streamlines_phase_aligned_initial_delay_seconds,
+    wait_for_streamlines_kit_frame_deadline,
 )
 from digital_twin_runtime_suite.app.streamlines.temporal import (
     TemporalSourceSample,
 )
 
 
-def test_cached_playback_switches_persisted_geometry_without_cae_or_vti(
-    monkeypatch,
-) -> None:
-    timeline = _Timeline()
-    app = _App()
-    _install_playback_modules(monkeypatch, timeline, app)
+def test_cached_playback_switches_persisted_geometry_without_cae_or_vti() -> None:
     runtime = _PlaybackRuntime(_contract())
 
     resolution = asyncio.run(runtime.select_streamlines_cache_state_in_kit(0.21))
 
     assert resolution.sample.sample_index == 1
-    assert timeline.pauses == 0
-    assert timeline.current_time is None
-    assert app.update_count == 0
-    assert runtime.applied_samples == [1]
+    assert runtime.snapshot_selections == [1]
     assert runtime._streamlines_cache_active_sample_index == 1
-    assert runtime.streamlines_controls_timeline_in_kit() is False
-
-    asyncio.run(runtime.release_streamlines_timeline_control_in_kit())
-
-    assert runtime.streamlines_controls_timeline_in_kit() is False
-    assert timeline.pauses == 0
+    assert runtime.streamlines_snapshot_visible_count_in_kit() == 1
 
 
-def test_cached_playback_same_state_is_no_op_without_kit_updates(
-    monkeypatch,
-) -> None:
-    timeline = _Timeline()
-    app = _App()
-    _install_playback_modules(monkeypatch, timeline, app)
+def test_cached_playback_same_state_is_no_op_without_snapshot_selection() -> None:
     runtime = _PlaybackRuntime(_contract())
     runtime._streamlines_cache_active_sample_index = 1
+    runtime._visible_snapshot_count = 1
 
     resolution = asyncio.run(runtime.select_streamlines_cache_state_in_kit(0.39))
 
     assert resolution.is_no_op is True
-    assert timeline.pauses == 0
-    assert app.update_count == 0
+    assert runtime.snapshot_selections == []
 
 
 def test_cached_playback_rejects_unloaded_cache_before_importing_kit() -> None:
@@ -83,12 +62,17 @@ def test_cached_playback_rejects_a_cache_outside_shared_airflow_identity() -> No
         asyncio.run(runtime.select_streamlines_cache_state_in_kit(0.0))
 
 
-def test_contract_explicit_selection_does_not_require_committed_target_identity(
-    monkeypatch,
-) -> None:
-    timeline = _Timeline()
-    app = _App()
-    _install_playback_modules(monkeypatch, timeline, app)
+def test_playback_runtime_has_no_mesh_selector_or_timeline_backend() -> None:
+    source = Path(playback_runtime.__file__).read_text(encoding="utf-8")
+
+    assert "select_streamlines_mesh_state_in_kit" not in source
+    assert "import omni.timeline" not in source
+    assert ".set_current_time(" not in source
+
+
+def test_contract_explicit_selection_does_not_require_committed_target_identity() -> (
+    None
+):
     contract = _contract()
     runtime = _PlaybackRuntime(contract)
     runtime._airflow_state = _airflow_state(
@@ -101,17 +85,11 @@ def test_contract_explicit_selection_does_not_require_committed_target_identity(
     )
 
     assert resolution.sample.sample_index == 1
-    assert timeline.current_time is None
-    assert app.update_count == 0
-    assert runtime.applied_samples == [1]
+    assert runtime.snapshot_selections == [1]
+    assert runtime.mesh_selector_calls == 0
 
 
-def test_pending_contract_scheduler_mutates_only_while_exactly_authorized(
-    monkeypatch,
-) -> None:
-    timeline = _Timeline()
-    app = _App()
-    _install_playback_modules(monkeypatch, timeline, app)
+def test_pending_contract_scheduler_mutates_only_while_exactly_authorized() -> None:
     contract = _contract()
     runtime = _PlaybackRuntime(contract, presentation_period_seconds=0.2)
     runtime._streamlines_cache_active_sample_index = 0
@@ -138,9 +116,8 @@ def test_pending_contract_scheduler_mutates_only_while_exactly_authorized(
 
     assert blocked.is_no_op is True
     assert allowed.sample.sample_index == 1
-    assert timeline.pauses == 0
-    assert app.update_count == 0
-    assert runtime.applied_samples == [1]
+    assert runtime.snapshot_selections == [1]
+    assert runtime.mesh_selector_calls == 0
 
 
 def test_production_scheduler_reads_phase_from_shared_airflow_state(
@@ -165,6 +142,36 @@ def test_production_scheduler_reads_phase_from_shared_airflow_state(
     asyncio.run(runtime.start_streamlines_cached_playback_in_kit())
 
     assert captured["phase_source"]() == 3.25
+    assert captured["initial_delay_seconds"] == pytest.approx(0.151)
+    assert callable(captured["sleep"])
+
+
+def test_phase_aligned_scheduler_delay_waits_for_the_next_real_cache_state() -> None:
+    assert streamlines_phase_aligned_initial_delay_seconds(
+        3.25,
+        sample_interval_seconds=0.2,
+    ) == pytest.approx(0.151)
+    assert streamlines_phase_aligned_initial_delay_seconds(
+        3.2,
+        sample_interval_seconds=0.2,
+    ) == pytest.approx(0.201)
+
+
+def test_kit_frame_deadline_waits_without_an_asyncio_timer() -> None:
+    clock = SimpleNamespace(value=0.0)
+
+    async def next_update() -> None:
+        clock.value += 0.05
+
+    asyncio.run(
+        wait_for_streamlines_kit_frame_deadline(
+            0.13,
+            next_update=next_update,
+            monotonic=lambda: clock.value,
+        )
+    )
+
+    assert clock.value == pytest.approx(0.15)
 
 
 def test_failed_tick_keeps_previous_state_and_scheduler_selector_alive(
@@ -204,213 +211,97 @@ def test_failed_tick_keeps_previous_state_and_scheduler_selector_alive(
     assert runtime._streamlines_cache_active_sample_index == 0
 
 
-def test_production_cache_sanity_uses_only_the_accepted_200_ms_scheduler(
-    monkeypatch,
-) -> None:
-    report = CachedPlaybackSchedulerReport(
-        period_seconds=0.2,
-        tick_count=20,
-        switch_count=10,
-        no_op_count=10,
-        missed_deadlines=0,
-        backlog_count=0,
-        maximum_drift_seconds=0.01,
-        maximum_switch_latency_seconds=0.03,
-        median_switch_latency_seconds=0.02,
-        loop_wrap_count=0,
-        cancelled=True,
-    )
+def test_failed_snapshot_selection_preserves_the_previous_visible_state() -> None:
+    runtime = _PlaybackRuntime(_contract())
+    runtime._streamlines_cache_active_sample_index = 0
+    runtime._visible_snapshot_count = 1
+    runtime.fail_snapshot_indices.add(1)
 
-    class _Scheduler:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-            self.active = False
+    with pytest.raises(RuntimeError, match="snapshot target rejected"):
+        asyncio.run(runtime.select_streamlines_cache_state_in_kit(0.21))
 
-        async def start(self) -> None:
-            self.active = True
+    assert runtime.snapshot_selections == []
+    assert runtime._streamlines_cache_active_sample_index == 0
+    assert runtime.streamlines_snapshot_visible_count_in_kit() == 1
+    assert runtime.mesh_selector_calls == 0
 
-        async def stop(self):
-            self.active = False
-            return report
 
-        @property
-        def active_task_count(self) -> int:
-            return int(self.active)
+def test_snapshot_ownership_mismatch_is_rejected_before_selection() -> None:
+    runtime = _PlaybackRuntime(_contract())
+    mismatched_contract = _contract(profile_id="line_detail")
 
-    async def _no_wait(_duration: float) -> None:
-        return None
+    with pytest.raises(RuntimeError, match="do not match the cached playback"):
+        asyncio.run(
+            runtime.select_streamlines_cached_contract_state_in_kit(
+                mismatched_contract,
+                0.21,
+            )
+        )
 
-    monkeypatch.setattr(playback_runtime, "CachedPlaybackScheduler", _Scheduler)
-    monkeypatch.setattr(playback_runtime.asyncio, "sleep", _no_wait)
+    assert runtime.snapshot_selections == []
+    assert runtime.mesh_selector_calls == 0
+
+
+def test_snapshot_cache_identity_mismatch_is_rejected_before_selection() -> None:
+    contract = _contract(cache_identity="cache-a")
+    runtime = _PlaybackRuntime(contract)
+    runtime._streamlines_snapshot_set_ownership.cache_identity = "cache-b"
+
+    with pytest.raises(RuntimeError, match="do not match the cached playback"):
+        asyncio.run(
+            runtime.select_streamlines_cached_contract_state_in_kit(
+                contract,
+                0.21,
+            )
+        )
+
+    assert runtime.snapshot_selections == []
+    assert runtime.mesh_selector_calls == 0
+
+
+def test_scheduler_start_rejects_missing_snapshots_before_creating_a_task() -> None:
     runtime = _PlaybackRuntime(_contract(), presentation_period_seconds=0.2)
+    runtime._streamlines_snapshot_set_ownership = None
 
-    async def _warm_up(_phase_seconds: float):
-        return SimpleNamespace(is_no_op=False)
+    with pytest.raises(RuntimeError, match="do not match the cached playback"):
+        asyncio.run(runtime.start_streamlines_cached_playback_in_kit())
 
-    runtime.select_streamlines_cache_state_in_kit = _warm_up
-
-    result = asyncio.run(runtime.run_streamlines_production_cache_sanity_in_kit())
-
-    assert result.scheduler == report
-    assert result.passed is True
-    assert report.period_seconds == PRODUCTION_CACHE_SANITY_PERIOD_SECONDS
-    assert result.maximum_active_playback_task_count == 1
-    assert result.active_playback_task_count_after_stop == 0
+    assert runtime._active_streamlines_playback_task_count() == 0
+    assert runtime.mesh_selector_calls == 0
 
 
-def test_production_cache_sanity_rejects_deadline_or_backlog_failure(
-    monkeypatch,
-) -> None:
-    report = CachedPlaybackSchedulerReport(
-        period_seconds=0.2,
-        tick_count=1,
-        switch_count=1,
-        no_op_count=0,
-        missed_deadlines=1,
-        backlog_count=0,
-        maximum_drift_seconds=0.21,
-        maximum_switch_latency_seconds=0.03,
-        median_switch_latency_seconds=0.03,
-        loop_wrap_count=0,
-        cancelled=True,
-    )
+def test_scheduler_restart_retains_exactly_one_owned_task(monkeypatch) -> None:
+    schedulers = []
 
     class _Scheduler:
         def __init__(self, **_kwargs) -> None:
             self.active = False
+            schedulers.append(self)
 
         async def start(self) -> None:
             self.active = True
 
         async def stop(self):
             self.active = False
-            return report
+            return None
 
         @property
         def active_task_count(self) -> int:
             return int(self.active)
 
-    async def _no_wait(_duration: float) -> None:
-        return None
-
     monkeypatch.setattr(playback_runtime, "CachedPlaybackScheduler", _Scheduler)
-    monkeypatch.setattr(playback_runtime.asyncio, "sleep", _no_wait)
     runtime = _PlaybackRuntime(_contract(), presentation_period_seconds=0.2)
 
-    async def _warm_up(_phase_seconds: float):
-        return SimpleNamespace(is_no_op=False)
+    async def exercise() -> tuple[int, int, int]:
+        await runtime.start_streamlines_cached_playback_in_kit()
+        first = runtime._active_streamlines_playback_task_count()
+        await runtime.start_streamlines_cached_playback_in_kit()
+        restarted = runtime._active_streamlines_playback_task_count()
+        await runtime.stop_streamlines_cached_playback_in_kit()
+        return first, restarted, runtime._active_streamlines_playback_task_count()
 
-    runtime.select_streamlines_cache_state_in_kit = _warm_up
-
-    with pytest.raises(RuntimeError, match="missed_deadlines=1"):
-        asyncio.run(runtime.run_streamlines_production_cache_sanity_in_kit())
-
-
-def test_production_cache_sanity_loads_without_autostart_and_measures_one_task(
-    monkeypatch,
-) -> None:
-    report = CachedPlaybackSchedulerReport(
-        period_seconds=0.2,
-        tick_count=20,
-        switch_count=10,
-        no_op_count=10,
-        missed_deadlines=0,
-        backlog_count=0,
-        maximum_drift_seconds=0.01,
-        maximum_switch_latency_seconds=0.04,
-        median_switch_latency_seconds=0.02,
-        loop_wrap_count=0,
-        cancelled=True,
-    )
-    starts: list[object] = []
-    loads: list[dict[str, object]] = []
-
-    class _Scheduler:
-        def __init__(self, **_kwargs) -> None:
-            self.active = False
-            starts.append(self)
-
-        async def start(self) -> None:
-            self.active = True
-
-        async def stop(self):
-            self.active = False
-            return report
-
-        @property
-        def active_task_count(self) -> int:
-            return int(self.active)
-
-    async def _no_wait(_duration: float) -> None:
-        return None
-
-    async def _load(**kwargs) -> None:
-        loads.append(kwargs)
-        runtime._streamlines_cache_playback_contract = _contract()
-
-    async def _warm_up(_phase_seconds: float):
-        return SimpleNamespace(is_no_op=False)
-
-    monkeypatch.setattr(playback_runtime, "CachedPlaybackScheduler", _Scheduler)
-    monkeypatch.setattr(playback_runtime.asyncio, "sleep", _no_wait)
-    runtime = _PlaybackRuntime(None, presentation_period_seconds=0.2)
-    runtime.load_streamlines_cache_in_kit = _load
-    runtime.select_streamlines_cache_state_in_kit = _warm_up
-
-    result = asyncio.run(runtime.run_streamlines_production_cache_sanity_in_kit())
-
-    assert loads == [{"status_callback": None, "start_playback": False}]
-    assert len(starts) == 1
-    assert result.maximum_active_playback_task_count == 1
-    assert result.active_playback_task_count_after_stop == 0
-
-
-def test_cadence_action_is_ready_only_after_validated_cache_load() -> None:
-    ready = _PlaybackRuntime(_contract())
-    ready._flow_lifecycle_state = "DETACHED"
-    blocked = _PlaybackRuntime(None)
-    blocked._flow_lifecycle_state = "DETACHED"
-
-    assert ready.is_streamlines_cadence_characterization_ready() is True
-    assert ready.announce_streamlines_cadence_characterization_ready() == (
-        'Ready — Press "Run Cadence Characterization".'
-    )
-    assert blocked.is_streamlines_cadence_characterization_ready() is False
-    assert blocked.announce_streamlines_cadence_characterization_ready() == (
-        "Load Streamlines Cache before cadence characterization."
-    )
-
-
-def test_fast_cadence_action_requires_the_accepted_500_ms_baseline() -> None:
-    ready = _PlaybackRuntime(_contract(), presentation_period_seconds=0.5)
-    ready._flow_lifecycle_state = "DETACHED"
-    unproven = _PlaybackRuntime(_contract(), presentation_period_seconds=0.25)
-    unproven._flow_lifecycle_state = "DETACHED"
-
-    assert ready.is_streamlines_fast_cadence_check_ready() is True
-    assert ready.announce_streamlines_fast_cadence_check_ready() == (
-        'Ready — Press "Run Fast Cadence Check".'
-    )
-    assert unproven.is_streamlines_fast_cadence_check_ready() is False
-    assert unproven.announce_streamlines_fast_cadence_check_ready() == (
-        "Run Cadence Characterization before the fast cadence check."
-    )
-
-
-def test_200_ms_wrap_recheck_requires_the_accepted_250_ms_fallback() -> None:
-    ready = _PlaybackRuntime(_contract(), presentation_period_seconds=0.25)
-    ready._flow_lifecycle_state = "DETACHED"
-    unproven = _PlaybackRuntime(_contract(), presentation_period_seconds=0.2)
-    unproven._flow_lifecycle_state = "DETACHED"
-
-    assert ready.is_streamlines_200ms_wrap_recheck_ready() is True
-    assert ready.announce_streamlines_200ms_wrap_recheck_ready() == (
-        'Ready — Press "Recheck 200 ms Wrap".'
-    )
-    assert unproven.is_streamlines_200ms_wrap_recheck_ready() is False
-    assert unproven.announce_streamlines_200ms_wrap_recheck_ready() == (
-        "A confirmed 250 ms Streamlines period is required for recheck."
-    )
+    assert asyncio.run(exercise()) == (1, 1, 0)
+    assert len(schedulers) == 2
 
 
 class _PlaybackRuntime(StreamlinesPlaybackRuntimeMixin):
@@ -428,79 +319,49 @@ class _PlaybackRuntime(StreamlinesPlaybackRuntimeMixin):
             )
         )
         self._airflow_state = _airflow_state()
-        self.applied_samples: list[int] = []
+        self._streamlines_snapshot_set_ownership = _snapshot_ownership(contract)
+        self._visible_snapshot_count = 0
+        self.snapshot_selections: list[int] = []
+        self.fail_snapshot_indices: set[int] = set()
+        self.mesh_selector_calls = 0
 
-    async def apply_streamlines_cached_state_in_kit(self, sample) -> None:
-        self.applied_samples.append(sample.sample_index)
-        self._streamlines_cache_active_sample_index = sample.sample_index
+    def select_streamlines_snapshot_state_in_kit(self, sample_index: int) -> bool:
+        if sample_index in self.fail_snapshot_indices:
+            raise RuntimeError("snapshot target rejected")
+        self.snapshot_selections.append(sample_index)
+        self._visible_snapshot_count = 1
+        self._streamlines_cache_active_sample_index = sample_index
+        return True
 
-    async def select_streamlines_mesh_state_in_kit(self, sample) -> None:
-        await self.apply_streamlines_cached_state_in_kit(sample)
+    def streamlines_snapshot_visible_count_in_kit(self) -> int:
+        return self._visible_snapshot_count
 
-    def acquire_streamlines_timeline_control_in_kit(self) -> None:
-        return None
+    async def select_streamlines_mesh_state_in_kit(self, _sample) -> None:
+        self.mesh_selector_calls += 1
+        raise AssertionError("Mesh selector must not be called by playback_runtime.")
 
     def _streamlines_carb_logger(self):
         return None
 
 
-class _Timeline:
-    def __init__(self) -> None:
-        self.pauses = 0
-        self.current_time: float | None = None
-        self.playing = True
-
-    def is_playing(self) -> bool:
-        return self.playing
-
-    def get_current_time(self) -> float:
-        return 7.25
-
-    def pause(self) -> None:
-        self.pauses += 1
-        self.playing = False
-
-    def set_current_time(self, value: float) -> None:
-        self.current_time = value
+def _snapshot_ownership(
+    contract: CachedPlaybackContract | None,
+) -> SimpleNamespace | None:
+    if contract is None:
+        return None
+    return SimpleNamespace(
+        workload=contract.workload,
+        dataset_identity=contract.dataset_identity,
+        profile_id=contract.profile_id,
+        cache_identity=contract.cache_identity,
+    )
 
 
-class _App:
-    def __init__(self) -> None:
-        self.update_count = 0
-
-    async def next_update_async(self) -> None:
-        self.update_count += 1
-
-
-class _Prim:
-    def IsValid(self) -> bool:
-        return True
-
-
-class _Stage:
-    def GetPrimAtPath(self, _path: str) -> _Prim:
-        return _Prim()
-
-
-def _install_playback_modules(monkeypatch, timeline: _Timeline, app: _App) -> None:
-    omni = _package("omni")
-    kit = _package("omni.kit")
-    kit_app = ModuleType("omni.kit.app")
-    kit_app.get_app = lambda: app
-    timeline_module = ModuleType("omni.timeline")
-    timeline_module.get_timeline_interface = lambda: timeline
-    usd = ModuleType("omni.usd")
-    usd.get_context = lambda: SimpleNamespace(get_stage=lambda: _Stage())
-
-    omni.kit = kit
-    omni.timeline = timeline_module
-    omni.usd = usd
-    kit.app = kit_app
-    for module in (omni, kit, kit_app, timeline_module, usd):
-        monkeypatch.setitem(sys.modules, module.__name__, module)
-
-
-def _contract() -> CachedPlaybackContract:
+def _contract(
+    *,
+    profile_id: str = "volume_coverage",
+    cache_identity: str = "cache-a",
+) -> CachedPlaybackContract:
     return CachedPlaybackContract(
         workload="Nominal",
         dataset_identity="server/load_normal",
@@ -510,6 +371,8 @@ def _contract() -> CachedPlaybackContract:
             _sample(1, 0.2),
             _sample(2, 0.4),
         ),
+        profile_id=profile_id,
+        cache_identity=cache_identity,
     )
 
 
@@ -537,9 +400,3 @@ def _airflow_state(
         phase_seconds=phase_seconds,
         resolve_current=lambda: target,
     )
-
-
-def _package(name: str) -> ModuleType:
-    package = ModuleType(name)
-    package.__path__ = []
-    return package

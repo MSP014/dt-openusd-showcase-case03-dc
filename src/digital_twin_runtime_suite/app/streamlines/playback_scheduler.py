@@ -65,6 +65,7 @@ class CachedPlaybackScheduler:
         self,
         *,
         period_seconds: float,
+        initial_delay_seconds: float = 0.0,
         phase_source: PhaseSource,
         state_selector: StateSelector,
         tick_observer: TickObserver | None = None,
@@ -75,7 +76,12 @@ class CachedPlaybackScheduler:
 
         if not math.isfinite(period_seconds) or period_seconds <= 0.0:
             raise ValueError("Cached playback period must be positive and finite.")
+        if not math.isfinite(initial_delay_seconds) or initial_delay_seconds < 0.0:
+            raise ValueError(
+                "Cached playback initial delay must be finite and non-negative."
+            )
         self._period_seconds = period_seconds
+        self._initial_delay_seconds = initial_delay_seconds
         self._phase_source = phase_source
         self._state_selector = state_selector
         self._tick_observer = tick_observer
@@ -113,7 +119,7 @@ class CachedPlaybackScheduler:
         if self.active:
             raise RuntimeError("Cached playback scheduler is already running.")
         self._reset_run_state()
-        self._started_at_seconds = self._monotonic()
+        self._started_at_seconds = self._monotonic() + self._initial_delay_seconds
         self._task = asyncio.create_task(self._run())
         await asyncio.sleep(0)
 

@@ -63,6 +63,9 @@ def test_phase3_acceptance_wiring_is_retired_without_removing_flow_controls(
 
 
 def _load_extension(monkeypatch):
+    for name in tuple(sys.modules):
+        if name.startswith("msp.dtrs"):
+            monkeypatch.delitem(sys.modules, name, raising=False)
     carb = types.ModuleType("carb")
     carb.log_warn = lambda _message: None
     carb.log_error = lambda _message: None
@@ -91,6 +94,7 @@ def _load_extension(monkeypatch):
         / "dtrs"
         / "extension.py"
     )
+    monkeypatch.syspath_prepend(str(path.parents[2]))
     spec = importlib.util.spec_from_file_location("phase3_closure_extension", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

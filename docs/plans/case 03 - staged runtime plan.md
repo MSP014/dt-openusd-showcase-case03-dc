@@ -8,6 +8,18 @@ around the Case 03 OpenUSD scene.
 
 ---
 
+### Application integration invariant
+
+All subsequent Case 03 work must preserve the repository-level Kit extension
+boundaries defined in
+[Application Boundaries](../architecture/application_boundaries.md).
+
+`extension.py` remains a thin lifecycle/composition root; new feature
+orchestration, acceptance workflows, and domain/runtime logic must not
+accumulate there.
+
+---
+
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
@@ -1135,7 +1147,7 @@ Rules:
 - Immediately after `READY`, emit an explicit `NEXT_ACTION` containing the
   exact UI action required, preferably using the exact visible button label:
 
-  `NEXT_ACTION | Press "Load Streamlines Cache"`.
+  `NEXT_ACTION | Select "Streamlines" in "Visualization"`.
 
 - Do not ask the operator to press a button before the corresponding operation
   is ready to be tested.
@@ -2223,9 +2235,9 @@ TEST COMPLETE                                        PASS
 
 **Status: PASS/CLOSED.** The production workload sequence confirmed exact
 workload/cache identity, shared-phase resolution, one visible advancing cached
-presentation and one scheduler. Reference-only cache swaps left both layer
-stacks and the server scene composition untouched, performed no forbidden
-runtime work, and returned cleanly to Normal.
+presentation and one scheduler. The accepted presentation is now a DTRS-owned
+static snapshot hierarchy, which performs no forbidden runtime work and returns
+cleanly to Normal.
 
 
 ##### 4.4 - Production Streamlines geometry, velocity presentation, X-Ray coexistence and UI
@@ -2233,7 +2245,8 @@ runtime work, and returned cleanly to Normal.
 Phase 4.3 proves the runtime architecture:
 
 workload -> authoritative AirflowDataset -> validated workload-owned persisted
-cache -> normalized-phase cached playback -> local Streamlines reference swap.
+cache -> static BasisCurves snapshots -> CachedPlaybackScheduler ->
+visibility-only snapshot switching.
 
 Do not reopen that architecture in Phase 4.4.
 
@@ -2343,8 +2356,136 @@ effective DAV            0.02 / 0.4 / 1.0
 The production-facing Profile order is Volume Coverage, then Global Flow
 Path. Volume Coverage is the clean-session default; an explicit user
 preference remains authoritative for that session. Production cache
-materialisation remains pending and is not part of this accepted 4.4A
-geometry-validation checkpoint.
+materialisation is now the accepted persisted centerline cache -> static
+`BasisCurves` snapshots -> `CachedPlaybackScheduler` -> visibility-only
+snapshot switching path. The Nominal / Volume Coverage 80-sample, 5 Hz
+production instance passed full-loop, teardown and clean re-entry acceptance.
+Higher sample-count scaling and final velocity-material work remain out of
+scope.
+
+
+###### 4.4B Renderer temporal playback investigation — RESOLVED
+
+The production Streamlines cache contains real temporal geometry variation, but
+the initially expected USD renderer path did not produce reliable visible
+deformation in the installed Kit/RTX stack.
+
+This became a renderer-presentation investigation rather than a cache-generation
+problem.
+
+Problem
+-------
+
+The persisted Streamlines caches were structurally valid and contained distinct
+geometry for different temporal samples, yet time-sampled `points` deformation
+remained visually static or unreliable in RTX.
+
+The failure therefore had to be separated into:
+
+- source/cache correctness;
+- USD composition correctness;
+- temporal sample selection;
+- renderer visibility of geometry deformation.
+
+Diagnostic sequence
+-------------------
+
+The investigation progressively falsified the following explanations and
+approaches:
+
+1. Variable-topology time-sampled `BasisCurves`
+   - source geometry was temporally distinct;
+   - RTX reported point-count/topology problems;
+   - visible result could corrupt into spiked/"spaghetti" geometry.
+
+2. Constant-topology time-sampled `BasisCurves`
+   - curves were padded to a fixed renderer topology;
+   - persisted and composed sample hashes changed correctly;
+   - viewport nevertheless remained visually static and showed temporal flicker.
+
+3. Explicit Python per-tick point replacement
+   - proved that explicit state mutation was possible in principle;
+   - performance collapsed to unusable levels and could trigger RTX Device Lost;
+   - rejected as a production path.
+
+4. Prebaked time-sampled `UsdGeomMesh`
+   - replaced curves with a fixed-topology tube Mesh;
+   - source and live Mesh state hashes changed correctly;
+   - visible deformation still remained static;
+   - disabling Geometry Streaming did not resolve the issue.
+
+5. Renderer-refresh probes
+   - an Xform-only probe visibly moved the complete Streamlines object, proving
+     that transform changes reached RTX;
+   - two static copies of the same logical streamline from consecutive cached
+     samples rendered as visibly different shapes;
+   - offline displacement analysis confirmed meaningful real temporal deformation
+     in the persisted cache.
+
+These results isolated the problem to renderer handling of time-sampled internal
+geometry deformation rather than to the VTI source, Streamlines integration,
+cache identity, or temporal resolver.
+
+Decisive workaround
+-------------------
+
+A final bounded experiment represented each temporal cache state as an immutable
+static `BasisCurves` snapshot and changed only USD visibility.
+
+The progression was:
+
+- two-state static A/B switching — visually successful;
+- ten consecutive full-density states at the production cadence — successful;
+- complete current 80-sample / 5 Hz loop — successful.
+
+The renderer therefore proved reliable when consuming immutable static geometry
+and visibility changes, while the same temporal shapes were unreliable when
+presented as time-sampled `points` deformation.
+
+Production decision
+-------------------
+
+The accepted production representation is therefore:
+
+    VALID persisted centerline cache
+    -> materialize one static BasisCurves snapshot per real manifest state
+    -> resolve the current real cached sample through CachedPlaybackScheduler
+    -> keep exactly one snapshot visible
+    -> advance by visibility-only switching
+
+This is a renderer-presentation workaround, not a change to Streamlines
+semantics.
+
+Each snapshot still represents the real cached streamline result for the
+corresponding authoritative manifest sample. No interpolation, synthetic states,
+runtime Streamlines recomputation, VTI presentation import, Mesh conversion, or
+per-tick point-array copying is performed.
+
+The current Volume Coverage / Nominal 80-sample / 5 Hz instance subsequently
+passed the final production gate with:
+
+- all real samples observed;
+- 79 -> 0 wrap accepted;
+- one scheduler;
+- exactly one visible snapshot;
+- zero missed deadlines/backlog;
+- clean Normal teardown and clean re-entry;
+- manual viewport acceptance.
+
+Retired approaches
+------------------
+
+The following paths are explicitly non-production and were removed after the
+snapshot path passed final acceptance:
+
+- time-sampled renderer `BasisCurves` deformation;
+- explicit per-tick Python point copying;
+- prebaked time-sampled Mesh playback;
+- Xform / real-curve A/B / full-state renderer probes.
+
+Higher sample-count residency and scaling behaviour remains a separate future
+characterization problem and is not part of this resolved renderer investigation.
+
 
 
 ###### 4.4.1 - Production velocity presentation

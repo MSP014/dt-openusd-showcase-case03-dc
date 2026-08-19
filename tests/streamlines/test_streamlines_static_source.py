@@ -46,7 +46,7 @@ def _evidence(*, flow_environment: str = "ABSENT") -> StaticSourceRuntimeEvidenc
         smoke_injectors="ABSENT",
         streamlines_operator="ABSENT",
         temporal_sequence="ABSENT",
-        timeline_playback="INACTIVE",
+        timeline_playback="NOT_OWNED",
     )
 
 

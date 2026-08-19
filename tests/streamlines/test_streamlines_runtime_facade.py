@@ -34,7 +34,6 @@ def test_runtime_controller_retains_ui_facing_streamlines_operations() -> None:
     assert issubclass(RuntimeController, StreamlinesRuntimeMixin)
     for operation in (
         "build_streamlines_cache_in_kit",
-        "load_streamlines_cache_in_kit",
         "inspect_streamlines_caches",
         "is_streamlines_production_cache_sanity_ready",
         "preview_streamlines_production_profile_in_kit",
@@ -44,18 +43,21 @@ def test_runtime_controller_retains_ui_facing_streamlines_operations() -> None:
         "accept_current_streamlines_profile_candidate",
         "accept_streamlines_production_profile",
         "build_validate_production_cache_set_in_kit",
-        "is_streamlines_cache_load_allowed",
         "select_streamlines_cache_state_in_kit",
         "start_streamlines_cached_playback_in_kit",
         "stop_streamlines_cached_playback_in_kit",
         "run_streamlines_production_cache_sanity_in_kit",
-        "announce_streamlines_phase44b_mesh_playback_when_ready",
-        "confirm_streamlines_mesh_playback",
-        "reject_streamlines_mesh_playback",
         "run_streamlines_cadence_characterization_in_kit",
         "run_streamlines_fast_cadence_check_in_kit",
         "run_streamlines_200ms_wrap_recheck_in_kit",
         "run_streamlines_recompute_fallback_in_kit",
+        "prepare_streamlines_snapshots_in_kit",
+        "select_streamlines_snapshot_state_in_kit",
+        "cleanup_streamlines_snapshots_in_kit",
+        "announce_streamlines_snapshot_playback_acceptance_ready",
+        "start_streamlines_snapshot_playback_acceptance",
+        "confirm_streamlines_snapshot_playback_acceptance",
+        "reject_streamlines_snapshot_playback_acceptance",
         "clear_streamlines_static_runtime_in_kit",
     ):
         assert callable(getattr(RuntimeController, operation))
@@ -212,8 +214,6 @@ def _install_kit_fallback_modules(monkeypatch, stage: _PreviewStage) -> None:
     app.get_app = lambda: SimpleNamespace(next_update_async=_next_update)
     commands = ModuleType("omni.kit.commands")
     commands.execute = _execute_stage_command(stage)
-    timeline = ModuleType("omni.timeline")
-    timeline.get_timeline_interface = lambda: object()
     usd = ModuleType("omni.usd")
     usd.get_context = lambda: SimpleNamespace(get_stage=lambda: stage)
     cae = _package("omni.cae")
@@ -232,7 +232,6 @@ def _install_kit_fallback_modules(monkeypatch, stage: _PreviewStage) -> None:
     usdrt.UsdGeom = ModuleType("usdrt.UsdGeom")
 
     omni.kit = kit
-    omni.timeline = timeline
     omni.usd = usd
     kit.app = app
     kit.commands = commands
@@ -253,7 +252,6 @@ def _install_kit_fallback_modules(monkeypatch, stage: _PreviewStage) -> None:
         kit,
         app,
         commands,
-        timeline,
         usd,
         cae,
         cae_data,

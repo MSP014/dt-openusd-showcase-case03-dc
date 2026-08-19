@@ -377,6 +377,11 @@ class VisualizationModeRuntimeMixin:
                 return self._result(False, "Visualization request was superseded.")
             if self._active_streamlines_playback_task_count() != 1:
                 raise RuntimeError("Streamlines requires exactly one scheduler task.")
+            self._report_visualization_progress(
+                status_callback,
+                "Snapshot presentation prepared; initial real state selected; "
+                "cached playback scheduler started.",
+            )
             advance_proof = (
                 await (
                     self.await_streamlines_cached_playback_advancement_in_kit(
@@ -394,6 +399,11 @@ class VisualizationModeRuntimeMixin:
                 )
             if not self.streamlines_cached_presentation_is_visible_in_kit():
                 raise RuntimeError("Prepared Streamlines visibility proof failed.")
+            self._report_visualization_progress(
+                status_callback,
+                "Production snapshot presentation is visible; "
+                "cached-playback scheduler is active.",
+            )
             await self._quiesce_previous_mode_for_streamlines(previous_mode)
             if not self._visualization_transition_is_current(transition):
                 raise RuntimeError("Visualization request was superseded.")
@@ -533,15 +543,12 @@ class VisualizationModeRuntimeMixin:
             return self._result(False, "Visualization request was superseded.")
         self._report_visualization_progress(
             status_callback,
-            "Smoke: stopping Streamlines scheduling and releasing the timeline.",
+            "Smoke: stopping Streamlines scheduling.",
         )
-        await self.release_streamlines_timeline_control_in_kit()
-        if (
-            self._active_streamlines_playback_task_count() != 0
-            or self.streamlines_controls_timeline_in_kit()
-        ):
+        await self.stop_streamlines_cached_playback_in_kit()
+        if self._active_streamlines_playback_task_count() != 0:
             return await self._restore_streamlines_after_smoke_resume_failure(
-                "Streamlines did not release temporal ownership cleanly."
+                "Streamlines scheduler did not stop cleanly."
             )
         if not self._visualization_transition_is_current(transition):
             return await self._restore_streamlines_after_smoke_resume_failure(
@@ -567,7 +574,6 @@ class VisualizationModeRuntimeMixin:
             )
         if (
             self._active_streamlines_playback_task_count() != 0
-            or self.streamlines_controls_timeline_in_kit()
             or not smoke_proof.timeline_playing
         ):
             return await self._restore_streamlines_after_smoke_resume_failure(
@@ -736,14 +742,9 @@ class VisualizationModeRuntimeMixin:
                 return self._result(False, detached.message)
         if previous_mode is VisualizationMode.STREAMLINES:
             try:
-                await self.release_streamlines_timeline_control_in_kit()
-                if (
-                    self._active_streamlines_playback_task_count() != 0
-                    or self.streamlines_controls_timeline_in_kit()
-                ):
-                    raise RuntimeError(
-                        "Streamlines temporal ownership did not release cleanly."
-                    )
+                await self.stop_streamlines_cached_playback_in_kit()
+                if self._active_streamlines_playback_task_count() != 0:
+                    raise RuntimeError("Streamlines scheduler did not stop cleanly.")
                 await self.cleanup_streamlines_cached_presentation_in_kit()
                 presentation = self.primary_visualization_presentation_snapshot_in_kit()
                 if (

@@ -452,6 +452,11 @@ class RuntimeController(
 
         return self._validation_receipt_store.metrics_snapshot()
 
+    def flow_lifecycle_state(self) -> str:
+        """Expose Flow lifecycle truth for application-level cleanup checks."""
+
+        return self._flow_lifecycle_state
+
     def load_validation_receipt_acceptance_checkpoint(self):
         """Load restart orchestration without treating it as evidence."""
 

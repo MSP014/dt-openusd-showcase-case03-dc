@@ -25,6 +25,7 @@ from digital_twin_runtime_suite.app.streamlines.speed import SPEED_PRIMVAR_ATTRI
 
 STREAMLINES_LOOK_ROOT = "/DTRS_Looks"
 STREAMLINES_MATERIAL_PATH = f"{STREAMLINES_LOOK_ROOT}/StreamlinesVelocity"
+STREAMLINES_SNAPSHOT_DISPLAY_COLOUR = (0.0, 0.8, 1.0)
 _PERFORMANCE_SETTLE_SECONDS = 10.0
 _PERFORMANCE_SAMPLE_WINDOW_SECONDS = 2.0
 _PERFORMANCE_SAMPLE_COUNT = 8
@@ -73,6 +74,38 @@ class StreamlinesPresentationRuntimeMixin:
         self._streamlines_material_accepted_candidate = None
         self._streamlines_material_preview_generation = 0
         self._streamlines_material_measurement_task = None
+
+    def apply_streamlines_snapshot_display_colour_in_kit(self) -> int:
+        """Preserve the accepted cyan snapshot look without authoring a material.
+
+        Static snapshots have no Mesh prototype to inherit the old material
+        binding.  This applies only the existing Full-State probe display colour;
+        velocity-driven material and palette work remains owned by its later seam.
+        """
+
+        import omni.usd
+        from pxr import Gf, UsdGeom
+
+        snapshots = getattr(self, "_streamlines_snapshot_set_ownership", None)
+        if snapshots is None:
+            raise RuntimeError("Static snapshot presentation is unavailable.")
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            raise RuntimeError("Static snapshot presentation requires an open stage.")
+        previous_target = stage.GetEditTarget()
+        try:
+            stage.SetEditTarget(stage.GetSessionLayer())
+            for state in snapshots.states:
+                curves = UsdGeom.BasisCurves(stage.GetPrimAtPath(state.prim_path))
+                display_colour = curves.CreateDisplayColorAttr(
+                    [Gf.Vec3f(*STREAMLINES_SNAPSHOT_DISPLAY_COLOUR)]
+                )
+                UsdGeom.Primvar(display_colour).SetInterpolation(
+                    UsdGeom.Tokens.constant
+                )
+        finally:
+            stage.SetEditTarget(previous_target)
+        return len(snapshots.states)
 
     def streamlines_presentation_contract(
         self,
