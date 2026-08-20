@@ -11,6 +11,10 @@ from digital_twin_runtime_suite.app.manual_acceptance import (
     format_manual_acceptance_event,
     format_manual_acceptance_test_complete,
 )
+from digital_twin_runtime_suite.app.status_log import (
+    format_dtrs_diagnostic_content,
+    format_dtrs_status_block,
+)
 from digital_twin_runtime_suite.app.visualization_mode import VisualizationMode
 
 
@@ -29,15 +33,19 @@ class ValidationReceiptWorkflow:
         current_workload: Callable[[], str | None],
         normal_selected: Callable[[], bool],
         log_warning: Callable[[str], None],
+        append_local_timestamp: Callable[[str], str],
         log_error: Callable[[str], None],
         include_airflow_diagnostics: bool,
+        guided_actions_allowed: Callable[[], bool] = lambda: True,
     ) -> None:
         self._controller = controller
         self._current_workload = current_workload
         self._normal_selected = normal_selected
         self._log_warning = log_warning
+        self._append_local_timestamp = append_local_timestamp
         self._log_error = log_error
         self._include_airflow_diagnostics = include_airflow_diagnostics
+        self._guided_actions_allowed = guided_actions_allowed
         self._airflow_background_validation_task = None
         self._streamlines_cache_validation_task = None
         self._streamlines_cache_validation_workload = None
@@ -71,6 +79,8 @@ class ValidationReceiptWorkflow:
     def initialize_acceptance(self) -> None:
         """Resume Session 2 or expose the opt-in Session 1 instruction."""
 
+        if not self._guided_actions_allowed():
+            return
         if self._checkpoint is not None:
             self._acceptance_owns_actions = True
             self._acceptance_task = asyncio.ensure_future(
@@ -116,6 +126,8 @@ class ValidationReceiptWorkflow:
     def begin_acceptance_session1(self) -> None:
         """Persist controlled evidence after both receipt-reuse settings are saved."""
 
+        if not self._guided_actions_allowed():
+            return
         task = self._acceptance_task
         if task is not None and not task.done():
             return
@@ -165,6 +177,8 @@ class ValidationReceiptWorkflow:
     def begin_consumer_action(self, mode: VisualizationMode) -> None:
         """Start guidance only for the explicitly selected production mode."""
 
+        if not self._guided_actions_allowed():
+            return
         session = self._acceptance
         if (
             session is None
@@ -190,6 +204,8 @@ class ValidationReceiptWorkflow:
     def complete_consumer_action(self, mode: VisualizationMode, result) -> None:
         """Record one completed product transition against the active session."""
 
+        if not self._guided_actions_allowed():
+            return
         if self._user_requested_mode is not mode:
             return
         self._user_requested_mode = None
@@ -220,7 +236,7 @@ class ValidationReceiptWorkflow:
         self._report("COMPLETE", completion, next_action=next_action)
         if next_action is not None or not session.complete():
             return
-        self._log_warning(
+        self._emit_status_block(
             format_manual_acceptance_test_complete(
                 "Persisted VTI and Streamlines validation receipt reuse passed."
             )
@@ -230,7 +246,7 @@ class ValidationReceiptWorkflow:
         self._acceptance_owns_actions = False
 
     async def run_acceptance_session1(self) -> None:
-        """Persist four VTI and four Streamlines receipts, then request restart."""
+        """Persist four VTI and eight Streamlines receipts, then request restart."""
 
         if not await self._wait_for_validation_tasks("SESSION_1"):
             return
@@ -252,7 +268,7 @@ class ValidationReceiptWorkflow:
         if coverage["vti_total"] != 4 or coverage["vti_valid"] != 4:
             self._fail("Not all configured VTI preflight receipts were persisted.")
             return
-        if coverage["streamlines_total"] != 4 or coverage["streamlines_valid"] != 4:
+        if coverage["streamlines_total"] != 8 or coverage["streamlines_valid"] != 8:
             self._fail("Not all configured Streamlines VALID receipts were persisted.")
             return
         self._controller.write_validation_receipt_acceptance_checkpoint(
@@ -306,12 +322,12 @@ class ValidationReceiptWorkflow:
         if (
             coverage_before["vti_total"] != 4
             or coverage_before["vti_valid"] != 4
-            or coverage_before["streamlines_total"] != 4
-            or coverage_before["streamlines_valid"] != 4
+            or coverage_before["streamlines_total"] != 8
+            or coverage_before["streamlines_valid"] != 8
         ):
             self._fail(
-                "Persisted receipt store does not cover the four controlled VTI "
-                "datasets and Streamlines caches."
+                "Persisted receipt store does not cover the four VTI datasets and "
+                "eight Streamlines profile caches."
             )
             return
         failures = self._normal_failures()
@@ -342,10 +358,10 @@ class ValidationReceiptWorkflow:
         if metrics.vti.fresh_validated or metrics.vti.expensive_validation_calls:
             failures.append("an expensive VTI preflight ran unexpectedly")
         if (
-            coverage["streamlines_valid"] != 4
-            or metrics.streamlines.persisted_reused != 4
+            coverage["streamlines_valid"] != 8
+            or metrics.streamlines.persisted_reused != 8
         ):
-            failures.append("Streamlines persisted reuse was not 4/4")
+            failures.append("Streamlines persisted reuse was not 8/8")
         if (
             metrics.streamlines.fresh_validated
             or metrics.streamlines.expensive_validation_calls
@@ -364,7 +380,7 @@ class ValidationReceiptWorkflow:
             "COMPLETE",
             "Persisted receipts restored through the cheap path. "
             "VTI persisted_reused=4/4; fresh_validated=0; invalidated=0; "
-            "expensive_preflight_calls=0; Streamlines persisted_reused=4/4; "
+            "expensive_preflight_calls=0; Streamlines persisted_reused=8/8; "
             "fresh_validated=0; invalidated=0; geometry_sha256_recomputed=0; "
             "strong_validation_calls=0.",
             next_action=(
@@ -388,16 +404,19 @@ class ValidationReceiptWorkflow:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         metrics = self._controller.validation_receipt_metrics_snapshot()
-        self._log_warning(
+        matrix_summary = self._streamlines_matrix_summary_lines()
+        self._emit_status_block(
             "\n".join(
                 (
-                    "DTRS VALIDATION RECEIPTS | STARTUP SUMMARY",
-                    "VTI:",
+                    "DTRS VALIDATION RECEIPTS",
+                    "process=STARTUP SUMMARY | state=COMPLETE",
+                    "VTI receipt checks:",
                     f"  persisted_reused={metrics.vti.persisted_reused}",
                     f"  session_reused={metrics.vti.session_reused}",
                     f"  fresh_validated={metrics.vti.fresh_validated}",
                     f"  invalidated={metrics.vti.invalidated}",
-                    "Streamlines:",
+                    *matrix_summary,
+                    "Streamlines receipt checks:",
                     "  persisted_reused=" f"{metrics.streamlines.persisted_reused}",
                     f"  session_reused={metrics.streamlines.session_reused}",
                     f"  fresh_validated={metrics.streamlines.fresh_validated}",
@@ -405,6 +424,36 @@ class ValidationReceiptWorkflow:
                 )
             )
         )
+
+    def _streamlines_matrix_summary_lines(self) -> tuple[str, ...]:
+        """Separate cache health from the receipt-work counters below it."""
+
+        entries = (
+            self._controller.streamlines_production_cache_matrix_readiness_snapshot()
+        )
+        classifications = {
+            classification: sum(
+                entry.classification == classification for entry in entries
+            )
+            for classification in ("VALID", "MISSING", "STALE", "INCOMPATIBLE")
+        }
+        total = len(entries)
+        valid = classifications["VALID"]
+        unknown = total - sum(classifications.values())
+        ready = total > 0 and valid == total
+        lines = (
+            "Streamlines cache matrix:",
+            f"  state={'READY' if ready else 'INCOMPLETE'}",
+            f"  valid={valid}/{total}",
+            f"  missing={classifications['MISSING']}",
+            f"  stale={classifications['STALE']}",
+            f"  incompatible={classifications['INCOMPATIBLE']}",
+        )
+        if unknown:
+            lines += (f"  other={unknown}",)
+        if not ready:
+            lines += ("  required_action=Build / Validate Production Cache Set",)
+        return lines
 
     def cancel(self) -> None:
         """Cancel only workflow-owned tasks during extension teardown."""
@@ -436,7 +485,9 @@ class ValidationReceiptWorkflow:
 
     async def _run_background_airflow_validation(self) -> None:
         try:
-            await self._controller.run_background_airflow_validation(self._log_warning)
+            await self._controller.run_background_airflow_validation(
+                self._emit_status_block
+            )
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -460,7 +511,7 @@ class ValidationReceiptWorkflow:
 
     async def _run_streamlines_receipt_sweep(self):
         def status(message: str) -> None:
-            self._log_warning("DTRS VALIDATION RECEIPTS | PROGRESS | " + message)
+            self._emit_status_block(self._format_streamlines_receipt_progress(message))
 
         try:
             ensure_configured_validations = getattr(
@@ -561,11 +612,43 @@ class ValidationReceiptWorkflow:
         status: str,
         next_action: str | None = None,
     ) -> None:
-        self._log_warning(
+        if not self._guided_actions_allowed():
+            return
+        self._emit_status_block(
             format_manual_acceptance_event(
                 area="VALIDATION RECEIPTS | ACCEPTANCE",
                 event=event,
                 status=status,
                 next_action=next_action,
             )
+        )
+
+    def _emit_status_block(self, content: str) -> None:
+        """Isolate user guidance and multi-line summaries from startup diagnostics."""
+
+        self._log_warning(
+            format_dtrs_status_block(
+                content,
+                append_local_timestamp=self._append_local_timestamp,
+            )
+        )
+
+    @staticmethod
+    def _format_streamlines_receipt_progress(message: str) -> str:
+        """Project the existing cache callback into readable diagnostic fields."""
+
+        details = {}
+        prefix = "Streamlines receipt: "
+        if message.startswith(prefix):
+            for field in message.removeprefix(prefix).split("; "):
+                name, separator, value = field.partition("=")
+                if separator:
+                    details[name] = value
+        if not details:
+            details["message"] = message
+        return format_dtrs_diagnostic_content(
+            owner="VALIDATION RECEIPTS",
+            process="CACHE VALIDATION",
+            state="PROGRESS",
+            details=details,
         )

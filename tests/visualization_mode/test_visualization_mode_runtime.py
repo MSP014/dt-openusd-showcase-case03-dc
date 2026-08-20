@@ -28,6 +28,16 @@ from digital_twin_runtime_suite.app.visualization_mode.runtime import (
 )
 
 
+def test_streamlines_xray_mode_follows_streamlines_in_selector_order():
+    assert tuple(mode.value for mode in VisualizationMode) == (
+        "Normal",
+        "Smoke",
+        "Streamlines",
+        "Streamlines + X-Ray",
+        "Heatmap",
+    )
+
+
 class _Runtime(VisualizationModeRuntimeMixin):
     def __init__(self) -> None:
         self._flow_lifecycle_state = "DETACHED"
@@ -64,6 +74,12 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._streamlines_advancement_proved = False
         self._streamlines_root_count = 0
         self._maximum_streamlines_root_count = 0
+        self._streamlines_material_release_count = 0
+        self._streamlines_material_binding_count = 0
+        self._streamlines_callback_count = 0
+        self._maximum_streamlines_callback_count = 0
+        self._xray_session_binding_spec_count = 0
+        self._maximum_xray_session_binding_spec_count = 0
         self._smoke_visible = False
         self._detach_leaves_smoke_visible = False
         self._smoke_resumes = True
@@ -167,6 +183,50 @@ class _Runtime(VisualizationModeRuntimeMixin):
             VisualizationMode.NORMAL,
         )
 
+    def apply_streamlines_xray_override_in_kit(self):
+        self._override_owner = "streamlines_xray"
+        self._override_targets = frozenset({"chassis", "fans"})
+        self._xray_session_binding_spec_count = len(self._override_targets)
+        self._maximum_xray_session_binding_spec_count = max(
+            self._maximum_xray_session_binding_spec_count,
+            self._xray_session_binding_spec_count,
+        )
+        return VisualizationModeResult(
+            True,
+            "Streamlines + X-Ray override applied.",
+            VisualizationMode.STREAMLINES,
+        )
+
+    def release_streamlines_xray_override_in_kit(self):
+        if self._override_owner != "streamlines_xray":
+            return VisualizationModeResult(
+                False,
+                "A different X-Ray target override is active.",
+                VisualizationMode.STREAMLINES,
+            )
+        self._override_owner = None
+        self._override_targets = frozenset()
+        self._xray_session_binding_spec_count = 0
+        return VisualizationModeResult(
+            True,
+            "Streamlines + X-Ray override released.",
+            VisualizationMode.STREAMLINES,
+        )
+
+    def restore_streamlines_xray_override_in_kit(self):
+        self._override_owner = "streamlines_xray"
+        self._override_targets = frozenset({"chassis", "fans"})
+        self._xray_session_binding_spec_count = len(self._override_targets)
+        self._maximum_xray_session_binding_spec_count = max(
+            self._maximum_xray_session_binding_spec_count,
+            self._xray_session_binding_spec_count,
+        )
+        return VisualizationModeResult(
+            True,
+            "Streamlines + X-Ray override restored.",
+            VisualizationMode.STREAMLINES,
+        )
+
     def xray_target_snapshot(self):
         return SimpleNamespace(
             manual_target_ids=self._manual_targets,
@@ -199,6 +259,12 @@ class _Runtime(VisualizationModeRuntimeMixin):
             dataset_identity=binding.dataset_identity,
         )
         self._streamlines_root_count = 1
+        self._streamlines_material_binding_count = 1
+        self._streamlines_callback_count = 1
+        self._maximum_streamlines_callback_count = max(
+            self._maximum_streamlines_callback_count,
+            self._streamlines_callback_count,
+        )
         self._streamlines_snapshot_prepare_count += 1
         self._streamlines_snapshot_selected_count = 1
         self._maximum_streamlines_root_count = max(
@@ -222,6 +288,12 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._streamlines_visible = False
         self._streamlines_root_count = 0
         self._streamlines_snapshot_selected_count = 0
+        self._streamlines_material_binding_count = 0
+        self._streamlines_callback_count = 0
+
+    def release_streamlines_presentation_material_in_kit(self):
+        self._streamlines_material_release_count += 1
+        self._streamlines_material_binding_count = 0
 
     async def start_streamlines_cached_playback_in_kit(self, **_kwargs):
         self._lifecycle_events.append("streamlines_start")
@@ -591,6 +663,7 @@ def test_readiness_uses_only_current_workload_receipt_and_read_only_cache(monkey
 
     assert readiness.for_mode(VisualizationMode.SMOKE).state == "VALIDATING"
     assert readiness.for_mode(VisualizationMode.STREAMLINES).state == "STALE"
+    assert readiness.for_mode(VisualizationMode.STREAMLINES_XRAY).state == "STALE"
     assert runtime._cache_mutations == 0
     assert readiness.for_mode(VisualizationMode.HEATMAP).state == "PREVIEW_READY"
 
@@ -619,6 +692,25 @@ def test_repeated_readiness_never_calls_strong_streamlines_inspection(monkeypatc
     for _ in range(5):
         readiness = runtime.visualization_readiness()
         assert readiness.for_mode(VisualizationMode.STREAMLINES).state == "VALID"
+
+
+def test_checking_streamlines_receipt_remains_selectable_for_validation(
+    monkeypatch,
+):
+    runtime = _Runtime()
+    runtime._cache_classification = "CHECKING"
+    monkeypatch.setattr(
+        "digital_twin_runtime_suite.app.visualization_mode.runtime."
+        "build_dataset_validation_signature",
+        lambda *_args: object(),
+    )
+
+    readiness = runtime.visualization_readiness().for_mode(
+        VisualizationMode.STREAMLINES
+    )
+
+    assert readiness.state == "CHECKING"
+    assert readiness.activation_available is True
 
 
 def test_other_workload_receipt_does_not_make_current_smoke_ready(monkeypatch):
@@ -689,14 +781,22 @@ def test_normal_to_smoke_preserves_independent_manual_xray_selection():
         ("Smoke", "Normal"),
         ("Normal", "Streamlines"),
         ("Streamlines", "Normal"),
+        ("Normal", "Streamlines + X-Ray"),
+        ("Streamlines + X-Ray", "Normal"),
         ("Normal", "Heatmap"),
         ("Heatmap", "Normal"),
         ("Smoke", "Streamlines"),
         ("Streamlines", "Smoke"),
+        ("Smoke", "Streamlines + X-Ray"),
+        ("Streamlines + X-Ray", "Smoke"),
         ("Smoke", "Heatmap"),
         ("Heatmap", "Smoke"),
         ("Streamlines", "Heatmap"),
         ("Heatmap", "Streamlines"),
+        ("Streamlines", "Streamlines + X-Ray"),
+        ("Streamlines + X-Ray", "Streamlines"),
+        ("Streamlines + X-Ray", "Heatmap"),
+        ("Heatmap", "Streamlines + X-Ray"),
     ),
 )
 def test_supported_mode_graph_activates_target_independently(source, target):
@@ -717,6 +817,7 @@ def test_supported_mode_graph_activates_target_independently(source, target):
         "Normal": (False, False, None, 0),
         "Smoke": (True, False, None, 0),
         "Streamlines": (False, True, None, 1),
+        "Streamlines + X-Ray": (False, True, "streamlines_xray", 1),
         "Heatmap": (False, False, "heatmap_preview", 0),
     }
     expected = visible[target]
@@ -724,6 +825,42 @@ def test_supported_mode_graph_activates_target_independently(source, target):
     assert runtime._streamlines_visible is expected[1]
     assert runtime._override_owner == expected[2]
     assert runtime._streamlines_scheduler_count == expected[3]
+
+
+def test_normal_releases_velocity_material_after_streamlines_cleanup():
+    runtime = _Runtime()
+    assert asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines")).success
+
+    result = asyncio.run(runtime.request_visualization_mode_in_kit("Normal"))
+
+    assert result.success is True
+    assert runtime._streamlines_scheduler_count == 0
+    assert runtime._streamlines_root_count == 0
+    assert runtime._streamlines_material_release_count == 1
+
+
+def test_streamlines_xray_toggle_preserves_existing_cached_playback():
+    runtime = _Runtime()
+    assert asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines")).success
+    before = (
+        runtime._streamlines_prepare_count,
+        runtime._streamlines_start_count,
+        runtime._streamlines_scheduler_count,
+    )
+
+    enabled = asyncio.run(
+        runtime.request_visualization_mode_in_kit("Streamlines + X-Ray")
+    )
+    disabled = asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines"))
+
+    assert enabled.success and disabled.success
+    assert runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES
+    assert runtime._override_owner is None
+    assert (
+        runtime._streamlines_prepare_count,
+        runtime._streamlines_start_count,
+        runtime._streamlines_scheduler_count,
+    ) == before
 
 
 def test_direct_normal_to_streamlines_uses_only_persisted_cache_playback():
@@ -1148,6 +1285,50 @@ def test_repeated_round_trip_keeps_exactly_one_primary_presentation_active():
 
     assert streamlines_only and smoke_only
     assert runtime._streamlines_scheduler_count == 0
+
+
+def test_repeated_mixed_modes_leave_no_streamlines_xray_accumulation():
+    runtime = _Runtime()
+
+    async def cycle():
+        for _ in range(3):
+            for target in (
+                "Smoke",
+                "Streamlines",
+                "Streamlines + X-Ray",
+                "Streamlines",
+                "Smoke",
+                "Normal",
+            ):
+                result = await runtime.request_visualization_mode_in_kit(target)
+                assert result.success is True
+                if target == "Streamlines + X-Ray":
+                    assert runtime._streamlines_scheduler_count == 1
+                    assert runtime._streamlines_root_count == 1
+                    assert runtime._streamlines_material_binding_count == 1
+                    assert runtime._streamlines_callback_count == 1
+                    assert runtime._override_owner == "streamlines_xray"
+                    assert runtime._xray_session_binding_spec_count == 2
+                elif target == "Streamlines":
+                    assert runtime._streamlines_scheduler_count == 1
+                    assert runtime._streamlines_root_count == 1
+                    assert runtime._streamlines_material_binding_count == 1
+                    assert runtime._streamlines_callback_count == 1
+                    assert runtime._override_owner is None
+                    assert runtime._xray_session_binding_spec_count == 0
+            assert runtime._streamlines_scheduler_count == 0
+            assert runtime._streamlines_root_count == 0
+            assert runtime._streamlines_material_binding_count == 0
+            assert runtime._streamlines_callback_count == 0
+            assert runtime._override_owner is None
+            assert runtime._override_targets == frozenset()
+            assert runtime._xray_session_binding_spec_count == 0
+
+    asyncio.run(cycle())
+
+    assert runtime._maximum_streamlines_root_count == 1
+    assert runtime._maximum_streamlines_callback_count == 1
+    assert runtime._maximum_xray_session_binding_spec_count == 2
 
 
 def test_streamlines_cancels_running_flow_proof_without_detaching_source():

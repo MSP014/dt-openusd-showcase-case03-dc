@@ -569,6 +569,7 @@ def format_runtime_override(
     chassis_presentation: ChassisPresentationConfig | None = None,
     streamlines_presentation_period_seconds: float | None = None,
     validation_receipts: ValidationReceiptReuseConfig | None = None,
+    streamlines_presentation: StreamlinesPresentationConfig | None = None,
 ) -> str:
     """Serialize local operator overrides as minimal TOML."""
 
@@ -607,6 +608,27 @@ def format_runtime_override(
             "reuse_verified_streamlines_cache_receipts = "
             f"{reuse_streamlines}\n"
         )
+    if streamlines_presentation is not None:
+        text += (
+            "\n"
+            "[streamlines.presentation]\n"
+            f"speed_min = {streamlines_presentation.speed_min:.9g}\n"
+            f"speed_max = {streamlines_presentation.speed_max:.9g}\n"
+            "speed_units = "
+            f"{_toml_string(streamlines_presentation.speed_units)}\n"
+            f"opacity = {streamlines_presentation.opacity:.9g}\n"
+            "emission_intensity = "
+            f"{streamlines_presentation.emission_intensity:.9g}\n"
+            "lighting_influence = "
+            f"{streamlines_presentation.lighting_influence:.9g}\n"
+        )
+        for position, color in streamlines_presentation.palette:
+            values = ", ".join(f"{value:.9g}" for value in color)
+            text += (
+                "\n[[streamlines.presentation.palette]]\n"
+                f"position = {position:.9g}\n"
+                f"color = [{values}]\n"
+            )
     if camera:
         text += (
             "\n"
@@ -887,6 +909,26 @@ def _merge_runtime_override(
                 continue
             validation_receipts[key] = value
         data["validation_receipts"] = validation_receipts
+
+    local_streamlines = local_data.get("streamlines")
+    if isinstance(local_streamlines, dict):
+        local_presentation = local_streamlines.get("presentation")
+        if isinstance(local_presentation, dict):
+            streamlines = dict(data.get("streamlines", {}))
+            presentation = dict(streamlines.get("presentation", {}))
+            for key in (
+                "speed_min",
+                "speed_max",
+                "speed_units",
+                "opacity",
+                "emission_intensity",
+                "lighting_influence",
+                "palette",
+            ):
+                if key in local_presentation:
+                    presentation[key] = local_presentation[key]
+            streamlines["presentation"] = presentation
+            data["streamlines"] = streamlines
 
 
 def _parse_camera_config(data: Any) -> CameraConfig | None:

@@ -1,21 +1,12 @@
-"""Kit/USD ownership for the one production Streamlines velocity material."""
+"""Bind one fixed-scale velocity material to the active static snapshots."""
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from statistics import mean
 from typing import Callable
 
-from digital_twin_runtime_suite.app.diagnostics import with_dtrs_yerevan_timestamp
-from digital_twin_runtime_suite.app.flow.performance import (
-    ViewportPerformanceSample,
-    capture_viewport_performance_sample,
-)
-from digital_twin_runtime_suite.app.streamlines.cache import (
-    CACHE_PLAYBACK_CURVES_PATH,
-)
 from digital_twin_runtime_suite.app.streamlines.presentation import (
     PaletteStop,
     PhysicalSpeedScale,
@@ -25,87 +16,53 @@ from digital_twin_runtime_suite.app.streamlines.speed import SPEED_PRIMVAR_ATTRI
 
 STREAMLINES_LOOK_ROOT = "/DTRS_Looks"
 STREAMLINES_MATERIAL_PATH = f"{STREAMLINES_LOOK_ROOT}/StreamlinesVelocity"
-STREAMLINES_SNAPSHOT_DISPLAY_COLOUR = (0.0, 0.8, 1.0)
-_PERFORMANCE_SETTLE_SECONDS = 10.0
-_PERFORMANCE_SAMPLE_WINDOW_SECONDS = 2.0
-_PERFORMANCE_SAMPLE_COUNT = 8
 StatusCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True)
 class StreamlinesMaterialSnapshot:
-    """Real authored/bound material evidence without renderer polling."""
+    """Material evidence for every static curve in the active snapshot set."""
 
     material_path: str
-    geometry_path: str
+    snapshot_root_path: str
+    geometry_paths: tuple[str, ...]
     presentation_signature: str
     material_bound: bool
     speed_primvar_readable: bool
     material_create_count: int
     apply_count: int
 
+    @property
+    def snapshot_count(self) -> int:
+        """Return the number of static states sharing the material."""
+
+        return len(self.geometry_paths)
+
 
 @dataclass(frozen=True)
 class StreamlinesMaterialPreviewReceipt:
-    """Stable material and post-settle viewport evidence for one preview."""
+    """One latest-wins preview receipt without playback-performance sampling."""
 
     material: StreamlinesMaterialSnapshot
-    performance_settle_seconds: float
-    performance_sample_window_seconds: float
-    performance_samples: int
-    viewport_fps_current: float | None
-    viewport_fps_average: float | None
-    viewport_fps_minimum: float | None
-    frame_time_ms_current: float | None
-    frame_time_ms_average: float | None
-    gpu_used_gib: float | None
-    process_used_gib: float | None
 
 
 class StreamlinesPresentationRuntimeMixin:
-    """Author and bind one stable material; never own cache/playback state."""
+    """Own only DTRS material authoring and snapshot-set bindings.
+
+    Cache generation, snapshot materialisation, and scheduler ownership remain
+    outside this mixin. Applying a presentation only changes one material and
+    bindings already owned by the current static snapshot set.
+    """
 
     def reset_streamlines_presentation_runtime_state(self) -> None:
+        """Clear session-only material state at lifecycle boundaries."""
+
         self.cancel_streamlines_material_preview_measurement()
         self._streamlines_material_create_count = 0
         self._streamlines_material_apply_count = 0
         self._streamlines_material_snapshot = None
-        self._streamlines_material_candidate = None
-        self._streamlines_material_accepted_candidate = None
+        self._streamlines_material_active_presentation = None
         self._streamlines_material_preview_generation = 0
-        self._streamlines_material_measurement_task = None
-
-    def apply_streamlines_snapshot_display_colour_in_kit(self) -> int:
-        """Preserve the accepted cyan snapshot look without authoring a material.
-
-        Static snapshots have no Mesh prototype to inherit the old material
-        binding.  This applies only the existing Full-State probe display colour;
-        velocity-driven material and palette work remains owned by its later seam.
-        """
-
-        import omni.usd
-        from pxr import Gf, UsdGeom
-
-        snapshots = getattr(self, "_streamlines_snapshot_set_ownership", None)
-        if snapshots is None:
-            raise RuntimeError("Static snapshot presentation is unavailable.")
-        stage = omni.usd.get_context().get_stage()
-        if stage is None:
-            raise RuntimeError("Static snapshot presentation requires an open stage.")
-        previous_target = stage.GetEditTarget()
-        try:
-            stage.SetEditTarget(stage.GetSessionLayer())
-            for state in snapshots.states:
-                curves = UsdGeom.BasisCurves(stage.GetPrimAtPath(state.prim_path))
-                display_colour = curves.CreateDisplayColorAttr(
-                    [Gf.Vec3f(*STREAMLINES_SNAPSHOT_DISPLAY_COLOUR)]
-                )
-                UsdGeom.Primvar(display_colour).SetInterpolation(
-                    UsdGeom.Tokens.constant
-                )
-        finally:
-            stage.SetEditTarget(previous_target)
-        return len(snapshots.states)
 
     def streamlines_presentation_contract(
         self,
@@ -114,11 +71,15 @@ class StreamlinesPresentationRuntimeMixin:
         emission_intensity: float | None = None,
         lighting_influence: float | None = None,
     ) -> StreamlinesPresentation:
+        """Return the immutable, cache-independent current material contract."""
+
         config = self.config.streamlines_presentation
         speed_scale = getattr(self, "_streamlines_accepted_speed_scale", None)
         if speed_scale is None:
             speed_scale = PhysicalSpeedScale(
-                config.speed_min, config.speed_max, config.speed_units
+                config.speed_min,
+                config.speed_max,
+                config.speed_units,
             )
         return StreamlinesPresentation(
             speed_scale=speed_scale,
@@ -142,7 +103,11 @@ class StreamlinesPresentationRuntimeMixin:
         self,
         presentation: StreamlinesPresentation | None = None,
     ) -> StreamlinesMaterialSnapshot:
-        """Update one material and direct binding without touching geometry."""
+        """Bind one material across the current snapshot states only.
+
+        The snapshot owner is authoritative: this deliberately has no fallback
+        to the retired single cached-playback curve path.
+        """
 
         import omni.usd
         from pxr import Gf, Sdf, UsdShade
@@ -150,15 +115,29 @@ class StreamlinesPresentationRuntimeMixin:
         stage = omni.usd.get_context().get_stage()
         if not stage:
             raise RuntimeError("Streamlines material requires an open stage.")
-        geometry = stage.GetPrimAtPath(CACHE_PLAYBACK_CURVES_PATH)
-        if not geometry or not geometry.IsValid():
-            raise RuntimeError("Streamlines presentation geometry is unavailable.")
-        speed = geometry.GetAttribute(SPEED_PRIMVAR_ATTRIBUTE)
-        if not speed or not speed.IsValid():
+        snapshots = getattr(self, "_streamlines_snapshot_set_ownership", None)
+        if snapshots is None or not snapshots.states:
+            raise RuntimeError(
+                "Static Streamlines snapshot presentation is unavailable."
+            )
+        geometries = tuple(
+            stage.GetPrimAtPath(state.prim_path) for state in snapshots.states
+        )
+        if any(not geometry or not geometry.IsValid() for geometry in geometries):
+            raise RuntimeError("Streamlines snapshot geometry is unavailable.")
+        if any(
+            not geometry.GetAttribute(SPEED_PRIMVAR_ATTRIBUTE)
+            or not geometry.GetAttribute(SPEED_PRIMVAR_ATTRIBUTE).IsValid()
+            for geometry in geometries
+        ):
             raise RuntimeError(
                 "Installed Streamlines material cannot read primvars:dtrs:speed."
             )
-        presentation = presentation or self.streamlines_presentation_contract()
+        presentation = (
+            presentation
+            or getattr(self, "_streamlines_material_active_presentation", None)
+            or self.streamlines_presentation_contract()
+        )
         previous_target = stage.GetEditTarget()
         try:
             stage.SetEditTarget(stage.GetSessionLayer())
@@ -177,114 +156,58 @@ class StreamlinesPresentationRuntimeMixin:
                 Gf=Gf,
                 Sdf=Sdf,
             )
-            UsdShade.MaterialBindingAPI.Apply(geometry).Bind(material)
+            for geometry in geometries:
+                UsdShade.MaterialBindingAPI.Apply(geometry).Bind(material)
         finally:
             stage.SetEditTarget(previous_target)
-        bound, _ = UsdShade.MaterialBindingAPI(geometry).ComputeBoundMaterial()
+        material_bound = all(
+            self._is_streamlines_material_bound(geometry, UsdShade)
+            for geometry in geometries
+        )
+        if not material_bound:
+            raise RuntimeError("Streamlines production material binding failed.")
         self._streamlines_material_apply_count += 1
+        self._streamlines_material_active_presentation = presentation
         snapshot = StreamlinesMaterialSnapshot(
             material_path=STREAMLINES_MATERIAL_PATH,
-            geometry_path=CACHE_PLAYBACK_CURVES_PATH,
+            snapshot_root_path=snapshots.root_path,
+            geometry_paths=tuple(str(geometry.GetPath()) for geometry in geometries),
             presentation_signature=presentation.signature,
-            material_bound=bool(
-                bound
-                and bound.GetPrim().IsValid()
-                and str(bound.GetPath()) == STREAMLINES_MATERIAL_PATH
-            ),
+            material_bound=True,
             speed_primvar_readable=True,
             material_create_count=self._streamlines_material_create_count,
             apply_count=self._streamlines_material_apply_count,
         )
-        if not snapshot.material_bound:
-            raise RuntimeError("Streamlines production material binding failed.")
         self._streamlines_material_snapshot = snapshot
         return snapshot
 
-    async def apply_streamlines_material_preview_in_kit(
+    async def apply_streamlines_material_settings_in_kit(
         self,
         presentation: StreamlinesPresentation,
         *,
         status_callback: StatusCallback | None = None,
     ) -> StreamlinesMaterialPreviewReceipt:
-        """Apply once, then publish evidence only after the stable 10+2 s gate."""
+        """Apply settings after one Kit update, without scheduler work."""
 
         self.cancel_streamlines_material_preview_measurement()
         self._streamlines_material_preview_generation += 1
         generation = self._streamlines_material_preview_generation
-        self._streamlines_material_candidate = None
-        self._report_streamlines_material_preview(
-            "START",
-            "Applying the shared production Streamlines material.",
-            status_callback,
-        )
         snapshot = self.apply_streamlines_presentation_in_kit(presentation)
         await self._await_streamlines_material_viewport_update()
         self._require_current_streamlines_material_preview(generation)
-        self._report_streamlines_material_preview(
-            "PROGRESS",
-            "Preview visible; material binding and raw speed are valid.",
-            status_callback,
-        )
-        self._report_streamlines_material_preview(
-            "WAITING",
-            "Allowing viewport to stabilize for performance measurement.",
-            status_callback,
-        )
-        task = asyncio.ensure_future(
-            self._collect_streamlines_material_performance_samples(generation)
-        )
-        self._streamlines_material_measurement_task = task
-        try:
-            samples = await task
-        finally:
-            if self._streamlines_material_measurement_task is task:
-                self._streamlines_material_measurement_task = None
-        self._require_current_streamlines_material_preview(generation)
-        receipt = self._streamlines_material_preview_receipt(snapshot, samples)
-        self._streamlines_material_candidate = presentation
-        self._report_streamlines_material_preview(
-            "COMPLETE",
-            "material_bound=True; dtrs:speed_readable=True; cache_build=0; "
-            "cache_rebuild=0; KitCAE=0; VTI_import=0; "
-            f"performance_samples={receipt.performance_samples}; "
-            f"viewport_fps_average={receipt.viewport_fps_average}; "
-            f"viewport_fps_minimum={receipt.viewport_fps_minimum}.",
-            status_callback,
-        )
-        return receipt
+        if status_callback:
+            status_callback(
+                "Material settings applied: one snapshot-set material; "
+                "cache_build=0; snapshot_rebuild=0; KitCAE=0; VTI_import=0."
+            )
+        return StreamlinesMaterialPreviewReceipt(snapshot)
 
     def cancel_streamlines_material_preview_measurement(self) -> None:
-        """Invalidate delayed evidence so superseded work cannot complete late."""
+        """Invalidate a stale material application before it reports completion."""
 
         self._streamlines_material_preview_generation = (
             getattr(self, "_streamlines_material_preview_generation", 0) + 1
         )
-        task = getattr(self, "_streamlines_material_measurement_task", None)
-        if task is not None and not task.done():
-            task.cancel()
-        self._streamlines_material_measurement_task = None
-        self._streamlines_material_candidate = None
-
-    async def _collect_streamlines_material_performance_samples(
-        self,
-        generation: int,
-    ) -> tuple[ViewportPerformanceSample, ...]:
-        await self._wait_streamlines_material_measurement_interval(
-            _PERFORMANCE_SETTLE_SECONDS
-        )
-        self._require_current_streamlines_material_preview(generation)
-        interval = _PERFORMANCE_SAMPLE_WINDOW_SECONDS / (_PERFORMANCE_SAMPLE_COUNT - 1)
-        samples = []
-        for index in range(_PERFORMANCE_SAMPLE_COUNT):
-            self._require_current_streamlines_material_preview(generation)
-            samples.append(capture_viewport_performance_sample())
-            if index + 1 < _PERFORMANCE_SAMPLE_COUNT:
-                await self._wait_streamlines_material_measurement_interval(interval)
-        return tuple(samples)
-
-    @staticmethod
-    async def _wait_streamlines_material_measurement_interval(seconds: float) -> None:
-        await asyncio.sleep(seconds)
 
     @staticmethod
     async def _await_streamlines_material_viewport_update() -> None:
@@ -299,61 +222,35 @@ class StreamlinesPresentationRuntimeMixin:
         if generation != self._streamlines_material_preview_generation:
             raise asyncio.CancelledError
 
-    @staticmethod
-    def _streamlines_material_preview_receipt(
-        snapshot: StreamlinesMaterialSnapshot,
-        samples: tuple[ViewportPerformanceSample, ...],
-    ) -> StreamlinesMaterialPreviewReceipt:
-        if len(samples) < 2:
-            raise RuntimeError("Material performance proof requires several samples.")
-        fps = tuple(value.fps for value in samples if value.fps is not None)
-        frame_times = tuple(
-            value.frame_time_ms for value in samples if value.frame_time_ms is not None
-        )
-        final = samples[-1]
-        return StreamlinesMaterialPreviewReceipt(
-            material=snapshot,
-            performance_settle_seconds=_PERFORMANCE_SETTLE_SECONDS,
-            performance_sample_window_seconds=_PERFORMANCE_SAMPLE_WINDOW_SECONDS,
-            performance_samples=len(samples),
-            viewport_fps_current=final.fps,
-            viewport_fps_average=float(mean(fps)) if fps else None,
-            viewport_fps_minimum=min(fps) if fps else None,
-            frame_time_ms_current=final.frame_time_ms,
-            frame_time_ms_average=(float(mean(frame_times)) if frame_times else None),
-            gpu_used_gib=final.gpu_memory_used_gib,
-            process_used_gib=final.process_memory_used_gib,
-        )
-
-    @staticmethod
-    def _report_streamlines_material_preview(
-        event: str,
-        message: str,
-        status_callback: StatusCallback | None,
-    ) -> None:
-        if status_callback:
-            status_callback(message)
-        try:
-            import carb
-        except ImportError:
-            return
-        carb.log_warn(
-            with_dtrs_yerevan_timestamp(
-                f"DTRS STREAMLINES | PHASE_4_4B_MATERIAL | {event}\nstatus={message}"
-            )
-        )
-
     def streamlines_material_snapshot(self) -> StreamlinesMaterialSnapshot | None:
+        """Return public evidence for the material bound to active snapshots."""
+
         return getattr(self, "_streamlines_material_snapshot", None)
 
-    def accept_streamlines_material_candidate(self) -> StreamlinesPresentation:
-        """Return the immutable session candidate from the last successful apply."""
+    def save_streamlines_material_settings(
+        self,
+        presentation: StreamlinesPresentation,
+    ) -> Path:
+        """Persist applied tuning without changing the shared speed scale."""
 
-        candidate = getattr(self, "_streamlines_material_candidate", None)
-        if candidate is None:
-            raise RuntimeError("Apply a Streamlines material preview first.")
-        self._streamlines_material_accepted_candidate = candidate
-        return candidate
+        persisted = replace(
+            self.config.streamlines_presentation,
+            opacity=presentation.opacity,
+            emission_intensity=presentation.emission_intensity,
+            lighting_influence=presentation.lighting_influence,
+        )
+        return self.save_streamlines_presentation_override(persisted)
+
+    @staticmethod
+    def _is_streamlines_material_bound(geometry, UsdShade) -> bool:
+        material, _binding = UsdShade.MaterialBindingAPI(
+            geometry
+        ).ComputeBoundMaterial()
+        return bool(
+            material
+            and material.GetPrim().IsValid()
+            and str(material.GetPath()) == STREAMLINES_MATERIAL_PATH
+        )
 
     @staticmethod
     def _define_streamlines_velocity_material(stage, *, Sdf, UsdShade):
@@ -411,7 +308,7 @@ class StreamlinesPresentationRuntimeMixin:
             )
 
     def clear_streamlines_presentation_material_from_stage(self, stage) -> None:
-        """Remove only DTRS-owned look state during reload/shutdown."""
+        """Remove only the DTRS-owned material during reload or shutdown."""
 
         if stage:
             previous_target = stage.GetEditTarget()
@@ -422,4 +319,19 @@ class StreamlinesPresentationRuntimeMixin:
                 stage.SetEditTarget(previous_target)
         self._streamlines_material_snapshot = None
         self._streamlines_material_candidate = None
+        self._streamlines_material_active_presentation = None
         self.cancel_streamlines_material_preview_measurement()
+
+    def release_streamlines_presentation_material_in_kit(self) -> None:
+        """Release material state only when Streamlines returns to Normal.
+
+        Workload and profile transitions replace snapshots while retaining the
+        accepted material. Only Normal releases the material prim, preview
+        task, and material snapshot together.
+        """
+
+        import omni.usd
+
+        self.clear_streamlines_presentation_material_from_stage(
+            omni.usd.get_context().get_stage()
+        )

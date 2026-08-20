@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from statistics import median
 from typing import Callable
 
-from digital_twin_runtime_suite.app.diagnostics import with_dtrs_yerevan_timestamp
 from digital_twin_runtime_suite.app.streamlines.presentation import PhysicalSpeedScale
 from digital_twin_runtime_suite.app.streamlines.profile import StreamlinesProfileId
 from digital_twin_runtime_suite.app.streamlines.speed_distribution import (
     SpeedDistribution,
     SpeedScaleCoverage,
-    persisted_speed_coverage,
-    persisted_speed_distribution,
-    proposed_speed_max,
+    SpeedScaleProposalEvidence,
+    fixed_scale_coverage_from_cache_evidence,
+    speed_distribution_from_cache_evidence,
+    volume_scale_from_cache_evidence,
 )
 
 StatusCallback = Callable[[str], None]
@@ -33,88 +33,111 @@ class StreamlinesSpeedDistributionReceipt:
 class StreamlinesSpeedScaleProposal:
     scale: PhysicalSpeedScale
     receipts: tuple[StreamlinesSpeedDistributionReceipt, ...]
+    critical_volume_evidence: SpeedScaleProposalEvidence
 
 
 class StreamlinesSpeedDistributionRuntimeMixin:
-    """Read cache samples off-thread; never mutate cache or presentation."""
+    """Calibrate from compact Volume build evidence without opening cache USD."""
 
     async def collect_streamlines_speed_scale_proposal(
         self,
         status_callback: StatusCallback | None = None,
+        *,
+        ready_entries=(),
     ) -> StreamlinesSpeedScaleProposal:
-        self._log_streamlines_speed_scale("START", "Reading 8 final raw-speed caches.")
-        distributions = []
-        targets = self.resolve_configured_airflow_targets()
-        for target in targets:
-            for profile_id in StreamlinesProfileId:
-                receipt = await self.ensure_streamlines_cache_validation_in_background(
-                    target.binding,
-                    target.dataset,
-                    profile_id=profile_id,
-                )
-                if not receipt.inspection.valid or receipt.inspection.metadata is None:
-                    raise RuntimeError(
-                        f"{target.binding.workload_mode}/{profile_id.value} cache is "
-                        f"{receipt.inspection.classification}."
-                    )
-                if status_callback:
-                    status_callback(
-                        f"Speed distribution: {target.binding.workload_mode}/"
-                        f"{profile_id.value}."
-                    )
-                distribution = await asyncio.to_thread(
-                    persisted_speed_distribution,
-                    receipt.inspection.paths.geometry_path,
-                    receipt.inspection.metadata,
-                )
-                distributions.append((target, profile_id, receipt, distribution))
-        upper = proposed_speed_max(
-            item[3]
-            for item in distributions
-            if item[1] is StreamlinesProfileId.VOLUME_COVERAGE
+        """Choose one shared p05/p95 scale from four Volume cache summaries."""
+
+        entries = tuple(ready_entries)
+        if len(entries) != 8 or not all(entry.valid for entry in entries):
+            raise RuntimeError(
+                "Eight readiness-approved production caches are required."
+            )
+        volume_entries = tuple(
+            entry
+            for entry in entries
+            if entry.entry.profile_id == StreamlinesProfileId.VOLUME_COVERAGE.value
         )
-        scale = PhysicalSpeedScale(0.0, upper, "source velocity units")
+        if len(volume_entries) != 4 or any(
+            entry.speed_evidence is None for entry in volume_entries
+        ):
+            raise RuntimeError(
+                "Four Volume Coverage cache speed-evidence records are required."
+            )
+        for entry in volume_entries:
+            if status_callback:
+                status_callback(
+                    f"Volume speed evidence: {entry.entry.workload}/"
+                    f"{StreamlinesProfileId.VOLUME_COVERAGE.value}."
+                )
+        evidence_by_workload = {
+            entry.entry.workload: entry.speed_evidence for entry in volume_entries
+        }
+        scale_minimum, scale_maximum = volume_scale_from_cache_evidence(
+            tuple(evidence_by_workload.values())
+        )
+        critical_volume = next(
+            entry for entry in volume_entries if entry.entry.workload == "Critical"
+        )
+        critical_cache_evidence = critical_volume.speed_evidence
+        if (
+            critical_cache_evidence is None
+            or not critical_cache_evidence.critical_state_indices
+        ):
+            raise RuntimeError("Critical/Volume state-p99 evidence is missing.")
+        critical_evidence = SpeedScaleProposalEvidence(
+            state_indices=critical_cache_evidence.critical_state_indices,
+            state_p99_values=critical_cache_evidence.critical_state_p99_values,
+            candidate_maximum=float(
+                median(critical_cache_evidence.critical_state_p99_values)
+            ),
+        )
+        scale = PhysicalSpeedScale(
+            scale_minimum,
+            scale_maximum,
+            "source velocity units",
+        )
         final = []
-        for target, profile_id, receipt, distribution in distributions:
-            coverage = await asyncio.to_thread(
-                persisted_speed_coverage,
-                receipt.inspection.paths.geometry_path,
-                receipt.inspection.metadata,
+        for entry in volume_entries:
+            evidence = entry.speed_evidence
+            if evidence is None:
+                raise RuntimeError(
+                    "Persisted Volume Coverage cache speed evidence is required."
+                )
+            coverage = fixed_scale_coverage_from_cache_evidence(
+                evidence,
                 minimum=scale.minimum,
                 maximum=scale.maximum,
             )
             final.append(
                 StreamlinesSpeedDistributionReceipt(
-                    target.binding.workload_mode,
-                    target.binding.dataset_identity,
-                    profile_id,
-                    distribution,
+                    entry.entry.workload,
+                    entry.entry.dataset_identity,
+                    StreamlinesProfileId.VOLUME_COVERAGE,
+                    speed_distribution_from_cache_evidence(evidence),
                     coverage,
                 )
             )
-        proposal = StreamlinesSpeedScaleProposal(scale, tuple(final))
-        self._streamlines_speed_scale_proposal = proposal
-        evidence = []
-        for item in proposal.receipts:
-            distribution = item.distribution
-            coverage = item.coverage
-            evidence.append(
-                f"{item.workload}/{item.profile_id.value}: "
-                f"count={distribution.value_count}; min={distribution.minimum:.9g}; "
-                f"p01={distribution.p01:.9g}; p05={distribution.p05:.9g}; "
-                f"p50={distribution.p50:.9g}; p95={distribution.p95:.9g}; "
-                f"p99={distribution.p99:.9g}; max={distribution.maximum:.9g}; "
-                f"below={coverage.below_percent:.6g}%; "
-                f"inside={coverage.inside_percent:.6g}%; "
-                f"above={coverage.above_percent:.6g}%"
-            )
-        self._log_streamlines_speed_scale(
-            "COMPLETE",
-            f"speed_min=0; speed_max={upper:.9g}; units={scale.units}; caches=8/8.\n"
-            + "\n".join(evidence)
-            + "\n"
-            "NEXT_ACTION | Review and accept the proposed fixed speed scale.",
+        proposal = StreamlinesSpeedScaleProposal(
+            scale,
+            tuple(final),
+            critical_evidence,
         )
+        self._streamlines_speed_scale_proposal = proposal
+        self._streamlines_accepted_speed_scale = proposal.scale
+        save_presentation = getattr(
+            self,
+            "save_streamlines_presentation_override",
+            None,
+        )
+        if save_presentation is not None:
+            save_presentation(
+                replace(
+                    self.config.streamlines_presentation,
+                    speed_min=proposal.scale.minimum,
+                    speed_max=proposal.scale.maximum,
+                    speed_units=proposal.scale.units,
+                )
+            )
         return proposal
 
     def accept_streamlines_speed_scale_proposal(self) -> PhysicalSpeedScale:
@@ -122,20 +145,4 @@ class StreamlinesSpeedDistributionRuntimeMixin:
         if proposal is None:
             raise RuntimeError("Collect the final cache speed distribution first.")
         self._streamlines_accepted_speed_scale = proposal.scale
-        self._log_streamlines_speed_scale(
-            "TEST COMPLETE",
-            "One fixed Streamlines physical speed scale accepted.",
-        )
         return proposal.scale
-
-    @staticmethod
-    def _log_streamlines_speed_scale(event: str, message: str) -> None:
-        try:
-            import carb
-        except ImportError:
-            return
-        carb.log_warn(
-            with_dtrs_yerevan_timestamp(
-                f"DTRS STREAMLINES | PHASE_4_4B_SPEED_SCALE | {event}\n{message}"
-            )
-        )

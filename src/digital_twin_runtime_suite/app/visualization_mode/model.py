@@ -13,6 +13,7 @@ class VisualizationMode(str, Enum):
     NORMAL = "Normal"
     SMOKE = "Smoke"
     STREAMLINES = "Streamlines"
+    STREAMLINES_XRAY = "Streamlines + X-Ray"
     HEATMAP = "Heatmap"
 
 

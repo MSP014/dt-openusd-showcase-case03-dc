@@ -6,13 +6,17 @@ import time
 from typing import Callable
 
 from digital_twin_runtime_suite.app.airflow_dataset import AirflowDataset
-from digital_twin_runtime_suite.app.diagnostics import with_dtrs_yerevan_timestamp
+from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
 from digital_twin_runtime_suite.app.flow import temporal as flow_temporal
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
     clear_static_velocity_source_from_stage,
     describe_imported_static_velocity_source,
     resolve_static_velocity_sample_from_airflow_dataset,
+)
+from digital_twin_runtime_suite.app.status_log import (
+    format_dtrs_diagnostic_block,
+    format_dtrs_status_block,
 )
 from digital_twin_runtime_suite.app.streamlines.diagnostics import (
     format_static_source_acceptance,
@@ -40,6 +44,7 @@ class StreamlinesSourceRuntimeMixin:
         status_callback: StatusCallback | None = None,
         binding: WorkloadAirflowBinding | None = None,
         airflow_dataset: AirflowDataset | None = None,
+        emit_runtime_diagnostics: bool = True,
     ) -> TemporalVelocitySourceDescriptor:
         """Author the shared ``vel.fileNames`` time-sample source for Streamlines.
 
@@ -58,6 +63,7 @@ class StreamlinesSourceRuntimeMixin:
             status_callback=status_callback,
             binding=binding,
             airflow_dataset=airflow_dataset,
+            emit_runtime_diagnostics=emit_runtime_diagnostics,
         )
         if (
             descriptor.workload != binding.workload_mode
@@ -173,6 +179,7 @@ class StreamlinesSourceRuntimeMixin:
         force_failure_after_import: bool = False,
         binding: WorkloadAirflowBinding | None = None,
         airflow_dataset: AirflowDataset | None = None,
+        emit_runtime_diagnostics: bool = True,
     ) -> StaticVelocitySourceDescriptor:
         """Resolve, import, and spatially validate one manifest-backed VTI sample.
 
@@ -244,13 +251,17 @@ class StreamlinesSourceRuntimeMixin:
         try:
             await import_to_stage(str(sample.vti_path), self.STATIC_IMPORT_ROOT)
             await app.next_update_async()
-            carb.log_warn(
-                with_dtrs_yerevan_timestamp(
-                    "DTRS STREAMLINES | VTI_IMPORT | PASS | "
-                    "duration_ms="
-                    f"{(time.monotonic() - import_started_at) * 1000.0:.0f}"
+            if emit_runtime_diagnostics:
+                import_duration_ms = (time.monotonic() - import_started_at) * 1000.0
+                carb.log_warn(
+                    format_dtrs_diagnostic_block(
+                        owner="STREAMLINES",
+                        process="VTI IMPORT",
+                        state="PASS",
+                        details={"duration_ms": f"{import_duration_ms:.0f}"},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
-            )
 
             dataset_prim = stage.GetPrimAtPath(self.STATIC_DATASET_PATH)
             field_prim = stage.GetPrimAtPath(field_path)
@@ -284,13 +295,17 @@ class StreamlinesSourceRuntimeMixin:
                 imported_grid=imported_grid,
                 stage_meters_per_unit=float(UsdGeom.GetStageMetersPerUnit(stage)),
             )
-            carb.log_warn(
-                with_dtrs_yerevan_timestamp(
-                    "DTRS STREAMLINES | SPATIAL_VALIDATION | PASS | "
-                    "duration_ms="
-                    f"{(time.monotonic() - spatial_started_at) * 1000.0:.0f}"
+            if emit_runtime_diagnostics:
+                spatial_duration_ms = (time.monotonic() - spatial_started_at) * 1000.0
+                carb.log_warn(
+                    format_dtrs_diagnostic_block(
+                        owner="STREAMLINES",
+                        process="SPATIAL VALIDATION",
+                        state="PASS",
+                        details={"duration_ms": f"{spatial_duration_ms:.0f}"},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
-            )
             evidence = inspect_static_source_runtime(
                 stage,
                 import_root_path=self.STATIC_IMPORT_ROOT,
@@ -298,32 +313,43 @@ class StreamlinesSourceRuntimeMixin:
                 cae_vtk=cae_vtk,
             )
             require_clean_static_source_runtime(evidence)
-            try:
-                carb.log_warn(
-                    with_dtrs_yerevan_timestamp(
-                        format_static_source_acceptance(descriptor, cleanup, evidence)
-                    )
-                )
-            except Exception as error:
-                # Evidence is required for acceptance, but a diagnostic failure
-                # must not discard the already validated reusable source.
-                diagnostic_reason = (
-                    " ".join(str(error).splitlines()) or type(error).__name__
-                )
-                self._streamlines_static_source_diagnostics_failure = diagnostic_reason
+            if emit_runtime_diagnostics:
                 try:
-                    carb.log_error(
-                        with_dtrs_yerevan_timestamp(
-                            "DTRS STREAMLINES | DIAGNOSTICS | FAIL | "
-                            f"reason={diagnostic_reason}"
+                    carb.log_warn(
+                        format_dtrs_status_block(
+                            format_static_source_acceptance(
+                                descriptor,
+                                cleanup,
+                                evidence,
+                            ),
+                            append_local_timestamp=with_dtrs_local_timestamp,
                         )
                     )
-                except Exception:
-                    # A failed secondary log sink must not discard the source
-                    # descriptor already validated above.
+                except Exception as error:
+                    # Evidence is required for acceptance, but a diagnostic failure
+                    # must not discard the already validated reusable source.
+                    diagnostic_reason = (
+                        " ".join(str(error).splitlines()) or type(error).__name__
+                    )
                     self._streamlines_static_source_diagnostics_failure = (
                         diagnostic_reason
                     )
+                    try:
+                        carb.log_error(
+                            format_dtrs_diagnostic_block(
+                                owner="STREAMLINES",
+                                process="SOURCE DIAGNOSTICS",
+                                state="FAIL",
+                                details={"reason": diagnostic_reason},
+                                append_local_timestamp=with_dtrs_local_timestamp,
+                            )
+                        )
+                    except Exception:
+                        # A failed secondary log sink must not discard the source
+                        # descriptor already validated above.
+                        self._streamlines_static_source_diagnostics_failure = (
+                            diagnostic_reason
+                        )
             self._streamlines_static_source_descriptor = descriptor
             if force_failure_after_import:
                 raise RuntimeError("Forced velocity-source failure after import.")

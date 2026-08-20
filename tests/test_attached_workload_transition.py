@@ -513,6 +513,38 @@ def test_detached_attach_validation_failure_remains_detached_without_partial_run
     assert lifecycle_calls == []
 
 
+def test_detached_attach_reconciles_streamlines_committed_target(monkeypatch):
+    """Attach must not skip Flow when Streamlines already proved the target."""
+
+    controller = RuntimeController("configs/digital_twin_runtime_suite.toml")
+    controller.set_workload_source(lambda: "Nominal")
+    _install_fake_carb(monkeypatch)
+    target = controller._airflow_state.resolve_target(
+        controller.resolve_workload_airflow_binding("Nominal")
+    )
+    assert controller._airflow_state.commit_target(target) is True
+    calls: list[str] = []
+
+    async def validation_pass(_binding):
+        calls.append("validation")
+        return _FakeValidationLease()
+
+    async def attach_pass(binding, _dataset, _status_callback):
+        calls.append("attach")
+        assert binding == target.binding
+        return SimulationCacheResult(True, "Flow attached")
+
+    controller.acquire_airflow_validation_for_attach = validation_pass
+    controller._attach_kit_cae_airflow_after_validation_in_kit = attach_pass
+
+    result = asyncio.run(controller._attach_kit_cae_airflow_in_kit())
+
+    assert result.success is True
+    assert calls == ["validation", "attach"]
+    assert controller._airflow_state.committed == target
+    assert controller._airflow_state.pending is None
+
+
 def test_successful_recovery_after_failure_accepts_the_same_target(monkeypatch):
     controller = _attached_transition_controller()
     _install_fake_carb(monkeypatch)

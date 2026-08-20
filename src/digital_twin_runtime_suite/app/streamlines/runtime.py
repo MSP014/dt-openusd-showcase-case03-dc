@@ -23,17 +23,14 @@ from digital_twin_runtime_suite.app.streamlines.operator_runtime import (
     StreamlinesOperatorExecutionReceipt,
     StreamlinesOperatorRuntimeMixin,
 )
+from digital_twin_runtime_suite.app.streamlines.playback_evidence import (
+    StreamlinesPlaybackEvidenceMixin,
+)
 from digital_twin_runtime_suite.app.streamlines.playback_runtime import (
     StreamlinesPlaybackRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.streamlines.presentation_runtime import (
     StreamlinesPresentationRuntimeMixin,
-)
-from digital_twin_runtime_suite.app.streamlines.profile import (
-    ProductionStreamlinesProfileState,
-)
-from digital_twin_runtime_suite.app.streamlines.profile_preview_runtime import (
-    StreamlinesProfilePreviewRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.streamlines.profile_transition import (
     StreamlinesProfileTransitionMixin,
@@ -43,9 +40,6 @@ from digital_twin_runtime_suite.app.streamlines.proof import (
 )
 from digital_twin_runtime_suite.app.streamlines.recompute_runtime import (
     StreamlinesRecomputeRuntimeMixin,
-)
-from digital_twin_runtime_suite.app.streamlines.snapshot_playback_acceptance import (
-    StreamlinesSnapshotPlaybackAcceptanceMixin,
 )
 from digital_twin_runtime_suite.app.streamlines.snapshot_runtime import (
     StreamlinesSnapshotRuntimeMixin,
@@ -116,14 +110,13 @@ def report_streamlines_task_failure(
 
 
 class StreamlinesRuntimeMixin(
-    StreamlinesSnapshotPlaybackAcceptanceMixin,
+    StreamlinesPlaybackEvidenceMixin,
     StreamlinesSnapshotRuntimeMixin,
     StreamlinesWorkloadTransitionMixin,
     StreamlinesProfileTransitionMixin,
     StreamlinesPlaybackRuntimeMixin,
     StreamlinesPresentationRuntimeMixin,
     StreamlinesSpeedDistributionRuntimeMixin,
-    StreamlinesProfilePreviewRuntimeMixin,
     StreamlinesCacheRuntimeMixin,
     StreamlinesRecomputeRuntimeMixin,
     StreamlinesSourceRuntimeMixin,
@@ -215,15 +208,11 @@ class StreamlinesRuntimeMixin(
         self._streamlines_cached_playback_scheduler = None
         self._streamlines_cached_playback_started_at = None
         self._streamlines_state_replacement_proofs = []
-        self._streamlines_last_profile_transition_evidence = None
-        self._streamlines_profile_state = ProductionStreamlinesProfileState()
-        self._streamlines_phase44b_cache_ready_emitted = False
         self._streamlines_speed_scale_proposal = None
         self._streamlines_accepted_speed_scale = None
         self.reset_streamlines_snapshot_runtime_state()
-        self.reset_streamlines_snapshot_playback_acceptance_state()
         self.reset_streamlines_presentation_runtime_state()
-        self.reset_streamlines_profile_preview_state()
+        self.reset_streamlines_profile_transition_state()
         self.reset_streamlines_workload_transition_state()
 
     def _streamlines_pending_runtime_task_count(self) -> int:

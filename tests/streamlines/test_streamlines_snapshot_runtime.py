@@ -12,10 +12,6 @@ from digital_twin_runtime_suite.app.streamlines.cache import (
     CACHE_PLAYBACK_CURVES_PATH,
     CACHE_PLAYBACK_ROOT_PATH,
 )
-from digital_twin_runtime_suite.app.streamlines.presentation_runtime import (
-    STREAMLINES_SNAPSHOT_DISPLAY_COLOUR,
-    StreamlinesPresentationRuntimeMixin,
-)
 from digital_twin_runtime_suite.app.streamlines.snapshot_runtime import (
     SNAPSHOTS_ROOT_PATH,
     SOURCE_TIME_ATTRIBUTE,
@@ -31,10 +27,6 @@ class _Runtime(StreamlinesSnapshotRuntimeMixin):
     def __init__(self) -> None:
         self._streamlines_cache_active_sample_index = None
         self.reset_streamlines_snapshot_runtime_state()
-
-
-class _PresentationRuntime(StreamlinesPresentationRuntimeMixin, _Runtime):
-    pass
 
 
 def _pxr_modules():
@@ -163,29 +155,6 @@ def test_metadata_states_materialise_as_one_static_basis_curves_prim_each(
     assert runtime.streamlines_snapshot_visible_count_in_kit() == 0
 
 
-def test_snapshot_presentation_preserves_the_accepted_static_cyan_colour(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    _Gf, _Sdf, _Usd, UsdGeom, _Vt = _pxr_modules()
-    runtime, stage, _source, ownership = _prepared_runtime(
-        tmp_path,
-        monkeypatch,
-        runtime_type=_PresentationRuntime,
-    )
-
-    assert runtime.apply_streamlines_snapshot_display_colour_in_kit() == 3
-    for state in ownership.states:
-        display_colour = UsdGeom.BasisCurves(
-            stage.GetPrimAtPath(state.prim_path)
-        ).GetDisplayColorAttr()
-        assert tuple(display_colour.Get()[0]) == pytest.approx(
-            STREAMLINES_SNAPSHOT_DISPLAY_COLOUR
-        )
-        assert display_colour.GetTimeSamples() == []
-        assert UsdGeom.Primvar(display_colour).GetInterpolation() == "constant"
-
-
 def test_static_snapshots_have_no_usd_time_samples(tmp_path, monkeypatch) -> None:
     _runtime, stage, _source, ownership = _prepared_runtime(tmp_path, monkeypatch)
 
@@ -273,6 +242,7 @@ def test_each_snapshot_copies_one_matching_persisted_source_state(
         assert snapshot.GetAttribute(SOURCE_TIME_ATTRIBUTE).Get() == (
             source.GetAttribute(SOURCE_TIME_ATTRIBUTE).Get(time_code)
         )
+        assert state.matches_persisted_geometry is True
 
 
 def test_selection_commits_one_visible_snapshot_and_active_index(
@@ -291,6 +261,14 @@ def test_selection_commits_one_visible_snapshot_and_active_index(
         .Get()
         == "inherited"
     )
+
+
+def test_snapshot_root_evidence_is_empty_before_kit_opens_a_stage(
+    monkeypatch,
+) -> None:
+    _install_omni_usd(monkeypatch, None)
+
+    assert _Runtime().streamlines_snapshot_root_count_in_kit() == 0
 
 
 def test_failed_selection_preserves_the_previous_visible_snapshot(

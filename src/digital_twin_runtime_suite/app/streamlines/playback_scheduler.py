@@ -185,12 +185,20 @@ class CachedPlaybackScheduler:
         if started_at is None:
             raise RuntimeError("Cached playback scheduler has no start time.")
         deadline_index = 0
+        initial_alignment_pending = self._initial_delay_seconds > 0.0
         while True:
             deadline = started_at + deadline_index * self._period_seconds
             delay_seconds = deadline - self._monotonic()
             if delay_seconds > 0.0:
                 await self._sleep(delay_seconds)
             tick_started_at = self._monotonic()
+            if initial_alignment_pending:
+                # Kit resumes only on a frame.  Anchor recurring 5 Hz cadence at
+                # that first real frame, but still count slow state selection.
+                started_at = tick_started_at
+                self._started_at_seconds = started_at
+                deadline = started_at
+                initial_alignment_pending = False
             phase_seconds = self._phase_source()
             resolution = await self._state_selector(phase_seconds)
             tick_completed_at = self._monotonic()

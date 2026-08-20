@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-_ACTION_RULE = "=" * 63
-
 
 @dataclass
 class GuidedAcceptanceSession:
@@ -75,22 +73,21 @@ def format_manual_acceptance_event(
     status: str,
     next_action: str | None = None,
 ) -> str:
-    """Format one reusable DTRS acceptance record with an isolated action."""
+    """Format guided-acceptance content for the shared status-block owner."""
 
     message = f"DTRS {area} | {event}\nstatus={status}"
     if next_action:
-        message += (
-            f"\n\n{_ACTION_RULE}\n" f"NEXT_ACTION | {next_action}\n" f"{_ACTION_RULE}"
-        )
+        message += f"\nNEXT_ACTION | {next_action}"
     return message
 
 
 def format_manual_acceptance_test_complete(result: str) -> str:
-    """Format the terminal record for one completed manual workflow."""
+    """Format terminal content for the shared status-block owner."""
 
-    return (
-        f"{_ACTION_RULE}\n"
-        f"TEST COMPLETE | {result}\n"
-        "No further manual action required.\n"
-        f"{_ACTION_RULE}"
+    return "\n".join(
+        (
+            "TEST COMPLETE",
+            result,
+            "No further manual action required.",
+        )
     )

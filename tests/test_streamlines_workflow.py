@@ -38,11 +38,11 @@ def test_active_profile_change_replaces_the_previous_ui_task(monkeypatch):
     scheduled[0].close()
 
 
-def test_material_preview_uses_the_controller_contract_once():
+def test_material_settings_apply_and_persist_from_the_controller_contract():
     workflow, controller, messages = _workflow()
 
     asyncio.run(
-        workflow._preview_material(
+        workflow._apply_material_settings(
             opacity=0.7,
             emission_intensity=2.0,
             lighting_influence=0.2,
@@ -50,7 +50,8 @@ def test_material_preview_uses_the_controller_contract_once():
     )
 
     assert controller.material_arguments == (0.7, 2.0, 0.2)
-    assert any("Material preview complete" in message for message in messages)
+    assert controller.material_settings_persisted is True
+    assert any("applied and saved locally" in message for message in messages)
 
 
 def test_cancel_stops_tasks_and_controller_measurement():
@@ -97,6 +98,7 @@ class _Controller:
         self.preference = None
         self.material_arguments = None
         self.measurement_cancelled = False
+        self.material_settings_persisted = False
 
     def set_streamlines_profile_preference(self, profile_id) -> None:
         self.preference = profile_id
@@ -112,7 +114,12 @@ class _Controller:
         )
         return "presentation"
 
-    async def apply_streamlines_material_preview_in_kit(
+    def save_streamlines_material_settings(self, presentation):
+        assert presentation == "presentation"
+        self.material_settings_persisted = True
+        return Path("runtime.local.toml")
+
+    async def apply_streamlines_material_settings_in_kit(
         self,
         _presentation,
         status_callback,

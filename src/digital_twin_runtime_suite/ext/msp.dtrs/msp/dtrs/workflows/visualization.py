@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
+
 
 class VisualizationWorkflow:
     """Own UI request tasks while RuntimeController owns mode transactions.
@@ -22,14 +24,16 @@ class VisualizationWorkflow:
         report_status: Callable[[str], None],
         refresh_cache_selector: Callable[[], None],
         refresh_visualization_controls: Callable[[], None],
-        sync_final_acceptance: Callable[[], None],
+        log_warning: Callable[[str], None] | None = None,
+        append_local_timestamp: Callable[[str], str] | None = None,
     ) -> None:
         self._controller = controller
         self._validation_receipts = validation_receipts
         self._report_status = report_status
         self._refresh_cache_selector = refresh_cache_selector
         self._refresh_visualization_controls = refresh_visualization_controls
-        self._sync_final_acceptance = sync_final_acceptance
+        self._log_warning = log_warning
+        self._append_local_timestamp = append_local_timestamp
         self._visualization_task = None
         self._scheduled_mode = None
         self._workload_transition_task = None
@@ -44,7 +48,19 @@ class VisualizationWorkflow:
         """Validate current readiness, then schedule one user-requested mode."""
 
         readiness = self._controller.visualization_readiness().for_mode(mode)
+        self._report_mode_transition(
+            "REQUEST",
+            mode,
+            readiness=readiness.state,
+            detail=readiness.message,
+        )
         if not readiness.activation_available:
+            self._report_mode_transition(
+                "REJECTED",
+                mode,
+                readiness=readiness.state,
+                detail=readiness.message,
+            )
             self._report_status(f"{mode.value} unavailable: {readiness.message}")
             self._refresh_visualization_controls()
             return False
@@ -91,13 +107,6 @@ class VisualizationWorkflow:
         self._controller.cancel_visualization_transition()
 
     async def _request_mode(self, mode) -> None:
-        start = getattr(
-            self._controller,
-            "start_streamlines_snapshot_playback_acceptance",
-            None,
-        )
-        if start:
-            start(mode)
         try:
             result = await self._controller.request_visualization_mode_in_kit(
                 mode,
@@ -110,23 +119,13 @@ class VisualizationWorkflow:
         self._report_status(result.message)
         self._refresh_visualization_controls()
         self._validation_receipts.complete_consumer_action(mode, result)
-        if getattr(mode, "value", mode) == "Streamlines":
-            observe = getattr(
-                self._controller,
-                "observe_streamlines_snapshot_playback_acceptance_result",
-                None,
-            )
-            if observe:
-                await observe(mode, result)
-        elif getattr(mode, "value", mode) == "Normal":
-            observe = getattr(
-                self._controller,
-                "observe_streamlines_snapshot_playback_acceptance_normal_result",
-                None,
-            )
-            if observe:
-                observe(mode, result)
-        self._sync_final_acceptance()
+        committed = getattr(result, "committed_mode", None)
+        self._report_mode_transition(
+            "COMPLETE" if result.success else "FAIL",
+            mode,
+            committed_mode=committed.value if committed is not None else "unknown",
+            detail=result.message,
+        )
 
     async def _request_workload_transition(self, workload_mode: str) -> None:
         result = await self._controller.request_workload_transition_in_kit(
@@ -139,10 +138,18 @@ class VisualizationWorkflow:
 
     def _report_progress(self, message: str) -> None:
         self._report_status(message)
-        report = getattr(
-            self._controller,
-            "report_streamlines_snapshot_playback_acceptance_progress",
-            None,
+
+    def _report_mode_transition(self, state: str, mode, **details) -> None:
+        """Emit readable UI-request and terminal mode-transition evidence."""
+
+        if self._log_warning is None or self._append_local_timestamp is None:
+            return
+        self._log_warning(
+            format_dtrs_diagnostic_block(
+                owner="VISUALIZATION",
+                process="MODE TRANSITION",
+                state=state,
+                details={"requested_mode": mode.value, **details},
+                append_local_timestamp=self._append_local_timestamp,
+            )
         )
-        if report:
-            report(message)

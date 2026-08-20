@@ -8,15 +8,17 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from digital_twin_runtime_suite.app.config import RuntimeConfig
-from digital_twin_runtime_suite.app.flow.performance import ViewportPerformanceSample
+from digital_twin_runtime_suite.app.config import (
+    RuntimeConfig,
+    StreamlinesPresentationConfig,
+)
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
-from digital_twin_runtime_suite.app.streamlines import presentation_runtime
 from digital_twin_runtime_suite.app.streamlines.cache import (
     CACHE_SCHEMA_VERSION,
     StreamlinesCacheOwnership,
+    StreamlinesCacheSpeedEvidence,
     streamlines_cache_paths,
     streamlines_settings_signature,
 )
@@ -49,9 +51,18 @@ from digital_twin_runtime_suite.app.streamlines.speed import (
     validate_persisted_speed_magnitudes,
 )
 from digital_twin_runtime_suite.app.streamlines.speed_distribution import (
+    SpeedDistribution,
     SpeedDistributionAccumulator,
+    build_streamlines_cache_speed_evidence,
+    distributed_manifest_state_indices,
     fixed_scale_coverage,
+    fixed_scale_coverage_from_cache_evidence,
     proposed_speed_max,
+    speed_scale_candidate_from_critical_volume,
+    volume_scale_from_cache_evidence,
+)
+from digital_twin_runtime_suite.app.streamlines.speed_distribution_runtime import (
+    StreamlinesSpeedDistributionRuntimeMixin,
 )
 from digital_twin_runtime_suite.app.visualization_mode.model import VisualizationMode
 
@@ -131,7 +142,8 @@ def test_eight_profile_aware_cache_identities_and_paths_are_unique(tmp_path) -> 
 
 def test_source_config_owns_the_one_shared_five_stop_palette() -> None:
     config = RuntimeConfig.load(
-        Path(__file__).resolve().parents[2] / "configs/digital_twin_runtime_suite.toml"
+        Path(__file__).resolve().parents[2] / "configs/digital_twin_runtime_suite.toml",
+        apply_local_overrides=False,
     ).streamlines_presentation
 
     assert tuple(position for position, _color in config.palette) == (
@@ -224,6 +236,115 @@ def test_distribution_and_fixed_scale_coverage_are_bounded_and_deterministic() -
     assert coverage.above_percent == 25.0
 
 
+def test_manifest_driven_critical_speed_scale_uses_five_real_states() -> None:
+    metadata = SimpleNamespace(sample_count=7, states=tuple(range(7)))
+    indices = distributed_manifest_state_indices(metadata)
+    distributions = tuple(
+        SpeedDistribution(4, 0.0, 0.1, 0.2, 1.0, 3.0, p99, 5.0)
+        for p99 in (2.0, 4.0, 6.0, 8.0, 10.0)
+    )
+
+    evidence = speed_scale_candidate_from_critical_volume(
+        distributions,
+        state_indices=indices,
+    )
+
+    assert indices == (0, 2, 3, 4, 6)
+    assert evidence.state_p99_values == (2.0, 4.0, 6.0, 8.0, 10.0)
+    assert evidence.candidate_maximum == pytest.approx(6.0)
+
+
+def test_volume_build_evidence_selects_shared_p05_p95_and_clipping() -> None:
+    accumulator = SpeedDistributionAccumulator()
+    accumulator.add(range(101))
+    critical_states = tuple(SpeedDistributionAccumulator() for _ in range(5))
+    for state, offset in zip(critical_states, (0, 1, 2, 3, 4)):
+        state.add(range(offset, offset + 101))
+
+    evidence = build_streamlines_cache_speed_evidence(
+        accumulator,
+        critical_state_indices=(0, 2, 4, 6, 8),
+        critical_state_accumulators=critical_states,
+    )
+
+    assert isinstance(evidence, StreamlinesCacheSpeedEvidence)
+    assert len(evidence.quantile_values) == 101
+    assert StreamlinesCacheSpeedEvidence.from_dict(evidence.to_dict()) == evidence
+    assert evidence.critical_state_indices == (0, 2, 4, 6, 8)
+    assert evidence.critical_state_p99_values == pytest.approx(
+        (99.0, 100.0, 101.0, 102.0, 103.0)
+    )
+    minimum, maximum = volume_scale_from_cache_evidence((evidence,) * 4)
+    assert minimum == pytest.approx(5.0)
+    assert maximum == pytest.approx(95.0)
+    coverage = fixed_scale_coverage_from_cache_evidence(
+        evidence,
+        minimum=minimum,
+        maximum=maximum,
+    )
+    assert coverage.below_percent == pytest.approx(5.0)
+    assert coverage.above_percent == pytest.approx(5.0)
+
+
+def test_velocity_scale_uses_only_compact_volume_evidence() -> None:
+    class Runtime(StreamlinesSpeedDistributionRuntimeMixin):
+        pass
+
+    accumulator = SpeedDistributionAccumulator()
+    accumulator.add(range(101))
+    critical_states = tuple(SpeedDistributionAccumulator() for _ in range(5))
+    for state in critical_states:
+        state.add(range(101))
+    critical_evidence = build_streamlines_cache_speed_evidence(
+        accumulator,
+        critical_state_indices=(0, 2, 4, 6, 8),
+        critical_state_accumulators=critical_states,
+    )
+    volume_evidence = build_streamlines_cache_speed_evidence(accumulator)
+    entries = []
+    for workload, evidence in (
+        ("Idle", volume_evidence),
+        ("Nominal", volume_evidence),
+        ("Surge", volume_evidence),
+        ("Critical", critical_evidence),
+    ):
+        entries.append(
+            SimpleNamespace(
+                valid=True,
+                speed_evidence=evidence,
+                entry=SimpleNamespace(
+                    workload=workload,
+                    dataset_identity=f"server/load_{workload.lower()}",
+                    profile_id="volume_coverage",
+                ),
+            )
+        )
+        entries.append(
+            SimpleNamespace(
+                valid=True,
+                speed_evidence=None,
+                entry=SimpleNamespace(
+                    workload=workload,
+                    dataset_identity=f"server/load_{workload.lower()}",
+                    profile_id="global_flow_path",
+                ),
+            )
+        )
+
+    progress = []
+    proposal = asyncio.run(
+        Runtime().collect_streamlines_speed_scale_proposal(
+            status_callback=progress.append,
+            ready_entries=entries,
+        )
+    )
+
+    assert proposal.scale.minimum == pytest.approx(5.0)
+    assert proposal.scale.maximum == pytest.approx(95.0)
+    assert len(proposal.receipts) == 4
+    assert len(progress) == 4
+
+
 def test_profile_state_rejects_stale_commit_and_keeps_explicit_preference() -> None:
     state = StreamlinesProfileState()
     first = state.begin(StreamlinesProfileId.GLOBAL_FLOW_PATH)
@@ -233,6 +354,18 @@ def test_profile_state_rejects_stale_commit_and_keeps_explicit_preference() -> N
     assert state.commit(second)
     state.set_preference(StreamlinesProfileId.GLOBAL_FLOW_PATH)
     assert state.snapshot.preferred_profile is StreamlinesProfileId.GLOBAL_FLOW_PATH
+
+
+def test_profile_preference_survives_runtime_reset_without_preview_state() -> None:
+    runtime = _ProfileTransitionRuntime(classification="VALID", advancing=True)
+
+    runtime.set_streamlines_profile_preference(StreamlinesProfileId.GLOBAL_FLOW_PATH)
+    runtime.reset_streamlines_profile_transition_state()
+
+    assert (
+        runtime.streamlines_profile_preference_snapshot().preferred_profile
+        is StreamlinesProfileId.GLOBAL_FLOW_PATH
+    )
 
 
 def test_cached_profile_switch_commits_only_after_target_advancement() -> None:
@@ -246,9 +379,26 @@ def test_cached_profile_switch_commits_only_after_target_advancement() -> None:
 
     assert result.success is True
     assert result.committed_profile is StreamlinesProfileId.GLOBAL_FLOW_PATH
-    assert runtime.events == ["prepare", "scheduler", "advance", "visible", "material"]
+    assert runtime.events == ["prepare", "scheduler", "advance", "visible"]
     assert runtime.scheduler_tasks == 1
     assert runtime.build_calls == runtime.recompute_calls == runtime.vti_imports == 0
+
+
+def test_cached_profile_switch_remains_active_with_streamlines_xray() -> None:
+    runtime = _ProfileTransitionRuntime(classification="VALID", advancing=True)
+    runtime.visualization_snapshot = lambda: SimpleNamespace(
+        committed=VisualizationMode.STREAMLINES_XRAY
+    )
+
+    result = asyncio.run(
+        runtime.request_streamlines_profile_transition_in_kit(
+            StreamlinesProfileId.GLOBAL_FLOW_PATH
+        )
+    )
+
+    assert result.success is True
+    assert result.committed_profile is StreamlinesProfileId.GLOBAL_FLOW_PATH
+    assert runtime.scheduler_tasks == 1
 
 
 def test_invalid_profile_target_preserves_loaded_profile_without_mutation() -> None:
@@ -266,6 +416,77 @@ def test_invalid_profile_target_preserves_loaded_profile_without_mutation() -> N
     assert runtime.scheduler_tasks == 1
 
 
+def test_profile_transition_supports_forward_and_reverse_cached_switches() -> None:
+    runtime = _ProfileTransitionRuntime(classification="VALID", advancing=True)
+
+    forward = asyncio.run(
+        runtime.request_streamlines_profile_transition_in_kit(
+            StreamlinesProfileId.GLOBAL_FLOW_PATH
+        )
+    )
+    reverse = asyncio.run(
+        runtime.request_streamlines_profile_transition_in_kit(
+            StreamlinesProfileId.VOLUME_COVERAGE
+        )
+    )
+
+    assert forward.success is True
+    assert reverse.success is True
+    assert reverse.committed_profile is StreamlinesProfileId.VOLUME_COVERAGE
+    assert runtime.scheduler_tasks == 1
+    assert runtime.build_calls == runtime.recompute_calls == runtime.vti_imports == 0
+
+
+def test_cached_profile_transition_has_no_legacy_single_geometry_dependency() -> None:
+    source = (
+        Path(__file__).parents[2]
+        / "src/digital_twin_runtime_suite/app/streamlines/profile_transition.py"
+    ).read_text(encoding="utf-8")
+
+    assert "apply_streamlines_presentation_in_kit" not in source
+    assert "CACHE_PLAYBACK_CURVES_PATH" not in source
+
+
+def test_profile_transition_supersession_preserves_the_newest_profile() -> None:
+    runtime = _SupersedingProfileTransitionRuntime()
+
+    async def run():
+        stale = asyncio.create_task(
+            runtime.request_streamlines_profile_transition_in_kit(
+                StreamlinesProfileId.GLOBAL_FLOW_PATH
+            )
+        )
+        await runtime.prepare_started.wait()
+        newest = await runtime.request_streamlines_profile_transition_in_kit(
+            StreamlinesProfileId.VOLUME_COVERAGE
+        )
+        runtime.release_prepare.set()
+        return await stale, newest
+
+    stale, newest = asyncio.run(run())
+
+    assert stale.success is False
+    assert stale.rolled_back is True
+    assert newest.success is True
+    assert newest.committed_profile is StreamlinesProfileId.VOLUME_COVERAGE
+    assert runtime.scheduler_tasks == 1
+
+
+def test_profile_transition_rollback_restores_the_previous_cached_profile() -> None:
+    runtime = _RollbackProfileTransitionRuntime()
+
+    result = asyncio.run(
+        runtime.request_streamlines_profile_transition_in_kit(
+            StreamlinesProfileId.GLOBAL_FLOW_PATH
+        )
+    )
+
+    assert result.success is False
+    assert result.rolled_back is True
+    assert result.committed_profile is StreamlinesProfileId.VOLUME_COVERAGE
+    assert runtime.scheduler_tasks == 1
+
+
 def test_mdl_reads_raw_speed_without_python_display_color_rewrite() -> None:
     mdl = (
         Path(__file__).resolve().parents[2]
@@ -280,6 +501,7 @@ def test_mdl_reads_raw_speed_without_python_display_color_rewrite() -> None:
 def test_material_runtime_reuses_one_material_and_binding(monkeypatch) -> None:
     stage = _install_fake_usd_material_runtime(monkeypatch)
     runtime = _PresentationRuntime()
+    _install_snapshot_ownership(runtime, stage)
 
     first = runtime.apply_streamlines_presentation_in_kit(_presentation())
     second = runtime.apply_streamlines_presentation_in_kit(_presentation(opacity=0.55))
@@ -288,14 +510,15 @@ def test_material_runtime_reuses_one_material_and_binding(monkeypatch) -> None:
     assert second.material_create_count == 1
     assert second.apply_count == 2
     assert second.material_bound is True
-    assert stage.geometry.bound is stage.material
-    assert "displayColor" not in stage.geometry.attributes
+    assert all(geometry.bound is stage.material for geometry in stage.geometries)
+    assert second.snapshot_count == 3
 
 
 def test_material_runtime_rejects_missing_raw_speed(monkeypatch) -> None:
     stage = _install_fake_usd_material_runtime(monkeypatch)
-    stage.geometry.attributes.clear()
     runtime = _PresentationRuntime()
+    _install_snapshot_ownership(runtime, stage)
+    stage.geometries[0].attributes.clear()
 
     with pytest.raises(RuntimeError, match="primvars:dtrs:speed"):
         runtime.apply_streamlines_presentation_in_kit(_presentation())
@@ -308,37 +531,46 @@ def test_accepted_fixed_scale_drives_shared_material_contract() -> None:
     assert runtime.streamlines_presentation_contract().speed_scale.maximum == 7.5
 
 
-def test_material_preview_completes_only_after_several_stable_samples(
+def test_material_settings_update_only_the_current_snapshot_material(
     monkeypatch,
 ) -> None:
-    _install_fake_usd_material_runtime(monkeypatch)
+    stage = _install_fake_usd_material_runtime(monkeypatch)
     runtime = _FastPresentationRuntime()
-    samples = iter(
-        ViewportPerformanceSample(index, 80.0 - index, 12.5 + index, 3.0, 6.0)
-        for index in range(8)
-    )
-    monkeypatch.setattr(
-        presentation_runtime,
-        "capture_viewport_performance_sample",
-        lambda: next(samples),
-    )
+    _install_snapshot_ownership(runtime, stage)
 
     receipt = asyncio.run(
-        runtime.apply_streamlines_material_preview_in_kit(_presentation())
+        runtime.apply_streamlines_material_settings_in_kit(_presentation())
     )
 
-    assert receipt.performance_settle_seconds == 10.0
-    assert receipt.performance_sample_window_seconds == 2.0
-    assert receipt.performance_samples == 8
-    assert receipt.viewport_fps_minimum == 73.0
-    assert runtime.accept_streamlines_material_candidate() == _presentation()
+    assert receipt.material.snapshot_count == 3
+    assert all(geometry.bound is stage.material for geometry in stage.geometries)
 
 
-def test_superseded_material_measurement_cannot_publish_candidate() -> None:
+def test_applying_material_settings_persists_only_the_tuning_values() -> None:
+    runtime = _PresentationRuntime()
+    candidate = replace(
+        _presentation(),
+        opacity=0.61,
+        emission_intensity=2.4,
+        lighting_influence=0.35,
+    )
+    local_path = runtime.save_streamlines_material_settings(candidate)
+
+    assert local_path == Path("runtime.local.toml")
+    assert runtime.saved_presentation == StreamlinesPresentationConfig(
+        speed_min=0.0,
+        speed_max=4.0,
+        speed_units="source velocity units",
+        opacity=0.61,
+        emission_intensity=2.4,
+        lighting_influence=0.35,
+        palette=tuple((stop.position, stop.color) for stop in _presentation().palette),
+    )
+
+
+def test_superseded_material_application_cannot_publish_late() -> None:
     runtime = _PresentationRuntime()
     runtime._streamlines_material_preview_generation = 4
-    runtime._streamlines_material_candidate = _presentation()
-
     runtime.cancel_streamlines_material_preview_measurement()
 
     with pytest.raises(asyncio.CancelledError):
@@ -348,7 +580,7 @@ def test_superseded_material_measurement_cannot_publish_candidate() -> None:
 class _PresentationRuntime(StreamlinesPresentationRuntimeMixin):
     def __init__(self) -> None:
         self.config = SimpleNamespace(
-            streamlines_presentation=SimpleNamespace(
+            streamlines_presentation=StreamlinesPresentationConfig(
                 speed_min=0.0,
                 speed_max=4.0,
                 speed_units="source velocity units",
@@ -362,12 +594,12 @@ class _PresentationRuntime(StreamlinesPresentationRuntimeMixin):
         )
         self.reset_streamlines_presentation_runtime_state()
 
+    def save_streamlines_presentation_override(self, presentation) -> Path:
+        self.saved_presentation = presentation
+        return Path("runtime.local.toml")
+
 
 class _FastPresentationRuntime(_PresentationRuntime):
-    @staticmethod
-    async def _wait_streamlines_material_measurement_interval(_seconds):
-        await asyncio.sleep(0)
-
     @staticmethod
     async def _await_streamlines_material_viewport_update():
         await asyncio.sleep(0)
@@ -441,6 +673,40 @@ class _ProfileTransitionRuntime(StreamlinesProfileTransitionMixin):
         self.events.append("material")
 
 
+class _SupersedingProfileTransitionRuntime(_ProfileTransitionRuntime):
+    def __init__(self) -> None:
+        super().__init__(classification="VALID", advancing=True)
+        self.prepare_started = asyncio.Event()
+        self.release_prepare = asyncio.Event()
+        self._prepare_calls = 0
+
+    async def prepare_streamlines_cached_target_in_kit(self, *_args, **_kwargs):
+        self.events.append("prepare")
+        self._prepare_calls += 1
+        if self._prepare_calls == 1:
+            self.prepare_started.set()
+            await self.release_prepare.wait()
+        return SimpleNamespace(
+            sample=SimpleNamespace(sample_index=3),
+            normalized_phase_seconds=1.2,
+        )
+
+
+class _RollbackProfileTransitionRuntime(_ProfileTransitionRuntime):
+    def __init__(self) -> None:
+        super().__init__(classification="VALID", advancing=True)
+        self._advancements = iter((False, True))
+
+    async def await_streamlines_cached_playback_advancement_in_kit(
+        self, *_args, **_kwargs
+    ):
+        self.events.append("advance")
+        return SimpleNamespace(
+            sample_advanced=next(self._advancements),
+            scheduler_tasks=self.scheduler_tasks,
+        )
+
+
 def _install_fake_usd_material_runtime(monkeypatch):
     class Attr:
         def __init__(self):
@@ -461,6 +727,9 @@ def _install_fake_usd_material_runtime(monkeypatch):
 
         def IsValid(self):
             return True
+
+        def GetPath(self):
+            return self.path
 
         def GetAttribute(self, name):
             return self.attributes.get(name)
@@ -511,15 +780,20 @@ def _install_fake_usd_material_runtime(monkeypatch):
 
     class Stage:
         def __init__(self):
-            self.geometry = Prim("/DTRS_StreamlinesCachePlayback/Geometry")
+            self.geometries = tuple(
+                Prim(f"/DTRS_StreamlinesCachePlayback/Snapshots/State_{index:06d}")
+                for index in range(3)
+            )
+            self.geometry = self.geometries[0]
             self.material = None
             self.shader = None
             self.target = object()
             self.session = object()
 
         def GetPrimAtPath(self, path):
-            if path.endswith("/Geometry"):
-                return self.geometry
+            for geometry in self.geometries:
+                if geometry.path == path:
+                    return geometry
             return Prim(path)
 
         def GetEditTarget(self):
@@ -589,3 +863,12 @@ def _install_fake_usd_material_runtime(monkeypatch):
     monkeypatch.setitem(sys.modules, "omni.usd", omni_usd)
     monkeypatch.setitem(sys.modules, "pxr", pxr)
     return stage
+
+
+def _install_snapshot_ownership(runtime, stage) -> None:
+    runtime._streamlines_snapshot_set_ownership = SimpleNamespace(
+        root_path="/DTRS_StreamlinesCachePlayback/Snapshots",
+        states=tuple(
+            SimpleNamespace(prim_path=geometry.path) for geometry in stage.geometries
+        ),
+    )

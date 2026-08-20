@@ -7,6 +7,11 @@ import omni.ui as ui
 
 COMPACT_TEXT_LENGTH = 44
 SERVER_VIEW_LABEL_WIDTH = 150
+_STREAMLINES_MATERIAL_TUNING_OPTIONS = {
+    "opacity": (0.40, 0.55, 0.70, 0.85, 1.00),
+    "emission": (0.5, 1.0, 1.5, 2.0, 3.0),
+    "lighting": (0.0, 0.1, 0.2, 0.35, 0.5),
+}
 
 
 def _compact_text(value: str, max_length: int = COMPACT_TEXT_LENGTH) -> str:
@@ -55,7 +60,7 @@ class StreamlinesUiMixin:
             )
 
     def _build_streamlines_profile_controls(self) -> None:
-        """Build production profile preference and shared material tuning."""
+        """Build production profile preference and persisted material tuning."""
 
         from digital_twin_runtime_suite.app.streamlines.profile import (
             STREAMLINES_PROFILE_LABELS,
@@ -66,52 +71,54 @@ class StreamlinesUiMixin:
             profiles = tuple(StreamlinesProfileId)
             snapshot = self._controller.streamlines_profile_preference_snapshot()
             preferred = snapshot.preferred_profile
+            presentation = self._controller.config.streamlines_presentation
             with ui.HStack(height=24, spacing=6, content_clipping=True):
                 ui.Label("Profile", width=SERVER_VIEW_LABEL_WIDTH)
-            self._streamlines_profile_combo = ui.ComboBox(
-                profiles.index(preferred),
-                *(STREAMLINES_PROFILE_LABELS[item] for item in profiles),
-                width=ui.Fraction(1),
+                self._streamlines_profile_combo = ui.ComboBox(
+                    profiles.index(preferred),
+                    *(STREAMLINES_PROFILE_LABELS[item] for item in profiles),
+                    width=ui.Fraction(1),
+                )
+            ui.Label("Production Cache Evidence", height=18)
+            self._streamlines_cache_build_button = ui.Button(
+                "Build / Validate Production Cache Set",
+                height=28,
+                clicked_fn=self._schedule_build_validate_production_cache_set,
             )
-            self._streamlines_final_acceptance_frame = ui.Frame(visible=False)
-            with self._streamlines_final_acceptance_frame:
-                with ui.VStack(spacing=6, content_clipping=True):
-                    ui.Label("Final acceptance failure reason", height=18)
-                    self._streamlines_final_acceptance_failure_reason = ui.StringField()
-                    self._streamlines_final_acceptance_confirm_button = ui.Button(
-                        "Confirm Clean Playback",
-                        height=28,
-                        clicked_fn=self._confirm_streamlines_final_acceptance,
-                    )
-                    self._streamlines_final_acceptance_failure_button = ui.Button(
-                        "Report Clean Playback Failure",
-                        height=28,
-                        clicked_fn=self._reject_streamlines_final_acceptance,
-                    )
             ui.Label("Material Tuning", height=18)
             self._streamlines_material_tuning_combos = {
                 "opacity": self._build_streamlines_tuning_combo(
-                    "Opacity", 3, (0.40, 0.55, 0.70, 0.85, 1.00)
+                    "Opacity",
+                    self._streamlines_tuning_index(
+                        "opacity",
+                        presentation.opacity,
+                    ),
+                    _STREAMLINES_MATERIAL_TUNING_OPTIONS["opacity"],
                 ),
                 "emission": self._build_streamlines_tuning_combo(
-                    "Emission", 2, (0.5, 1.0, 1.5, 2.0, 3.0)
+                    "Emission",
+                    self._streamlines_tuning_index(
+                        "emission",
+                        presentation.emission_intensity,
+                    ),
+                    _STREAMLINES_MATERIAL_TUNING_OPTIONS["emission"],
                 ),
                 "lighting": self._build_streamlines_tuning_combo(
-                    "Lighting Influence", 2, (0.0, 0.1, 0.2, 0.35, 0.5)
+                    "Lighting Influence",
+                    self._streamlines_tuning_index(
+                        "lighting",
+                        presentation.lighting_influence,
+                    ),
+                    _STREAMLINES_MATERIAL_TUNING_OPTIONS["lighting"],
                 ),
             }
-            ui.Button(
-                "Apply Material Preview",
+            self._streamlines_material_preview_button = ui.Button(
+                "Apply Material Settings",
                 height=28,
-                clicked_fn=self._apply_streamlines_material_preview,
-            )
-            ui.Button(
-                "Accept Material Candidate",
-                height=28,
-                clicked_fn=self._accept_streamlines_material_candidate,
+                clicked_fn=self._apply_streamlines_material_settings,
             )
             self._streamlines_material_status_label = ui.Label(
-                "Material preview changes no cache, workload, profile, or scheduler.",
+                "Applying settings changes no cache, workload, profile, or scheduler.",
                 height=32,
                 word_wrap=True,
             )
@@ -120,6 +127,13 @@ class StreamlinesUiMixin:
             profile_model.add_value_changed_fn(
                 self._on_streamlines_profile_preference_changed
             )
+
+    @staticmethod
+    def _streamlines_tuning_index(name: str, value: float) -> int:
+        """Select the configured option or the nearest supported control value."""
+
+        options = _STREAMLINES_MATERIAL_TUNING_OPTIONS[name]
+        return min(range(len(options)), key=lambda index: abs(options[index] - value))
 
     def _build_streamlines_tuning_combo(
         self,
@@ -148,20 +162,23 @@ class StreamlinesUiMixin:
         if not 0 <= index < len(profiles):
             return
         profile_id = profiles[index]
+        from digital_twin_runtime_suite.app.visualization_mode import (
+            VisualizationMode,
+        )
+
         visualization = self._controller.visualization_snapshot()
         self._streamlines_workflow.request_profile(
             profile_id,
-            streamlines_active=visualization.committed.value == "Streamlines",
+            streamlines_active=visualization.committed
+            in {
+                VisualizationMode.STREAMLINES,
+                VisualizationMode.STREAMLINES_XRAY,
+            },
         )
 
-    def _apply_streamlines_material_preview(self) -> None:
-        """Schedule one cancellable material-only preview and performance gate."""
+    def _apply_streamlines_material_settings(self) -> None:
+        """Apply and persist one material-only production settings request."""
 
-        options = {
-            "opacity": (0.40, 0.55, 0.70, 0.85, 1.00),
-            "emission": (0.5, 1.0, 1.5, 2.0, 3.0),
-            "lighting": (0.0, 0.1, 0.2, 0.35, 0.5),
-        }
         selected = {
             name: values[
                 self._model_int(
@@ -170,18 +187,13 @@ class StreamlinesUiMixin:
                     )
                 )
             ]
-            for name, values in options.items()
+            for name, values in _STREAMLINES_MATERIAL_TUNING_OPTIONS.items()
         }
-        self._streamlines_workflow.preview_material(
+        self._streamlines_workflow.apply_material_settings(
             opacity=selected["opacity"],
             emission_intensity=selected["emission"],
             lighting_influence=selected["lighting"],
         )
-
-    def _accept_streamlines_material_candidate(self) -> None:
-        """Accept the last applied immutable session presentation snapshot."""
-
-        self._streamlines_workflow.accept_material_candidate()
 
     def _cancel_streamlines_material_preview(self) -> None:
         """Cancel delayed material evidence after profile/workload supersession."""

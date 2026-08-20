@@ -31,7 +31,6 @@ from digital_twin_runtime_suite.app.streamlines.cache_runtime import (
 )
 from digital_twin_runtime_suite.app.streamlines.profile import (
     PRODUCTION_STREAMLINES_PROFILE,
-    ProductionStreamlinesProfileState,
     StreamlinesProfileId,
 )
 from digital_twin_runtime_suite.app.streamlines.proof import (
@@ -224,16 +223,6 @@ def test_cache_without_raw_speed_contract_is_stale_after_profile_extension(
     assert validation.message == "Cache settings or seed are stale."
 
 
-def test_source_controlled_profile_is_accepted_after_runtime_reset() -> None:
-    runtime = _ProfileRuntime()
-
-    assert runtime.is_streamlines_production_profile_frozen() is True
-    assert (
-        runtime.accept_streamlines_production_profile()
-        == PRODUCTION_STREAMLINES_PROFILE
-    )
-
-
 def test_frozen_profile_reuses_four_independently_valid_caches(
     tmp_path: Path,
 ) -> None:
@@ -260,6 +249,27 @@ def test_frozen_profile_reuses_four_independently_valid_caches(
     assert runtime.build_calls == []
 
 
+def test_matrix_readiness_reports_the_exact_eight_cache_identities(
+    tmp_path: Path,
+) -> None:
+    runtime = _CacheSetRuntime(tmp_path, failed_workload=None)
+
+    entries = runtime.streamlines_production_cache_matrix_readiness_snapshot()
+
+    assert [
+        (entry.workload, entry.profile_id, entry.classification) for entry in entries
+    ] == [
+        ("Idle", "volume_coverage", "VALID"),
+        ("Idle", "global_flow_path", "VALID"),
+        ("Nominal", "volume_coverage", "VALID"),
+        ("Nominal", "global_flow_path", "VALID"),
+        ("Surge", "volume_coverage", "VALID"),
+        ("Surge", "global_flow_path", "VALID"),
+        ("Critical", "volume_coverage", "VALID"),
+        ("Critical", "global_flow_path", "VALID"),
+    ]
+
+
 def test_one_invalid_workload_stops_before_rebuilding_later_workloads(
     tmp_path: Path,
 ) -> None:
@@ -273,17 +283,51 @@ def test_one_invalid_workload_stops_before_rebuilding_later_workloads(
     assert runtime.build_calls == ["Nominal"]
 
 
-class _ProfileRuntime(StreamlinesCacheRuntimeMixin):
-    def __init__(self) -> None:
-        self._flow_lifecycle_state = "DETACHED"
-        self._streamlines_profile_state = ProductionStreamlinesProfileState()
+def test_cache_set_retry_reuses_completed_work_after_a_mid_sequence_failure(
+    tmp_path: Path,
+) -> None:
+    runtime = _ResumableCacheSetRuntime(tmp_path)
+
+    failed = asyncio.run(runtime.build_validate_production_cache_set_in_kit())
+    retried = asyncio.run(runtime.build_validate_production_cache_set_in_kit())
+
+    assert failed.success is False
+    assert [item.workload for item in failed.results] == ["Idle", "Idle"]
+    assert retried.success is True
+    assert [item.reused for item in retried.results[:2]] == [True, True]
+    assert runtime.build_calls == [
+        ("Nominal", "volume_coverage"),
+        ("Nominal", "volume_coverage"),
+        ("Nominal", "global_flow_path"),
+        ("Surge", "volume_coverage"),
+        ("Surge", "global_flow_path"),
+        ("Critical", "volume_coverage"),
+        ("Critical", "global_flow_path"),
+    ]
+
+
+def test_temporally_degenerate_cache_is_rebuilt_without_touching_moving_caches(
+    tmp_path: Path,
+) -> None:
+    runtime = _TemporalRebuildRuntime(tmp_path)
+
+    result = asyncio.run(runtime.build_validate_production_cache_set_in_kit())
+
+    assert result.success is True
+    assert runtime.build_calls == [("Surge", "volume_coverage")]
+    rebuilt = next(
+        item
+        for item in result.results
+        if item.workload == "Surge" and item.profile_id == "volume_coverage"
+    )
+    assert rebuilt.reused is False
+    assert sum(item.reused for item in result.results) == 7
 
 
 class _CacheSetRuntime(StreamlinesCacheRuntimeMixin):
     def __init__(self, repo_root: Path, failed_workload: str | None) -> None:
         self.config = SimpleNamespace(repo_root=repo_root)
         self._flow_lifecycle_state = "DETACHED"
-        self._streamlines_profile_state = ProductionStreamlinesProfileState()
         self.failed_workload = failed_workload
         self.build_calls: list[str] = []
         self.targets = tuple(
@@ -317,11 +361,80 @@ class _CacheSetRuntime(StreamlinesCacheRuntimeMixin):
         self, binding, _dataset, *, profile_id=None
     ):
         valid = binding.workload_mode != self.failed_workload
-        return SimpleNamespace(valid=valid, metadata=self.metadata)
+        return SimpleNamespace(
+            valid=valid,
+            metadata=self.metadata,
+            classification="VALID" if valid else "STALE",
+            message="cache ready" if valid else "cache stale",
+        )
 
     async def build_streamlines_cache_in_kit(self, *, binding, **_kwargs):
         self.build_calls.append(binding.workload_mode)
         return StreamlinesCacheBuildResult(False, "injected sample failure")
+
+    @staticmethod
+    def _inspect_persisted_cache_temporal_geometry(_geometry_path, _metadata):
+        return SimpleNamespace(passed=True)
+
+
+class _ResumableCacheSetRuntime(_CacheSetRuntime):
+    def __init__(self, repo_root: Path) -> None:
+        super().__init__(repo_root, failed_workload=None)
+        self._valid_keys = {("Idle", profile.value) for profile in StreamlinesProfileId}
+        self._fail_once = True
+        self.build_calls: list[tuple[str, str]] = []
+
+    def _inspect_streamlines_cache_for_target(
+        self, binding, _dataset, *, profile_id=None
+    ):
+        profile_id = StreamlinesProfileId(profile_id)
+        key = (binding.workload_mode, profile_id.value)
+        valid = key in self._valid_keys
+        return SimpleNamespace(
+            valid=valid,
+            metadata=self.metadata if valid else None,
+            classification="VALID" if valid else "STALE",
+            message="cache ready" if valid else "cache stale",
+        )
+
+    async def build_streamlines_cache_in_kit(self, *, binding, profile_id, **_kwargs):
+        key = (binding.workload_mode, StreamlinesProfileId(profile_id).value)
+        self.build_calls.append(key)
+        if key == ("Nominal", "volume_coverage") and self._fail_once:
+            self._fail_once = False
+            return StreamlinesCacheBuildResult(False, "injected build failure")
+        self._valid_keys.add(key)
+        return StreamlinesCacheBuildResult(True, "built", self.metadata)
+
+
+class _TemporalRebuildRuntime(_CacheSetRuntime):
+    def __init__(self, repo_root: Path) -> None:
+        super().__init__(repo_root, failed_workload=None)
+        self.build_calls: list[tuple[str, str]] = []
+        self._temporal_validity = {}
+        for target in self.targets:
+            for profile_id in StreamlinesProfileId:
+                paths = streamlines_cache_paths(
+                    repo_root,
+                    self._streamlines_cache_ownership(target.binding, profile_id),
+                )
+                self._temporal_validity[paths.geometry_path] = not (
+                    target.binding.workload_mode == "Surge"
+                    and profile_id is StreamlinesProfileId.VOLUME_COVERAGE
+                )
+
+    def _inspect_persisted_cache_temporal_geometry(self, geometry_path, _metadata):
+        return SimpleNamespace(passed=self._temporal_validity[geometry_path])
+
+    async def build_streamlines_cache_in_kit(self, *, binding, profile_id, **_kwargs):
+        profile_id = StreamlinesProfileId(profile_id)
+        self.build_calls.append((binding.workload_mode, profile_id.value))
+        paths = streamlines_cache_paths(
+            self.config.repo_root,
+            self._streamlines_cache_ownership(binding, profile_id),
+        )
+        self._temporal_validity[paths.geometry_path] = True
+        return StreamlinesCacheBuildResult(True, "built", self.metadata)
 
 
 def test_production_cache_sanity_readiness_requires_four_valid_detached_caches(

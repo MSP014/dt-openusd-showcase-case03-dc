@@ -9,19 +9,16 @@ from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
 from digital_twin_runtime_suite.app.streamlines.profile import (
+    FINAL_GLOBAL_FLOW_PATH_GEOMETRY_CONTRACT,
     PRODUCTION_STREAMLINES_PROFILE,
     ProductionStreamlinesProfile,
+    StreamlinesGeometryContract,
     geometry_contract_signature,
 )
 from digital_twin_runtime_suite.app.streamlines.seed_layout import (
     STREAMLINES_FRONT_INTAKE_SEED_PATH,
     FrontIntakeSeedLayout,
     StratifiedSeedLayout,
-)
-from digital_twin_runtime_suite.app.streamlines.tuning import (
-    BASELINE_STREAMLINES_TUNING,
-    StreamlinesGeometryTuning,
-    StreamlinesProfileTuning,
 )
 
 STREAMLINES_OPERATOR_ROOT = "/DTRS_KitCAE/Streamlines"
@@ -154,19 +151,19 @@ def build_streamlines_operator_request(
     )
 
 
-def build_streamlines_preview_operator_request(
+def build_streamlines_seeded_operator_request(
     descriptor: StaticVelocitySourceDescriptor | None,
     layout: FrontIntakeSeedLayout | StratifiedSeedLayout,
     *,
     profile: ProductionStreamlinesProfile = PRODUCTION_STREAMLINES_PROFILE,
-    tuning: StreamlinesGeometryTuning | StreamlinesProfileTuning = (
-        BASELINE_STREAMLINES_TUNING
+    geometry_contract: StreamlinesGeometryContract = (
+        FINAL_GLOBAL_FLOW_PATH_GEOMETRY_CONTRACT
     ),
 ) -> StreamlinesOperatorRequest:
-    """Bind the standard operator to one exact developer seed layout."""
+    """Bind the standard operator to one frozen production seed layout."""
 
     request = build_streamlines_operator_request(descriptor, profile=profile)
-    contract = tuning.geometry_contract
+    contract = geometry_contract
     if isinstance(layout, StratifiedSeedLayout):
         expected = contract.seed_count * contract.section_count
         if layout.seed_count != expected:
@@ -193,7 +190,7 @@ def build_streamlines_preview_operator_request(
     else:
         if layout.seed_count != layout.columns * layout.rows:
             raise StreamlinesOperatorRequestError(
-                "Streamlines preview seed layout is incomplete."
+                "Streamlines seeded layout is incomplete."
             )
         columns = layout.columns
         rows = layout.rows
@@ -201,9 +198,9 @@ def build_streamlines_preview_operator_request(
         vertical_spacing = layout.vertical_spacing
         seed_plane_z = layout.seed_plane_z
         layout_signature = layout.profile_signature
-        profile_id = "global_flow_path"
-        section_count = 1
-        seeds_per_section = layout.seed_count
+        profile_id = contract.profile_id.value
+        section_count = contract.section_count
+        seeds_per_section = contract.seed_count
         centre = layout.centre
     return replace(
         request,

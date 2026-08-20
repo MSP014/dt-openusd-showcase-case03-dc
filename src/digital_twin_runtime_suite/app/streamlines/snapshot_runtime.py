@@ -30,7 +30,14 @@ class StreamlinesSnapshotStateOwnership:
     curve_count: int
     point_count: int
     points_sha256: str
+    persisted_points_sha256: str
     speed_sha256: str
+
+    @property
+    def matches_persisted_geometry(self) -> bool:
+        """Prove the static runtime copy matches its source cache state."""
+
+        return self.points_sha256 == self.persisted_points_sha256
 
 
 @dataclass(frozen=True)
@@ -180,6 +187,33 @@ class StreamlinesSnapshotRuntimeMixin:
             for state in ownership.states
         )
 
+    def streamlines_snapshot_active_state_ownership(self):
+        """Return the visible snapshot's persisted-geometry identity."""
+
+        ownership = self._streamlines_snapshot_set_ownership
+        index = self._streamlines_snapshot_active_sample_index
+        if ownership is None or index is None:
+            return None
+        for state in ownership.states:
+            if state.sample_index == index:
+                return state
+        raise RuntimeError("Visible static snapshot is outside the owned cache set.")
+
+    def streamlines_snapshot_root_count_in_kit(self) -> int:
+        """Detect the active root and any suffixed leftovers from a failed swap."""
+
+        try:
+            stage = self._streamlines_snapshot_stage()
+        except (ImportError, RuntimeError):
+            # Startup acceptance reads evidence before Kit creates its first stage.
+            return 0
+        parent = stage.GetPrimAtPath(CACHE_PLAYBACK_ROOT_PATH)
+        if not parent or not parent.IsValid():
+            return 0
+        return sum(
+            child.GetName().startswith("Snapshots") for child in parent.GetChildren()
+        )
+
     def cleanup_streamlines_snapshots_in_kit(self) -> bool:
         """Remove the DTRS-owned snapshot hierarchy and clear its ownership."""
 
@@ -289,13 +323,22 @@ class StreamlinesSnapshotRuntimeMixin:
         )
         speed_primvar.Set(speeds)
         curves.CreateVisibilityAttr(UsdGeom.Tokens.invisible)
+        persisted_points_sha256 = _streamlines_snapshot_hash(points)
+        snapshot_points_sha256 = _streamlines_snapshot_hash(
+            curves.GetPointsAttr().Get()
+        )
+        if snapshot_points_sha256 != persisted_points_sha256:
+            raise RuntimeError(
+                "Static Streamlines snapshot geometry differs from its cache state."
+            )
         return StreamlinesSnapshotStateOwnership(
             sample_index=state.sample_index,
             prim_path=path,
             source_time_seconds=float(source_time),
             curve_count=len(counts),
             point_count=len(points),
-            points_sha256=_streamlines_snapshot_hash(points),
+            points_sha256=snapshot_points_sha256,
+            persisted_points_sha256=persisted_points_sha256,
             speed_sha256=_streamlines_snapshot_hash(speeds),
         )
 

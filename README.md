@@ -30,10 +30,10 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 > → [📚 Knowledge Base Hub (Index)](./docs/knowledge_base/README.md) · [Architecture & Physics](./docs/knowledge_base/main_concept.md) · [Hardware Specification](./docs/knowledge_base/hardware_specification.md)
 
 Unlike traditional linear animation, this ecosystem is structured as a **State
-Machine**. One semantic workload state already drives telemetry, hardware
-behaviour, and manifest-backed airflow-cache selection; streamlines, heatmaps,
-lighting, and HUD cues remain staged extensions rather than fixed-shot
-animation.
+Machine**. One semantic workload state drives telemetry, hardware behaviour,
+and manifest-backed airflow selection. Streamlines is a production cached
+presentation; heatmaps, lighting, and HUD cues remain staged extensions rather
+than fixed-shot animation.
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
@@ -97,6 +97,20 @@ when Flow is attached, a validated target retargets the existing temporal
 source at a phase-preserving sample boundary without rebuilding smoke or Flow.
 An unavailable cache leaves telemetry and hardware behaviour truthful while
 the last confirmed safe airflow dataset remains active.
+
+### Stage 09 Airflow Presentation
+
+Houdini-authored temporal VTI files remain the authoritative airflow source.
+Smoke presents that source through Kit-CAE and NVIDIA Flow. Streamlines is a
+derived, workload/profile-specific cache of static snapshot curves; its runtime
+playback changes cached visibility and does not import VTI, execute Kit-CAE
+Streamlines, or rebuild geometry. Both modes preserve one shared logical
+workload and normalized temporal phase. `Streamlines + X-Ray` layers the
+independently owned X-Ray presentation over the same cached Streamlines path.
+
+These modes are qualitative technical visualization, not a claim of validated
+engineering CFD, live sensor-driven physics, or runtime Streamlines
+recomputation.
 
 → [Watch the Houdini airflow simulation preview](https://youtu.be/lDswlLGkTQ8)
 
@@ -200,9 +214,9 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 * **Application**: **Digital Twin Runtime Suite**.
 * **Extension**: `msp.dtrs`.
 * **Logic**: A State Machine that consumes the Python Data Provider and drives
-  node presentation controls, hardware behaviour, and manifest-backed airflow
-  cache selection. Vector streamlines and thermal heatmaps remain later staged
-  visual layers.
+  node presentation controls, hardware behaviour, manifest-backed airflow, and
+  validated cached Streamlines. Thermal heatmaps remain a later staged visual
+  layer.
 * **UI**: OmniUI sidebar with `Telemetry`, `View`, and `Config` tabs, plus runtime status and performance overlays. Hierarchical Hall/Rack/Node navigation and a viewport HUD remain future work.
 
 ---
@@ -364,8 +378,8 @@ smoke, transport, and emitter-layout controls.
 
 ## 📜 Changelog
 
-* **Week of 10 August, 2026:** Completed Stage 8 workload-to-cache binding for Digital Twin Runtime Suite v0.4.0: one semantic workload state now drives telemetry, fan behaviour, and explicit manifest-backed Houdini temporal airflow selection, with cached validation, truthful failure state, phase-preserving in-place Flow switching, and cancellable latest-request-wins transitions.
-* **Week of 10 August, 2026:** Completed Stage 7 of Digital Twin Runtime Suite v0.4.0, delivering a project-owned Custom MDL Fresnel X-Ray mode with config-driven multi-target selection, reversible Session Layer ownership, live ReviewCamera response, telemetry-aware LED restoration, accepted combined RTX Flow performance, and final runtime-plan archival.
+* **Week of 17 August, 2026:** Completed Stage 8 workload-to-cache binding for Digital Twin Runtime Suite v0.4.0: one semantic workload state now drives telemetry, fan behaviour, and explicit manifest-backed Houdini temporal airflow selection, with cached validation, truthful failure state, phase-preserving in-place Flow switching, and cancellable latest-request-wins transitions.
+* **Week of 17 August, 2026:** Completed Stage 7 of Digital Twin Runtime Suite v0.4.0, delivering a project-owned Custom MDL Fresnel X-Ray mode with config-driven multi-target selection, reversible Session Layer ownership, live ReviewCamera response, telemetry-aware LED restoration, accepted combined RTX Flow performance, and final runtime-plan archival.
 * **Week of 3 August, 2026:** Hardened the responsive VTI Attach lifecycle and runtime configuration boundary, preserved Houdini PDG VTI export tooling, corrected public runtime links, and began the material-recovery and renderer-limitation investigation that established the Stage 7 X-Ray implementation path.
 * **Week of 27 July, 2026:** Completed the Stage 6 cached-airflow runtime review, including Kit-CAE/Flow capability proof, temporal VTI playback, persistent smoke tuning, extracted Flow runtime ownership, and the Digital Twin Runtime Suite naming transition.
 * **Week of 20 July, 2026:** Advanced Digital Twin Runtime Suite v0.4.0 into an interactive full-server presentation layer with server enclosure visibility controls, hinged front-panel animation, QLED CPU-temperature display, front-panel activity indicators, focused UI-control tests, and refreshed runtime screenshots.

@@ -22,6 +22,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    StreamlinesPresentationConfig,
     ValidationReceiptReuseConfig,
     XRayMaterialConfig,
     chassis_presentation_with_operator_state,
@@ -43,6 +44,7 @@ from digital_twin_runtime_suite.app.airflow_validation.family import (
     validate_airflow_dataset_family,
     validate_airflow_dataset_family_compatibility,
 )
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_content
 from digital_twin_runtime_suite.app.flow.progress import TemporalProofProgress
 from digital_twin_runtime_suite.app.flow.runtime import (
     FlowRuntimeMixin,
@@ -330,6 +332,7 @@ class RuntimeController(
         chassis_presentation: ChassisPresentationConfig | None = None,
         streamlines_presentation_period_seconds: float | None = None,
         validation_receipts: ValidationReceiptReuseConfig | None = None,
+        streamlines_presentation: StreamlinesPresentationConfig | None = None,
     ) -> Path:
         """Persist local operator settings beside the base config."""
 
@@ -350,6 +353,9 @@ class RuntimeController(
         active_validation_receipts = (
             validation_receipts or self.config.validation_receipts
         )
+        active_streamlines_presentation = (
+            streamlines_presentation or self.config.streamlines_presentation
+        )
         local_path = RuntimeConfig.local_config_path_for(self._config_path)
         temporary_path = local_path.with_name(f"{local_path.name}.tmp")
         temporary_path.write_text(
@@ -362,6 +368,7 @@ class RuntimeController(
                 active_chassis_presentation,
                 active_presentation_period,
                 active_validation_receipts,
+                active_streamlines_presentation,
             ),
             encoding="utf-8",
         )
@@ -500,6 +507,24 @@ class RuntimeController(
             period_seconds,
         )
 
+    def save_streamlines_presentation_override(
+        self,
+        presentation: StreamlinesPresentationConfig,
+    ) -> Path:
+        """Persist fixed velocity presentation without touching cache identity."""
+
+        return self.save_runtime_override(
+            self.config.lighting,
+            self.config.camera,
+            self.config.grid,
+            self.config.simulation_cache.smoke_tuning,
+            self.config.simulation_cache.emitter_layout,
+            self.config.chassis_presentation,
+            self.config.simulation_cache.streamlines_presentation_period_seconds,
+            self.config.validation_receipts,
+            presentation,
+        )
+
     def save_emitter_layout_override(
         self,
         emitter_layout: EmitterLayoutConfig,
@@ -599,6 +624,7 @@ class RuntimeController(
                 self.config.chassis_presentation,
                 self.config.simulation_cache.streamlines_presentation_period_seconds,
                 self.config.validation_receipts,
+                self.config.streamlines_presentation,
             ),
             encoding="utf-8",
         )
@@ -758,7 +784,10 @@ class RuntimeController(
         """Route one semantic workload request to the active primary consumer."""
 
         mode = self.visualization_snapshot().committed
-        if mode is VisualizationMode.STREAMLINES:
+        if mode in {
+            VisualizationMode.STREAMLINES,
+            VisualizationMode.STREAMLINES_XRAY,
+        }:
             return await self.request_streamlines_workload_transition_in_kit(
                 workload_mode,
                 status_callback=status_callback,
@@ -920,16 +949,29 @@ class RuntimeController(
                 family = self.validate_registered_airflow_dataset_family()
             except AirflowDatasetFamilyCompatibilityError as error:
                 log(
-                    "DTRS AIRFLOW DATASET FAMILY | FAILED "
-                    f"| family_compatible=False | reason={error}"
+                    format_dtrs_diagnostic_content(
+                        owner="AIRFLOW DATASET FAMILY",
+                        process="COMPATIBILITY CHECK",
+                        state="FAILED",
+                        details={
+                            "family_compatible": False,
+                            "reason": error,
+                        },
+                    )
                 )
             else:
                 log(
-                    "DTRS AIRFLOW DATASET FAMILY | PASS | members="
-                    + ", ".join(family.member_selectors)
-                    + f" | family_compatible={family.family_compatible}"
-                    + f" | duration_seconds={family.loop_duration_seconds:g}"
-                    + f" | phase_mapping={family.phase_mapping}"
+                    format_dtrs_diagnostic_content(
+                        owner="AIRFLOW DATASET FAMILY",
+                        process="COMPATIBILITY CHECK",
+                        state="PASS",
+                        details={
+                            "members": ", ".join(family.member_selectors),
+                            "family_compatible": family.family_compatible,
+                            "duration_seconds": f"{family.loop_duration_seconds:g}",
+                            "phase_mapping": family.phase_mapping,
+                        },
+                    )
                 )
         return result
 
