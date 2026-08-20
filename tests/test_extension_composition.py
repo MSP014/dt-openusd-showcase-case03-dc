@@ -79,12 +79,11 @@ def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> No
     ]
 
 
-def test_workload_cache_mapping_uses_extension_owned_diagnostics_setting(
+def test_workload_cache_mapping_logs_when_a_controller_is_available(
     monkeypatch,
 ) -> None:
     module = _load_extension(monkeypatch)
     extension = module.DigitalTwinRuntimeSuiteExtension()
-    extension._suppress_airflow_diagnostics = False
     extension._controller = _MappingController()
 
     extension._log_workload_cache_mapping("Nominal")

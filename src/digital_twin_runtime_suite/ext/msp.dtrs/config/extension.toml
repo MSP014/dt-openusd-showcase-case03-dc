@@ -9,6 +9,7 @@ keywords = ["openusd", "kit", "viewer", "runtime"]
 "omni.appwindow" = {}
 "omni.kit.uiapp" = {}
 "omni.kit.viewport.window" = {}
+"omni.kit.window.status_bar" = {}
 "omni.kit.usd.mdl" = {}
 "omni.timeline" = {}
 "omni.hydra.engine.stats" = {}

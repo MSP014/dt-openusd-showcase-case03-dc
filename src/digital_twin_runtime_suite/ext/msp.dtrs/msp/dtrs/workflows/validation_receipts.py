@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Callable
 
 from digital_twin_runtime_suite.app.manual_acceptance import (
     GuidedAcceptanceSession,
     format_manual_acceptance_event,
     format_manual_acceptance_test_complete,
+)
+from digital_twin_runtime_suite.app.observability import (
+    ProgressReporter,
+    ProgressState,
 )
 from digital_twin_runtime_suite.app.status_log import (
     format_dtrs_diagnostic_content,
@@ -36,6 +39,7 @@ class ValidationReceiptWorkflow:
         append_local_timestamp: Callable[[str], str],
         log_error: Callable[[str], None],
         include_airflow_diagnostics: bool,
+        progress_reporter: ProgressReporter | None = None,
         guided_actions_allowed: Callable[[], bool] = lambda: True,
     ) -> None:
         self._controller = controller
@@ -45,12 +49,12 @@ class ValidationReceiptWorkflow:
         self._append_local_timestamp = append_local_timestamp
         self._log_error = log_error
         self._include_airflow_diagnostics = include_airflow_diagnostics
+        self._progress_reporter = progress_reporter
         self._guided_actions_allowed = guided_actions_allowed
         self._airflow_background_validation_task = None
         self._streamlines_cache_validation_task = None
         self._streamlines_cache_validation_workload = None
         self._streamlines_receipt_sweep_task = None
-        self._summary_task = None
         self._acceptance_task = None
         self._acceptance = None
         self._checkpoint = None
@@ -79,6 +83,14 @@ class ValidationReceiptWorkflow:
     def initialize_acceptance(self) -> None:
         """Resume Session 2 or expose the opt-in Session 1 instruction."""
 
+        preferences = self._controller.config.validation_receipts
+        if self._checkpoint is not None and not (
+            preferences.reuse_verified_vti_receipts
+            and preferences.reuse_verified_streamlines_cache_receipts
+        ):
+            # Reuse was explicitly disabled after Session 1.  Its controlled
+            # restart proof cannot apply to a fresh-validation startup.
+            self._reset_acceptance_for_fresh_validation()
         if not self._guided_actions_allowed():
             return
         if self._checkpoint is not None:
@@ -89,7 +101,6 @@ class ValidationReceiptWorkflow:
             return
         self._acceptance = GuidedAcceptanceSession(("SESSION_1",))
         self._acceptance.begin()
-        preferences = self._controller.config.validation_receipts
         if (
             preferences.reuse_verified_vti_receipts
             and preferences.reuse_verified_streamlines_cache_receipts
@@ -119,9 +130,22 @@ class ValidationReceiptWorkflow:
         )
         if reuse_vti and reuse_streamlines:
             self.begin_acceptance_session1()
-        elif reuse_streamlines:
+        else:
+            self._reset_acceptance_for_fresh_validation()
             self.start_background_work()
         return path
+
+    def _reset_acceptance_for_fresh_validation(self) -> None:
+        """Discard only stale restart guidance, retaining reusable receipts."""
+
+        task = self._acceptance_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._acceptance_task = None
+        self._controller.clear_validation_receipt_acceptance_checkpoint()
+        self._checkpoint = None
+        self._acceptance = None
+        self._acceptance_owns_actions = False
 
     def begin_acceptance_session1(self) -> None:
         """Persist controlled evidence after both receipt-reuse settings are saved."""
@@ -170,9 +194,6 @@ class ValidationReceiptWorkflow:
             self._streamlines_receipt_sweep_task = asyncio.ensure_future(
                 self._run_streamlines_receipt_sweep()
             )
-        task = self._summary_task
-        if task is None or task.done():
-            self._summary_task = asyncio.ensure_future(self.report_startup_summary())
 
     def begin_consumer_action(self, mode: VisualizationMode) -> None:
         """Start guidance only for the explicitly selected production mode."""
@@ -389,72 +410,6 @@ class ValidationReceiptWorkflow:
             ),
         )
 
-    async def report_startup_summary(self) -> None:
-        """Emit one compact metrics summary after bounded startup work settles."""
-
-        tasks = tuple(
-            task
-            for task in (
-                self._airflow_background_validation_task,
-                self._streamlines_receipt_sweep_task,
-                self._streamlines_cache_validation_task,
-            )
-            if task is not None
-        )
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        metrics = self._controller.validation_receipt_metrics_snapshot()
-        matrix_summary = self._streamlines_matrix_summary_lines()
-        self._emit_status_block(
-            "\n".join(
-                (
-                    "DTRS VALIDATION RECEIPTS",
-                    "process=STARTUP SUMMARY | state=COMPLETE",
-                    "VTI receipt checks:",
-                    f"  persisted_reused={metrics.vti.persisted_reused}",
-                    f"  session_reused={metrics.vti.session_reused}",
-                    f"  fresh_validated={metrics.vti.fresh_validated}",
-                    f"  invalidated={metrics.vti.invalidated}",
-                    *matrix_summary,
-                    "Streamlines receipt checks:",
-                    "  persisted_reused=" f"{metrics.streamlines.persisted_reused}",
-                    f"  session_reused={metrics.streamlines.session_reused}",
-                    f"  fresh_validated={metrics.streamlines.fresh_validated}",
-                    f"  invalidated={metrics.streamlines.invalidated}",
-                )
-            )
-        )
-
-    def _streamlines_matrix_summary_lines(self) -> tuple[str, ...]:
-        """Separate cache health from the receipt-work counters below it."""
-
-        entries = (
-            self._controller.streamlines_production_cache_matrix_readiness_snapshot()
-        )
-        classifications = {
-            classification: sum(
-                entry.classification == classification for entry in entries
-            )
-            for classification in ("VALID", "MISSING", "STALE", "INCOMPATIBLE")
-        }
-        total = len(entries)
-        valid = classifications["VALID"]
-        unknown = total - sum(classifications.values())
-        ready = total > 0 and valid == total
-        lines = (
-            "Streamlines cache matrix:",
-            f"  state={'READY' if ready else 'INCOMPLETE'}",
-            f"  valid={valid}/{total}",
-            f"  missing={classifications['MISSING']}",
-            f"  stale={classifications['STALE']}",
-            f"  incompatible={classifications['INCOMPATIBLE']}",
-        )
-        if unknown:
-            lines += (f"  other={unknown}",)
-        if not ready:
-            lines += ("  required_action=Build / Validate Production Cache Set",)
-        return lines
-
     def cancel(self) -> None:
         """Cancel only workflow-owned tasks during extension teardown."""
 
@@ -462,7 +417,6 @@ class ValidationReceiptWorkflow:
             "_airflow_background_validation_task",
             "_streamlines_cache_validation_task",
             "_streamlines_receipt_sweep_task",
-            "_summary_task",
             "_acceptance_task",
         ):
             task = getattr(self, name)
@@ -484,9 +438,26 @@ class ValidationReceiptWorkflow:
         )
 
     async def _run_background_airflow_validation(self) -> None:
+        loop = asyncio.get_running_loop()
+
+        def progress(
+            selector: str,
+            completed: int,
+            total: int,
+            filename: str,
+        ) -> None:
+            loop.call_soon_threadsafe(
+                self._report_airflow_preflight_progress,
+                selector,
+                completed,
+                total,
+                filename,
+            )
+
         try:
             await self._controller.run_background_airflow_validation(
-                self._emit_status_block
+                self._report_airflow_validation_event,
+                progress_callback=progress,
             )
         except asyncio.CancelledError:
             raise
@@ -494,6 +465,30 @@ class ValidationReceiptWorkflow:
             self._log_error(
                 "DTRS AIRFLOW BACKGROUND VALIDATION | ABORTED | " f"{error}"
             )
+        finally:
+            self._finish_live_progress()
+
+    def _report_airflow_validation_event(self, content: str) -> None:
+        """Keep only VTI lifecycle boundaries and abnormal diagnostics in history."""
+
+        if "process=DATASET PREFLIGHT | state=START" in content:
+            self._emit_status_block(content)
+            return
+        if "process=DATASET PREFLIGHT | state=COMPLETE" in content:
+            self._emit_status_block(content)
+            return
+        if any(
+            state in content
+            for state in (
+                "state=FAILED",
+                "state=TERMINAL FAILURE",
+                "state=REQUEUED",
+            )
+        ):
+            self._emit_status_block(content)
+            return
+        if "DTRS AIRFLOW DATASET FAMILY" in content and "state=PASS" not in content:
+            self._emit_status_block(content)
 
     async def _run_current_streamlines_cache_validation(self) -> None:
         try:
@@ -510,15 +505,70 @@ class ValidationReceiptWorkflow:
             )
 
     async def _run_streamlines_receipt_sweep(self):
+        total = len(
+            self._controller.streamlines_production_cache_matrix_readiness_snapshot()
+        )
+        completed = 0
+        classifications: list[str] = []
+        receipt_sources: list[str] = []
+        self._emit_status_block(
+            format_dtrs_diagnostic_content(
+                owner="STREAMLINES CACHE VALIDATION",
+                process="PERSISTED CACHE RECEIPTS",
+                state="START",
+                details={"cache_count": total},
+            )
+        )
+
         def status(message: str) -> None:
-            self._emit_status_block(self._format_streamlines_receipt_progress(message))
+            nonlocal completed
+            details = self._streamlines_receipt_details(message)
+            classification = details.get("status")
+            workload = details.get("workload", "unknown")
+            profile = details.get("profile", "unknown")
+            if classification != "CHECKING":
+                completed += 1
+                classifications.append(classification or "UNKNOWN")
+                receipt_sources.append(details.get("receipt_source", "NONE"))
+            self._report_streamlines_receipt_progress(
+                workload=workload,
+                profile=profile,
+                classification=classification or "UNKNOWN",
+                completed=completed,
+                total=total,
+            )
+            if classification not in {"CHECKING", "VALID"}:
+                self._emit_status_block(
+                    format_dtrs_diagnostic_content(
+                        owner="STREAMLINES CACHE VALIDATION",
+                        process="PERSISTED CACHE RECEIPTS",
+                        state="WARNING",
+                        details=details,
+                    )
+                )
 
         try:
             ensure_configured_validations = getattr(
                 self._controller,
                 "ensure_configured_streamlines_cache_validations_in_background",
             )
-            return await ensure_configured_validations(status_callback=status)
+            receipts = await ensure_configured_validations(status_callback=status)
+            valid = sum(classification == "VALID" for classification in classifications)
+            fresh = sum(source == "FRESH" for source in receipt_sources)
+            reused = sum(source != "FRESH" for source in receipt_sources)
+            self._emit_status_block(
+                format_dtrs_diagnostic_content(
+                    owner="STREAMLINES CACHE VALIDATION",
+                    process="PERSISTED CACHE RECEIPTS",
+                    state="COMPLETE",
+                    details={
+                        "caches_valid": f"{valid}/{len(receipts)}",
+                        "fresh_validated": fresh,
+                        "reused": reused,
+                    },
+                )
+            )
+            return receipts
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -526,6 +576,8 @@ class ValidationReceiptWorkflow:
                 "DTRS VALIDATION RECEIPTS | STREAMLINES | FAIL | " f"reason={error}"
             )
             return ()
+        finally:
+            self._finish_live_progress()
 
     def _smoke_failures(self, result) -> list[str]:
         consumer = self._controller.vti_receipt_consumer_check_snapshot()
@@ -576,8 +628,8 @@ class ValidationReceiptWorkflow:
         return failures
 
     async def _wait_for_validation_tasks(self, session_name: str) -> bool:
-        started_at = time.monotonic()
-        next_waiting_at = started_at + 5.0
+        """Wait for bounded work without turning unchanged state into log spam."""
+
         while True:
             tasks = tuple(
                 task
@@ -589,14 +641,6 @@ class ValidationReceiptWorkflow:
             )
             if not tasks:
                 return True
-            now = time.monotonic()
-            if now >= next_waiting_at:
-                self._report(
-                    "WAITING",
-                    f"{session_name} validation remains active; "
-                    f"elapsed_s={now - started_at:.1f}.",
-                )
-                next_waiting_at = now + 5.0
             await asyncio.sleep(0.1)
 
     def _fail(self, reason: str) -> None:
@@ -634,8 +678,8 @@ class ValidationReceiptWorkflow:
         )
 
     @staticmethod
-    def _format_streamlines_receipt_progress(message: str) -> str:
-        """Project the existing cache callback into readable diagnostic fields."""
+    def _streamlines_receipt_details(message: str) -> dict[str, str]:
+        """Read the existing cache callback without making cache code UI-aware."""
 
         details = {}
         prefix = "Streamlines receipt: "
@@ -646,9 +690,71 @@ class ValidationReceiptWorkflow:
                     details[name] = value
         if not details:
             details["message"] = message
-        return format_dtrs_diagnostic_content(
-            owner="VALIDATION RECEIPTS",
-            process="CACHE VALIDATION",
-            state="PROGRESS",
-            details=details,
+        return details
+
+    def _report_airflow_preflight_progress(
+        self,
+        selector: str,
+        completed: int,
+        total: int,
+        filename: str,
+    ) -> None:
+        """Publish per-file VTI preflight state without creating log history."""
+
+        reporter = self._progress_reporter
+        if reporter is None:
+            return
+        fraction = completed / total if total else None
+        reporter.progress(
+            ProgressState(
+                operation_id="Airflow VTI validation",
+                phase="DATASET PREFLIGHT",
+                message="Reading VTI metadata.",
+                fraction=fraction,
+                current=completed,
+                total=total,
+                metadata={
+                    "terminal_context": f"{selector} | {filename}",
+                    "dataset": selector,
+                    "filename": filename,
+                },
+            )
         )
+
+    def _report_streamlines_receipt_progress(
+        self,
+        *,
+        workload: str,
+        profile: str,
+        classification: str,
+        completed: int,
+        total: int,
+    ) -> None:
+        """Publish cache-set state while retaining only terminal diagnostics."""
+
+        reporter = self._progress_reporter
+        if reporter is None:
+            return
+        fraction = completed / total if total else None
+        reporter.progress(
+            ProgressState(
+                operation_id="Streamlines cache validation",
+                phase="CACHE VALIDATION",
+                message=f"{classification}: {workload} / {profile}",
+                fraction=fraction,
+                current=completed,
+                total=total,
+                metadata={
+                    "terminal_context": f"{workload} / {profile}",
+                    "workload": workload,
+                    "profile": profile,
+                    "classification": classification,
+                },
+            )
+        )
+
+    def _finish_live_progress(self) -> None:
+        """Clean up optional terminal rendering after a bounded worker settles."""
+
+        if self._progress_reporter is not None:
+            self._progress_reporter.finish()

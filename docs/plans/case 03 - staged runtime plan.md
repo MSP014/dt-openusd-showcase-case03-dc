@@ -792,7 +792,6 @@ Rack and data-hall Heatmap behavior is outside Stage 10.
 
 #### Phase 10.0 - Asset preflight
 
-- verify the Stage 9 checkpoint;
 - inspect the production server USD used by DTRS;
 - verify `thermal_zone`, `thermal_component`, `thermal_weight`, and optional
   `temperature_preview`;

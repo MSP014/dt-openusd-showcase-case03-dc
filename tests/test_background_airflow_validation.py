@@ -63,6 +63,52 @@ def test_background_validation_is_sequential_and_current_workload_first(tmp_path
     assert sum("validation_executed=True" in line for line in logs) == 4
 
 
+def test_default_preflight_publishes_per_vti_file_progress(tmp_path, monkeypatch):
+    dataset = _datasets(tmp_path)[1]
+    progress = []
+
+    def validate(paths, _field_name, progress_callback=None, cancel_requested=None):
+        assert cancel_requested is not None
+        for completed, path in enumerate(paths, start=1):
+            progress_callback(completed, len(paths), path.name)
+        return _metadata(), True
+
+    monkeypatch.setattr(
+        airflow_preflight,
+        "validate_kit_cae_temporal_vti_contract",
+        validate,
+    )
+
+    result = asyncio.run(
+        _coordinator(
+            (dataset,),
+            "Nominal",
+            preflight_validator=None,
+        ).run(
+            lambda _message: None,
+            progress_callback=lambda selector, current, total, name: progress.append(
+                (selector, current, total, name)
+            ),
+        )
+    )
+
+    assert result.validated == 1
+    assert progress == [
+        (
+            "server/load_normal",
+            0,
+            1,
+            "server_airflow_velocity_load_normal_1001.vti",
+        ),
+        (
+            "server/load_normal",
+            1,
+            1,
+            "server_airflow_velocity_load_normal_1001.vti",
+        ),
+    ]
+
+
 def test_expensive_vti_preflight_runs_off_the_calling_thread(tmp_path):
     dataset = _datasets(tmp_path)[1]
     calling_thread = threading.get_ident()

@@ -53,9 +53,22 @@ class StreamlinesUiMixin:
                     model=self._reuse_streamlines_receipts_model,
                     width=24,
                 )
+            ui.Label("Live validation", height=18)
+            self._validation_receipt_progress_labels = {
+                "DATASET PREFLIGHT": ui.Label(
+                    "VTI validation: idle.",
+                    height=24,
+                    word_wrap=False,
+                ),
+                "CACHE VALIDATION": ui.Label(
+                    "Streamlines cache validation: idle.",
+                    height=24,
+                    word_wrap=False,
+                ),
+            }
             self._validation_receipt_status_label = ui.Label(
                 "Receipt reuse is opt-in and identity checked.",
-                height=32,
+                height=24,
                 word_wrap=True,
             )
 
@@ -112,7 +125,7 @@ class StreamlinesUiMixin:
                     _STREAMLINES_MATERIAL_TUNING_OPTIONS["lighting"],
                 ),
             }
-            self._streamlines_material_preview_button = ui.Button(
+            self._streamlines_material_apply_button = ui.Button(
                 "Apply Material Settings",
                 height=28,
                 clicked_fn=self._apply_streamlines_material_settings,
@@ -156,7 +169,7 @@ class StreamlinesUiMixin:
 
         if self._updating_streamlines_profile_combo:
             return
-        self._cancel_streamlines_material_preview()
+        self._cancel_streamlines_material_apply()
         profiles = tuple(StreamlinesProfileId)
         index = self._model_int(model)
         if not 0 <= index < len(profiles):
@@ -195,11 +208,11 @@ class StreamlinesUiMixin:
             lighting_influence=selected["lighting"],
         )
 
-    def _cancel_streamlines_material_preview(self) -> None:
-        """Cancel delayed material evidence after profile/workload supersession."""
+    def _cancel_streamlines_material_apply(self) -> None:
+        """Cancel a stale material-only apply task after a newer UI action."""
 
         if self._streamlines_workflow:
-            self._streamlines_workflow.cancel_material_preview()
+            self._streamlines_workflow.cancel_material_apply()
 
     def _restore_streamlines_profile_selection(self, committed) -> None:
         """Restore the ComboBox after a rejected profile transition."""
@@ -220,6 +233,21 @@ class StreamlinesUiMixin:
 
         if self._streamlines_material_status_label is not None:
             self._streamlines_material_status_label.text = message
+
+    def _set_validation_receipt_live_progress(self, state) -> None:
+        """Render replaceable VTI/cache validation state in the existing panel."""
+
+        if state.phase not in {"DATASET PREFLIGHT", "CACHE VALIDATION"}:
+            return
+        from digital_twin_runtime_suite.app.observability import (
+            format_terminal_progress_line,
+        )
+
+        message = format_terminal_progress_line(state)
+        label = self._validation_receipt_progress_labels.get(state.phase)
+        if label is not None:
+            label.text = message
+            label.tooltip = message
 
     def _on_validation_receipt_reuse_changed(self, _model) -> None:
         """Persist preferences immediately; validation remains background-owned."""

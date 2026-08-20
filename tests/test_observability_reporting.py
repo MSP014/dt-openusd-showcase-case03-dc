@@ -5,6 +5,7 @@ from __future__ import annotations
 from digital_twin_runtime_suite.app.observability import (
     DtrsEventSink,
     EventKind,
+    KitStatusBarProgressSink,
     ProgressReporter,
     ProgressState,
     TerminalProgressRenderer,
@@ -101,6 +102,37 @@ def test_progress_sink_failure_never_aborts_the_observed_operation():
     reporter.progress(state)
 
     assert reporter.latest_progress is state
+
+
+def test_kit_status_bar_sink_replaces_progress_without_creating_log_events():
+    events = []
+    sink = KitStatusBarProgressSink(
+        lambda event_name, *, payload: events.append((event_name, payload))
+    )
+
+    sink(_state(fraction=0.25, current=25))
+    sink(_state(fraction=0.75, current=75, context="short"))
+    sink.finish()
+
+    assert events == [
+        ("omni.kit.window.status_bar@progress", {"progress": 0.25}),
+        (
+            "omni.kit.window.status_bar@activity",
+            {
+                "text": (
+                    "DTRS Streamlines [+++++---------------] 25.0% | 25/100 "
+                    "| cache 1/8 | Idle / Volume Coverage"
+                )
+            },
+        ),
+        ("omni.kit.window.status_bar@progress", {"progress": 0.75}),
+        (
+            "omni.kit.window.status_bar@activity",
+            {"text": "DTRS Streamlines [+++++++++++++++-----] 75.0% | 75/100 | short"},
+        ),
+        ("omni.kit.window.status_bar@progress", {"progress": -1.0}),
+        ("omni.kit.window.status_bar@activity", {"text": ""}),
+    ]
 
 
 def test_static_preview_uses_the_same_live_terminal_representation():

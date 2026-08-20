@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from statistics import median
 from typing import Callable
 
 from digital_twin_runtime_suite.app.streamlines.presentation import PhysicalSpeedScale
@@ -11,7 +10,6 @@ from digital_twin_runtime_suite.app.streamlines.profile import StreamlinesProfil
 from digital_twin_runtime_suite.app.streamlines.speed_distribution import (
     SpeedDistribution,
     SpeedScaleCoverage,
-    SpeedScaleProposalEvidence,
     fixed_scale_coverage_from_cache_evidence,
     speed_distribution_from_cache_evidence,
     volume_scale_from_cache_evidence,
@@ -33,7 +31,6 @@ class StreamlinesSpeedDistributionReceipt:
 class StreamlinesSpeedScaleProposal:
     scale: PhysicalSpeedScale
     receipts: tuple[StreamlinesSpeedDistributionReceipt, ...]
-    critical_volume_evidence: SpeedScaleProposalEvidence
 
 
 class StreamlinesSpeedDistributionRuntimeMixin:
@@ -75,22 +72,6 @@ class StreamlinesSpeedDistributionRuntimeMixin:
         scale_minimum, scale_maximum = volume_scale_from_cache_evidence(
             tuple(evidence_by_workload.values())
         )
-        critical_volume = next(
-            entry for entry in volume_entries if entry.entry.workload == "Critical"
-        )
-        critical_cache_evidence = critical_volume.speed_evidence
-        if (
-            critical_cache_evidence is None
-            or not critical_cache_evidence.critical_state_indices
-        ):
-            raise RuntimeError("Critical/Volume state-p99 evidence is missing.")
-        critical_evidence = SpeedScaleProposalEvidence(
-            state_indices=critical_cache_evidence.critical_state_indices,
-            state_p99_values=critical_cache_evidence.critical_state_p99_values,
-            candidate_maximum=float(
-                median(critical_cache_evidence.critical_state_p99_values)
-            ),
-        )
         scale = PhysicalSpeedScale(
             scale_minimum,
             scale_maximum,
@@ -120,7 +101,6 @@ class StreamlinesSpeedDistributionRuntimeMixin:
         proposal = StreamlinesSpeedScaleProposal(
             scale,
             tuple(final),
-            critical_evidence,
         )
         self._streamlines_speed_scale_proposal = proposal
         self._streamlines_accepted_speed_scale = proposal.scale

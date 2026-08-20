@@ -57,10 +57,24 @@ def format_live_progress_preview() -> str:
 class TerminalProgressRenderer:
     """Render one progress state in place without becoming a correctness owner."""
 
-    def __init__(self, stream: TextIO | None = None, *, width: int = 20) -> None:
-        self._stream = stream or sys.stderr
+    def __init__(
+        self,
+        stream: TextIO | None = None,
+        *,
+        width: int = 20,
+    ) -> None:
+        self._stream = stream or self._default_stream()
         self._width = width
         self._previous_length = 0
+
+    @staticmethod
+    def _default_stream() -> TextIO:
+        """Prefer stderr, but use stdout when it is the interactive console."""
+
+        stderr_isatty = getattr(sys.stderr, "isatty", None)
+        if stderr_isatty and stderr_isatty():
+            return sys.stderr
+        return sys.stdout
 
     def publish(self, state: ProgressState) -> None:
         """Replace the previous TTY line and ignore non-interactive streams."""

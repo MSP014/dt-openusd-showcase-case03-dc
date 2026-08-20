@@ -51,14 +51,10 @@ from digital_twin_runtime_suite.app.streamlines.speed import (
     validate_persisted_speed_magnitudes,
 )
 from digital_twin_runtime_suite.app.streamlines.speed_distribution import (
-    SpeedDistribution,
     SpeedDistributionAccumulator,
     build_streamlines_cache_speed_evidence,
-    distributed_manifest_state_indices,
     fixed_scale_coverage,
     fixed_scale_coverage_from_cache_evidence,
-    proposed_speed_max,
-    speed_scale_candidate_from_critical_volume,
     volume_scale_from_cache_evidence,
 )
 from digital_twin_runtime_suite.app.streamlines.speed_distribution_runtime import (
@@ -229,51 +225,25 @@ def test_distribution_and_fixed_scale_coverage_are_bounded_and_deterministic() -
     assert distribution.value_count == 10
     assert distribution.minimum == 0.0
     assert distribution.maximum == 9.0
-    assert proposed_speed_max((distribution,)) == distribution.p99
     coverage = fixed_scale_coverage(((0.0, 1.0, 2.0, 4.0),), minimum=0.0, maximum=2.0)
     assert coverage.below_percent == 0.0
     assert coverage.inside_percent == 75.0
     assert coverage.above_percent == 25.0
 
 
-def test_manifest_driven_critical_speed_scale_uses_five_real_states() -> None:
-    metadata = SimpleNamespace(sample_count=7, states=tuple(range(7)))
-    indices = distributed_manifest_state_indices(metadata)
-    distributions = tuple(
-        SpeedDistribution(4, 0.0, 0.1, 0.2, 1.0, 3.0, p99, 5.0)
-        for p99 in (2.0, 4.0, 6.0, 8.0, 10.0)
-    )
-
-    evidence = speed_scale_candidate_from_critical_volume(
-        distributions,
-        state_indices=indices,
-    )
-
-    assert indices == (0, 2, 3, 4, 6)
-    assert evidence.state_p99_values == (2.0, 4.0, 6.0, 8.0, 10.0)
-    assert evidence.candidate_maximum == pytest.approx(6.0)
-
-
 def test_volume_build_evidence_selects_shared_p05_p95_and_clipping() -> None:
     accumulator = SpeedDistributionAccumulator()
     accumulator.add(range(101))
-    critical_states = tuple(SpeedDistributionAccumulator() for _ in range(5))
-    for state, offset in zip(critical_states, (0, 1, 2, 3, 4)):
-        state.add(range(offset, offset + 101))
-
-    evidence = build_streamlines_cache_speed_evidence(
-        accumulator,
-        critical_state_indices=(0, 2, 4, 6, 8),
-        critical_state_accumulators=critical_states,
-    )
+    evidence = build_streamlines_cache_speed_evidence(accumulator)
 
     assert isinstance(evidence, StreamlinesCacheSpeedEvidence)
     assert len(evidence.quantile_values) == 101
     assert StreamlinesCacheSpeedEvidence.from_dict(evidence.to_dict()) == evidence
-    assert evidence.critical_state_indices == (0, 2, 4, 6, 8)
-    assert evidence.critical_state_p99_values == pytest.approx(
-        (99.0, 100.0, 101.0, 102.0, 103.0)
-    )
+    legacy_evidence = evidence.to_dict() | {
+        "critical_state_indices": [0, 2, 4, 6, 8],
+        "critical_state_p99_values": [99.0, 100.0, 101.0, 102.0, 103.0],
+    }
+    assert StreamlinesCacheSpeedEvidence.from_dict(legacy_evidence) == evidence
     minimum, maximum = volume_scale_from_cache_evidence((evidence,) * 4)
     assert minimum == pytest.approx(5.0)
     assert maximum == pytest.approx(95.0)
@@ -292,21 +262,13 @@ def test_velocity_scale_uses_only_compact_volume_evidence() -> None:
 
     accumulator = SpeedDistributionAccumulator()
     accumulator.add(range(101))
-    critical_states = tuple(SpeedDistributionAccumulator() for _ in range(5))
-    for state in critical_states:
-        state.add(range(101))
-    critical_evidence = build_streamlines_cache_speed_evidence(
-        accumulator,
-        critical_state_indices=(0, 2, 4, 6, 8),
-        critical_state_accumulators=critical_states,
-    )
     volume_evidence = build_streamlines_cache_speed_evidence(accumulator)
     entries = []
     for workload, evidence in (
         ("Idle", volume_evidence),
         ("Nominal", volume_evidence),
         ("Surge", volume_evidence),
-        ("Critical", critical_evidence),
+        ("Critical", volume_evidence),
     ):
         entries.append(
             SimpleNamespace(
@@ -570,11 +532,11 @@ def test_applying_material_settings_persists_only_the_tuning_values() -> None:
 
 def test_superseded_material_application_cannot_publish_late() -> None:
     runtime = _PresentationRuntime()
-    runtime._streamlines_material_preview_generation = 4
-    runtime.cancel_streamlines_material_preview_measurement()
+    runtime._streamlines_material_apply_generation = 4
+    runtime.cancel_streamlines_material_apply()
 
     with pytest.raises(asyncio.CancelledError):
-        runtime._require_current_streamlines_material_preview(4)
+        runtime._require_current_streamlines_material_apply(4)
 
 
 class _PresentationRuntime(StreamlinesPresentationRuntimeMixin):

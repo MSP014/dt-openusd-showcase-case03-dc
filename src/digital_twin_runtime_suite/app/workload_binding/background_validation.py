@@ -34,6 +34,7 @@ from digital_twin_runtime_suite.app.workload_binding.runtime import (
 )
 
 ValidationLog = Callable[[str], None]
+ValidationProgress = Callable[[str, int, int, str], None]
 PreflightValidator = Callable[
     [tuple, str, Callable[[], bool]],
     tuple[dict[str, object], bool],
@@ -138,6 +139,7 @@ class BackgroundAirflowValidationCoordinator:
         self._validation_cache = validation_cache
         self._flow_attached = flow_attached or (lambda: False)
         self._signature_builder = signature_builder
+        self._uses_default_preflight_validator = preflight_validator is None
         self._preflight_validator = (
             preflight_validator or self._validate_temporal_vti_contract
         )
@@ -150,6 +152,9 @@ class BackgroundAirflowValidationCoordinator:
         self._priority_validated: set[str] = set()
         self._generation = 0
         self._log: ValidationLog = lambda _message: None
+        self._progress: ValidationProgress = (
+            lambda _selector, _done, _total, _name: None
+        )
 
     @staticmethod
     def _ordered_datasets(
@@ -181,10 +186,17 @@ class BackgroundAirflowValidationCoordinator:
         if self._background_gate:
             self._background_gate.set()
 
-    async def run(self, log: ValidationLog) -> BackgroundValidationResult:
+    async def run(
+        self,
+        log: ValidationLog,
+        progress_callback: ValidationProgress | None = None,
+    ) -> BackgroundValidationResult:
         """Run the startup queue; Attach requests may pause it through a lease."""
 
         self._log = log
+        self._progress = progress_callback or (
+            lambda _selector, _done, _total, _name: None
+        )
         self._background_gate = asyncio.Event()
         self._background_gate.set()
         self._queue = deque(_ValidationJob(dataset, 1) for dataset in self._datasets)
@@ -416,10 +428,12 @@ class BackgroundAirflowValidationCoordinator:
         job.handled = loop.create_future()
         self._active_job = job
         try:
+            self._publish_dataset_preflight_start(job.dataset)
             signature = self._signature_builder(job.dataset, self._velocity_field_name)
             lookup = self._validation_cache.lookup(signature)
             cached_receipt = lookup.preflight
             if cached_receipt:
+                self._publish_dataset_preflight_complete(job.dataset)
                 result = _JobResult(
                     "PASS",
                     receipt=cached_receipt,
@@ -487,12 +501,22 @@ class BackgroundAirflowValidationCoordinator:
         if lookup.preflight:
             return lookup.preflight, True, lookup.receipt_source
         self._validation_cache.record_expensive_preflight_call()
-        metadata, grid_match = await asyncio.to_thread(
-            self._preflight_validator,
+        validator_args = (
             dataset.velocity_vti_sequence_paths,
             self._velocity_field_name,
             cancel_requested.is_set,
         )
+        if self._uses_default_preflight_validator:
+            metadata, grid_match = await asyncio.to_thread(
+                self._preflight_validator,
+                *validator_args,
+                self._preflight_progress_callback(_dataset_identity(dataset)),
+            )
+        else:
+            metadata, grid_match = await asyncio.to_thread(
+                self._preflight_validator,
+                *validator_args,
+            )
         if cancel_requested.is_set() or self._shutdown_requested.is_set():
             raise airflow_preflight.TemporalVtiValidationCancelled(
                 "VTI preflight cancelled"
@@ -549,15 +573,46 @@ class BackgroundAirflowValidationCoordinator:
             )
         )
 
+    def _preflight_progress_callback(self, selector: str):
+        """Project worker file progress without coupling preflight to a sink."""
+
+        return lambda completed, total, filename: self._progress(
+            selector,
+            completed,
+            total,
+            filename,
+        )
+
+    def _publish_dataset_preflight_start(self, dataset: AirflowDataset) -> None:
+        """Expose the current dataset before its worker reads the first VTI."""
+
+        paths = dataset.velocity_vti_sequence_paths
+        if paths:
+            self._progress(_dataset_identity(dataset), 0, len(paths), paths[0].name)
+
+    def _publish_dataset_preflight_complete(self, dataset: AirflowDataset) -> None:
+        """Make a reused receipt visibly complete without running the worker."""
+
+        paths = dataset.velocity_vti_sequence_paths
+        if paths:
+            self._progress(
+                _dataset_identity(dataset),
+                len(paths),
+                len(paths),
+                paths[-1].name,
+            )
+
     @staticmethod
     def _validate_temporal_vti_contract(
         velocity_paths: tuple,
         velocity_field_name: str,
         cancel_requested: Callable[[], bool],
+        progress_callback=None,
     ) -> tuple[dict[str, object], bool]:
         return airflow_preflight.validate_kit_cae_temporal_vti_contract(
             velocity_paths,
             velocity_field_name,
+            progress_callback=progress_callback,
             cancel_requested=cancel_requested,
         )
 

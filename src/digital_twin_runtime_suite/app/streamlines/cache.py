@@ -243,8 +243,6 @@ class StreamlinesCacheSpeedEvidence:
     p99: float
     maximum: float
     quantile_values: tuple[float, ...]
-    critical_state_indices: tuple[int, ...] = ()
-    critical_state_p99_values: tuple[float, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return a compact JSON-safe cache-side presentation evidence record."""
@@ -259,8 +257,6 @@ class StreamlinesCacheSpeedEvidence:
             "p99": self.p99,
             "maximum": self.maximum,
             "quantile_values": list(self.quantile_values),
-            "critical_state_indices": list(self.critical_state_indices),
-            "critical_state_p99_values": list(self.critical_state_p99_values),
         }
 
     @classmethod
@@ -269,13 +265,10 @@ class StreamlinesCacheSpeedEvidence:
 
         if not isinstance(data, dict):
             raise ValueError("Cache speed evidence must be an object.")
+        # Accepted caches can contain retired Critical/Volume state-p99 audit
+        # keys. Pooled Volume quantiles are now authoritative, so unknown keys
+        # remain deliberately ignored instead of forcing a cache rebuild.
         quantiles = tuple(float(value) for value in data["quantile_values"])
-        state_indices = tuple(
-            int(value) for value in data.get("critical_state_indices", ())
-        )
-        state_p99 = tuple(
-            float(value) for value in data.get("critical_state_p99_values", ())
-        )
         evidence = cls(
             value_count=int(data["value_count"]),
             minimum=float(data["minimum"]),
@@ -286,8 +279,6 @@ class StreamlinesCacheSpeedEvidence:
             p99=float(data["p99"]),
             maximum=float(data["maximum"]),
             quantile_values=quantiles,
-            critical_state_indices=state_indices,
-            critical_state_p99_values=state_p99,
         )
         evidence._validate()
         return evidence
@@ -304,7 +295,6 @@ class StreamlinesCacheSpeedEvidence:
             self.p99,
             self.maximum,
             *self.quantile_values,
-            *self.critical_state_p99_values,
         )
         if self.value_count <= 0 or any(
             not math.isfinite(value) or value < 0.0 for value in values
@@ -324,8 +314,6 @@ class StreamlinesCacheSpeedEvidence:
             <= self.maximum
         ):
             raise ValueError("Cache speed evidence percentiles are inconsistent.")
-        if len(self.critical_state_indices) != len(self.critical_state_p99_values):
-            raise ValueError("Critical speed-state evidence is incomplete.")
 
 
 @dataclass(frozen=True)

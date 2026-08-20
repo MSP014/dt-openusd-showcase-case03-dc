@@ -394,7 +394,7 @@ class TelemetryUiMixin:
         return model is not None and self._model_int(model) == 0
 
     def _on_workload_mode_changed(self, model) -> None:
-        self._cancel_streamlines_material_preview()
+        self._cancel_streamlines_material_apply()
         if not self._telemetry_provider:
             return
         index = self._model_int(model)
@@ -434,7 +434,7 @@ class TelemetryUiMixin:
     def _log_workload_cache_mapping(self, workload_mode: str) -> None:
         """Report mapping resolution without changing the Flow lifecycle."""
 
-        if self._suppress_airflow_diagnostics or not self._controller:
+        if not self._controller:
             return
         mapping_log = self._controller.resolve_workload_airflow_binding(
             workload_mode
