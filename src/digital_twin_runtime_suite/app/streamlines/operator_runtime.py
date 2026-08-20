@@ -73,6 +73,7 @@ class _PreparedStreamlinesOperator:
     binding_evidence: object
     integration_settings: tuple[tuple[str, str], ...]
     source_processing_mode: str
+    locked_source_time_code: float | None
 
 
 @dataclass(frozen=True)
@@ -204,6 +205,7 @@ class StreamlinesOperatorRuntimeMixin:
         cae_viz,
         UsdGeom,
         execute_command,
+        source_time_code: float | None,
     ) -> _PreparedStreamlinesOperator:
         """Create and bind a disposable operator without modifying shared inputs."""
 
@@ -246,6 +248,11 @@ class StreamlinesOperatorRuntimeMixin:
         velocity_target = request.velocity_field_prim_path
         velocity_selection.GetTargetRel().SetTargets([velocity_target])
         velocity_selection.CreateModeAttr().Set(cae_viz.Tokens.unchanged)
+        locked_source_time_code = self._lock_streamlines_operator_to_source_time(
+            operator_prim,
+            source_time_code=source_time_code,
+            cae_viz=cae_viz,
+        )
         if request.operator_type != "standard":
             raise RuntimeError(
                 "Only the standard Kit-CAE Streamlines operator is supported."
@@ -274,7 +281,38 @@ class StreamlinesOperatorRuntimeMixin:
             binding_evidence=binding_evidence,
             integration_settings=integration_settings,
             source_processing_mode=source_processing_mode,
+            locked_source_time_code=locked_source_time_code,
         )
+
+    @staticmethod
+    def _lock_streamlines_operator_to_source_time(
+        operator_prim,
+        *,
+        source_time_code: float | None,
+        cae_viz,
+    ) -> float | None:
+        """Pin one disposable cache operator to its manifest source state.
+
+        Kit-CAE executes Streamlines with its operator temporal context.  A
+        query of a temporal field alone does not select the context consumed by
+        the operator, so each cache sample locks its own disposable operator.
+        """
+
+        if source_time_code is None:
+            return None
+        expected = float(source_time_code)
+        cae_viz.OperatorTemporalAPI.Apply(operator_prim)
+        temporal_api = cae_viz.OperatorTemporalAPI(operator_prim)
+        temporal_api.GetUseLockedTimeAttr().Set(True)
+        temporal_api.GetLockedTimeAttr().Set(expected)
+        if (
+            temporal_api.GetUseLockedTimeAttr().Get() is not True
+            or float(temporal_api.GetLockedTimeAttr().Get()) != expected
+        ):
+            raise RuntimeError(
+                "Streamlines operator did not retain its manifest source time."
+            )
+        return expected
 
     @staticmethod
     def _validate_streamlines_bindings(
@@ -360,6 +398,7 @@ class StreamlinesOperatorRuntimeMixin:
                 cae_viz=cae_viz,
                 UsdGeom=UsdGeom,
                 execute_command=execute_command,
+                source_time_code=source_time_code,
             )
             rebuild_ms, evidence, execution_receipt = (
                 await self._execute_streamlines_operator_in_kit(

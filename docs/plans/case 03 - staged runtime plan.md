@@ -1,14 +1,14 @@
 # Case 03 - Staged Runtime Plan
 
-**Status**: Active roadmap; Stages 1–8 complete; Stage 9 active
-**Last Updated**: 2026-08-15
+**Status**: Active roadmap; Stages 1–9 complete; Stage 10 next
+**Last Updated**: 2026-08-20
 
 This document records the working plan for a staged review/runtime application
 around the Case 03 OpenUSD scene.
 
 ---
 
-### Application integration invariant
+## Application integration invariant
 
 All subsequent Case 03 work must preserve the repository-level Kit extension
 boundaries defined in
@@ -23,15 +23,15 @@ accumulate there.
 ## Current State
 
 Case 03 currently has the authored Houdini/OpenUSD asset pipeline, hydrated
-external asset layout, and the first eight completed Digital Twin Runtime Suite
-slices through Engineering X-Ray visual mode.
+external asset layout, and the first nine completed Digital Twin Runtime Suite
+slices through cached Streamlines velocity presentation and Streamlines + X-Ray.
 
 Current decisions already made:
 
 - The public application name is **Digital Twin Runtime Suite**.
 - The first build was **Digital Twin Runtime Suite v0.1**.
 - The current runtime build is **Digital Twin Runtime Suite v0.4.0**, released
-  with Stage 7. Stage 8 has no separate release bump; the next feature
+  with Stage 7. Stages 8 and 9 have no separate release bump; the next feature
   milestone remains `0.5.0` after Stage 10.
 - DTRS now opens the canonical `Blackwell_Rig_server_assembly.usd` stage by
   default through the `blackwell_rig_gb203` runtime asset entry.
@@ -95,6 +95,10 @@ Current decisions already made:
 - Stage 8 binds the shared semantic workload state to manifest-backed Houdini
   temporal airflow datasets through cached validation and phase-preserving Flow
   switching. Its completed evidence is preserved in the [Stage 8 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-8---workload-to-cache-state-binding-slice).
+- Stage 9 delivers server-scale cached Streamlines velocity presentation,
+  workload/profile switching, velocity material settings, and independent
+  Streamlines + X-Ray composition without runtime Streamlines recompute. Its
+  completed contract and evidence are preserved in the [Stage 9 archive](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-9---server-velocity-trail-foundation-slice).
 - Heavy USD, texture, HDRI, temporal VTI, and future runtime assets stay
   outside the source package and are hydrated through `assets/_external/`.
 - The application source root is `src/digital_twin_runtime_suite/`.
@@ -126,7 +130,9 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
   Mode Slice.
 - Completed implementation task: `DC-46` - Stage 8 Workload-to-Cache State
   Binding Slice.
-- Next planned implementation task: `DC-49` - Stage 9 Server Velocity Trail
+- Completed implementation task: `DC-49` - Stage 9 Server Velocity Trail
+  Foundation Slice.
+- Next planned implementation task: `DC-50` - Stage 10 Server Heatmap
   Foundation Slice.
 - When a delivery stage is completed, update the matching Jira task before
   moving to the next stage: add a concise completion comment, log the actual
@@ -135,10 +141,12 @@ deliberately and update README, ADRs, plans, and tooling references in one pass.
 
 ## Next Step
 
-Stage 9, Server Velocity Trail Foundation, is the next active implementation
-slice. Stage 8, Workload-to-Cache Binding, is complete and archived with its
-evidence in the completed runtime-stage plans. Stage 9 must preserve the
-accepted Stage 6 Flow, Stage 7 X-Ray, and Stage 8 workload-to-cache contracts.
+Stage 10, Server Heatmap Foundation, is the next planned implementation slice
+(`DC-50` remains To Do). Stage 9, Server Velocity Trail Foundation, is complete
+and archived with its evidence in the completed runtime-stage plans. Before
+starting Stage 10, create the clean Stage 9 Git checkpoint required by the
+Stage 10 preflight. Stage 10 must preserve the accepted Stage 6 Flow, Stage 7
+X-Ray, Stage 8 workload-to-cache, and Stage 9 cached Streamlines contracts.
 
 ---
 
@@ -339,7 +347,7 @@ from making future capabilities sound like v0.1 requirements.
 | Cached simulation visual layer | Stage 6 | Implemented |
 | Engineering X-Ray visual mode | Stage 7 | Implemented |
 | Workload-to-cache state binding | Stage 8 | Implemented |
-| Server velocity trail foundation | Stage 9 | Future |
+| Server velocity trail foundation | Stage 9 | Implemented |
 | Server heatmap foundation | Stage 10 | Future |
 | Server/rack/data hall navigation | Stage 11 | Future |
 | Cross-scale camera bookmarks | Stage 11 | Future |
@@ -667,2432 +675,12 @@ Detailed plans for completed runtime stages are preserved in
 | Stage 6 - Cached Simulation Playback | `DC-45` | ✅ Complete | [Stage 6 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-6---cached-simulation-playback-slice) |
 | Stage 7 - Engineering X-Ray | `DC-48` | ✅ Complete | [Stage 7 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-7---engineering-x-ray-visual-mode-slice) |
 | Stage 8 - Workload-to-Cache State Binding | `DC-46` | ✅ Complete | [Stage 8 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-8---workload-to-cache-state-binding-slice) |
+| Stage 9 - Server Velocity Trail Foundation | `DC-49` | ✅ Complete | [Stage 9 details](case%2003%20-%20completed%20runtime%20stage%20plans.md#stage-9---server-velocity-trail-foundation-slice) |
 
 When a runtime stage is completed, move its detailed plan from this document to
 the completed-stage archive, update this table with a direct link, and keep only
 the active and future stage details here. Cross-stage contracts that still
 govern future work remain in this plan.
-
-
-### Stage 9 - Server Velocity Trail Foundation Slice
-
-Checkpoint preflight: before implementation, verify the preceding stage ends
-at a Git checkpoint commit. If it does not, create that checkpoint before
-starting this stage.
-
-Jira: `DC-49`
-
-Target release milestone: `0.5.0` (not released; assigned after Stage 10 completion).
-
-Deliver a reusable Kit-CAE Streamlines subsystem at `Server` scale. It must
-consume the same manifest-backed Houdini airflow datasets as Stages 6--8,
-without duplicating VTI discovery, spatial registration, or workload identity.
-The result is an engineering visualisation of the active velocity field, not a
-second smoke implementation and not a custom streamline integrator.
-
-The first proof must run from a clean DTRS startup state and must not require
-the existing full airflow Attach workflow. Attach currently imports and authors
-the complete temporal sequence before creating Flow objects; that remains the
-right workflow for smoke, but it is intentionally too large for the initial
-Streamlines proof.
-
-#### Scope and semantic boundary
-
-- Streamlines are **instantaneous streamlines derived from the active
-  Houdini-authored velocity field**. They are not particles or pathlines moving
-  through a transient simulation.
-- An optional animated-streak material may improve directional readability over
-  already-generated `BasisCurves`; it must never be presented as a particle
-  simulation or as interpolated vector data.
-- Do not write a custom streamline integrator. Use the Kit-CAE Streamlines
-  operator after the VTI source and spatial contract have been validated.
-- Preserve the current Stage 6 Flow Attach behaviour while extracting shared
-  source preparation. Do not migrate the working Flow path merely to introduce
-  Streamlines.
-- Rack and Data Hall streamlines, a user-facing timeline/frame selector, and
-  artificial intermediate velocity fields are out of scope.
-
-#### Code-readability checkpoints
-
-New Streamlines code must follow the established `app/flow` readability
-pattern: document module responsibility, public runtime entry points,
-plain-data contracts, lifecycle/state transitions, and non-obvious Kit-CAE
-constraints at the point of implementation. Comments explain engineering
-intent and invariants, not obvious Python syntax.
-
-Apply the project code-readability review at these checkpoints:
-
-1. **Every runtime change set:** before adding or refactoring implementation
-   code, apply the review to identify its owner, public contract, and lifecycle
-   boundary.
-2. **Every contract or lifecycle seam:** when changing airflow-source data,
-   asynchronous state, Kit-CAE authoring, cleanup, or a visualization-mode
-   invariant, apply the review and document the non-obvious reason locally.
-3. **Each phase gate:** before accepting the Phase 1 static proof, Phase 2
-   temporal feasibility result, Phase 2.5 cache decision, Phase 2.75 runtime
-   decomposition, Phase 3 shared-source refactor, or Phase 4 production mode,
-   apply the review by rereading the changed surface as a first-time technical
-   reader and filling only real explanatory gaps.
-
-The runtime source contract remains:
-
-```text
-telemetry workload
-    -> Stage 8 workload-to-dataset binding
-    -> manifest-backed server/load_* dataset
-    -> Houdini VTI velocity field
-    -> /DTRS_HoudiniVelocity/VTKImageData
-    -> /DTRS_HoudiniVelocity/PointData/<configured velocity field; currently vel>
-```
-
-The implementation must use the API provided by the selected DTRS Kit-CAE
-build:
-
-```python
-from omni.cae.data.commands import execute_command
-from omni.cae.schema import viz as cae_viz
-```
-
-`CreateCaeVizStreamlines` receives the imported dataset path and creates the
-operator at a DTRS-owned path. A DTRS-owned UnitSphere seed source is then
-created and related to the operator; creating the operator alone is not a
-valid visual proof.
-
-#### Phase 1 - Static source and operator proof ✅ — PASS/CLOSED
-
-1. ✅ Add only the responsibilities that are immediately needed under
-   `app/streamlines/`: runtime ownership and Kit-CAE authoring. Do not create
-   empty diagnostics, validation, or performance modules before they have an
-   owner. Add the `StreamlinesRuntimeMixin` to `RuntimeController` alongside
-   the existing runtime mixins.
-2. ✅ Add a collapsed `Streamlines` section in the Airflow Cache UI with one
-   initial diagnostic action, `Run Static Test`, and a clear status. The action
-   is available only from a clean, non-attached airflow state; if Flow Attach
-   is active it is disabled or explains why it cannot run.
-3. ✅ Extract a narrow source helper beside the existing Flow code, for example
-   `prepare_static_velocity_sample_in_kit(sample_index=0)`. It resolves the
-   current telemetry workload through the Stage 8 binding, validates the
-   manifest-selected VTI, imports exactly that one sample, applies the proven
-   origin correction, and returns a plain descriptor containing workload,
-   dataset identity, sample index, VTI path, dataset path, velocity-field path,
-   bounds, dimensions, spacing, and origin. This is source preparation, not a
-   partial Flow attach.
-4. ✅ Sample `0` is the deterministic initial test input. Re-running the test for
-   the same workload must select the same VTI; changing workload selects the
-   corresponding dataset's sample `0`.
-5. ✅ Reuse the existing VTI checks before authoring Streamlines: configured
-   velocity field (currently `vel`), dimensions, spacing, VTI origin, imported
-   origin, world bounds, and stage units. Reuse the accepted session-layer VTI
-   origin compatibility shim; upstream investigation of importer origin loss
-   remains separate technical debt. The first phase gate is that the imported
-   VTI is a correct spatial velocity source while no Flow environment, emitter,
-   injector, or temporal loop exists.
-6. ✅ Create one Streamlines operator beneath `/DTRS_KitCAE/Streamlines` through
-   `CreateCaeVizStreamlines`, and a small diagnostic UnitSphere beneath
-   `/DTRS_KitCAE/StreamlineSeeds`. Bind the configured vector-valued velocity
-   field (currently `vel`) directly, set a known direction, and verify generated
-   `BasisCurves` both visually and through diagnostics. The line must be in the
-   expected region and direction, remain inside the credible airflow domain,
-   and show no axis or scale error. Stage 7 documents that
-   `/app/useFabricSceneDelegate=true` breaks Engineering X-Ray viewport rollback,
-   so FSD remains disabled. For this Package B human gate, hide the command's
-   authored four-point fallback and author a short-lived DTRS-owned
-   `RuntimePreview` `BasisCurves` snapshot from the accepted UsdRT points and
-   curve counts. It is a diagnostic presentation bridge for the normal USD
-   viewport, not a second operator, custom integrator, or new airflow source;
-   proof cleanup removes it with the Streamlines runtime roots.
-7. ✅ Run a controlled `standard` versus `nanovdb` comparison using the identical
-   VTI, seed, and integration settings. Record creation/rebuild duration,
-   curve and point count, viewport FPS, visual quality, stability, and memory
-   pressure. Choose one production type; do not support both without an
-   evidenced reason.
-
-   Package C procedure: retain the accepted Package B setup exactly
-   (`Nominal`, sample `0`, `server_airflow_velocity_normal_1001.vti`, `vel`,
-   seed transform, direction, integration settings, width, camera/viewport,
-   FSD=false, and the RuntimePreview bridge), changing only `operator_type`.
-   Run one warm-up plus three measured executions per type; use medians for
-   rebuild, preview-mirror, total-visible-update, FPS, and available Kit/RTX
-   memory evidence. Each warm-up and measured execution must have its own
-   causally matched Kit-CAE begin/end completion receipt; real UsdRT geometry
-   is necessary evidence but is not a substitute for that receipt. Log NanoVDB
-   voxelization time only if it is separately observable. NanoVDB's effective
-   uniform voxel size must be no coarser than the imported VTI spacing; log its
-   effective dimensions and voxel size rather than only the requested setting.
-   Do not tune a separate ROI or lower-fidelity resolution merely to make it
-   win. Recreate and clean the disposable comparison operator for the warm-up
-   and for each measured run; never perturb the shared VTI, seed, velocity
-   field, integration settings, or NanoVDB fidelity simply to make Kit dirty.
-   Treat steady FPS as a post-operation recovery/sanity metric rather than the
-   primary `standard`/`nanovdb` discriminator: under FSD=false both paths are
-   displayed through equivalent RuntimePreview geometry. After each final
-   visible preview becomes stable, wait 5 seconds, then reuse the Flow
-   performance snapshot source for 5 snapshots at 5-second intervals. Log
-   `fps_snapshots`, FPS median/min/max, GPU-memory snapshots, and process-memory
-   snapshots; never derive evidence from repeated adjacent `next_update()`
-   frame-time reads. Leave either measured preview selectable under the unchanged viewport
-   for visual review.
-
-   **Package C decision — accepted:** `standard` is the sole production
-   Streamlines operator. Under the fixed Package B setup, standard rebuilt in
-   median **63 ms** versus NanoVDB **94 ms**; steady viewport FPS medians were
-   **49.8** versus **48.9**; GPU memory was **4.0 GiB** versus **4.1 GiB**.
-   Both produced **256 curves / 51,200 points**, and human review found no
-   material NanoVDB visual-quality, stability, or artifact advantage. NanoVDB
-   remains only in the Package C comparison/integration harness as regression
-   evidence; no production runtime path may retain it.
-8. ✅ Make the static action idempotent. Before a new run, clean the preceding
-   Streamlines operator, seed source, and static imported dataset from every
-   layer to which the importer or command authored them. The same cleanup must
-   run on reload, stage reopen, and shutdown.
-
-   **Package D acceptance — passed:** canonical cleanup passed on rerun and
-   after a deterministic post-import failure rollback; the recovery run, Reload
-   Config path, stage reopen path, and pre-shutdown cleanup all passed. A full
-   DTRS restart then passed clean-startup verification, a new static run and
-   cleanup, and a second idempotent cleanup. Every receipt reported
-   `stale_relationships=0`, `remaining_layer_specs=0`, `duplicate_prims=0`,
-   and `pending_tasks=0`. The production operator decision remains
-   `standard`; NanoVDB is retained only in the regression comparison harness.
-
-**Code-readability checkpoint: PASS.** Reviewed before the Phase 1 gate:
-the new `app/streamlines/` ownership boundary, static-source descriptor,
-Kit-CAE authoring path, and cleanup behaviour. A first-time reader can follow
-why this proof neither creates nor requires Flow, why cleanup spans session and
-root layers, and why the post-restart handoff uses a persistent Kit setting.
-
-**Status: PASS/CLOSED.** From clean startup, one validated Houdini VTI
-produces correctly placed Kit-CAE Streamlines, with no Flow objects and no
-duplicate runtime prims after repeated run/cleanup cycles. The Package D
-in-process lifecycle matrix and full post-restart check also verified clean
-rollback, reload, stage reopen, shutdown, and second-cleanup idempotence.
-
-#### Phase 2 - Temporal feasibility ✅ — PASS/CLOSED
-
-1. ✅ Extend the static helper into a minimal no-Flow temporal probe path. It must
-   prepare the real manifest-selected VTI source and use the same temporal
-   field-relation/timecode mechanism intended for DTRS, but it creates neither
-   a Flow environment nor emitters and does not move Stage 8 transition
-   ownership. Minimal means minimal consumer and state ownership, not an
-   artificial VTI or an unrelated reimport path.
-2. ✅ Add `Run Temporal Probe` only after this narrow helper exists. For the active
-   workload it derives a representative deterministic sequence from that
-   dataset's manifest-defined sample count and cadence: first sample, early
-   samples, approximately 25% and 50% phase, final sample, then the first
-   sample again. Deduplicate indices for short sequences. Wait for the
-   DTRS-owned Kit-CAE operator tracker and record selected VTI, sample index,
-   operator start/end, rebuild duration, geometry replacement, curve/point
-   count, and a viewport-recovery observation. Package E does not interpret
-   FPS or rebuild timings as a cadence result; that measurement belongs to
-   Package F.
-
-   **Package E evidence — accepted:** the manifest temporal source passed with
-   the deterministic sequence `0 → 1 → 2 → 20 → 40 → 79 → 0`. Exact VTI
-   selection passed for all 7 samples; all 7/7 standard Streamlines consumer
-   recreations produced fresh successful Kit-CAE executions and confirmed UsdRT
-   geometry replacements. The final-to-first boundary passed and the returned
-   first-sample geometry was consistent with the initial result. Flow,
-   emitters, and smoke remained absent; canonical cleanup was clean. The
-   installed consumer therefore refreshes explicitly at each selected source
-   boundary. Per-sample rebuild timings are retained as Package F evidence only;
-   they do not yet support a cadence conclusion. Production operator remains
-   `standard`.
-3. ✅ Treat the selected Kit-CAE Streamlines operator as non-temporal until an
-   installed-build experiment proves otherwise. Measure its cost at real source
-   boundaries, repeated samples, and the intended 5 Hz source cadence. Do not
-   promise 5 Hz production updates, build production UI, or add synthetic
-   intermediate vectors before this measurement.
-
-   **Package F evidence — accepted measurement, classification B:** the source
-   cadence is 5 Hz / 200 ms. On the frozen Package E path, sequential boundaries
-   measured median `source_transition=31 ms`, `operator_rebuild=1204 ms`,
-   `UsdRT_ready=1437 ms`, `RuntimePreview_update=1125 ms`, and
-   `total_visible_update=2547 ms`. Repeating one sample measured a median
-   `total_visible_update=1562 ms`. The 5 Hz burst processed all 10/10 requested
-   samples correctly, but missed all 10 deadlines, reached queue depth 8, and
-   accumulated median/max completion lateness of `8044/18512 ms`. The final to
-   first boundary, geometry correctness, and canonical cleanup all passed.
-   Baseline/during/recovery FPS medians were `48.4/7.0/41.7`; recovery did not
-   reach 90% of baseline in the observed window. Therefore temporal Streamlines
-   are functionally stable, but 5 Hz visible presentation is not viable with
-   explicit consumer rebuild plus the FSD-safe RuntimePreview bridge. No
-   optimisation or cadence reduction was applied in Package F; `standard`
-   remains the production operator and Package G owns the time-based
-   presentation decision.
-4. ✅ Define the maximum practical time-based presentation cadence from the evidence.
-   Treat source cadence and Streamlines presentation cadence as separate clocks:
-   each workload dataset retains its own manifest-defined sample count and source
-   cadence, while Streamlines presentation is scheduled by a runtime presentation
-   period in seconds against the shared 16-second loop phase.
-
-   If every source boundary is viable, retain the dataset cadence. Otherwise,
-   measure and select the minimum practical `presentation_period_seconds`
-   independently of dataset sample count. At each presentation tick, resolve the
-   latest real manifest sample whose source time is at or before the current loop
-   phase, preserving the exact selected sample index, source time, timecode, and
-   VTI identity. Do not interpolate, average, or synthesize intermediate velocity
-   vectors.
-
-   If a presentation tick resolves to the same source sample that is already
-   presented, treat it as a no-op rather than rebuilding the Streamlines consumer.
-   Validate the selected period across loop wrap and demonstrate that it does not
-   accumulate queue depth or timing drift during sustained operation.
-
-   If no credible time-based presentation period is viable, stop before the
-   shared-source refactor and reassess Stage 09 scope.
-
-   **Package G evidence — accepted:**
-
-   ```text
-   decision=TIME_BASED_PRESENTATION_VIABLE
-   presentation_period_seconds=2.6
-   presentation_cadence_hz=0.384615
-   loop_duration_seconds=16
-
-   source_cadence=manifest-defined per workload
-   source_resolution=latest sample at or before loop phase
-   same_source_sample=NO_OP
-   interpolation=NONE
-
-   sustained_confirmation:
-     measured_ticks=12
-     rebuilt_ticks=11
-     no_op_ticks=1
-     missed_deadlines=0
-     max_pending_requests=0
-     visible_update_ms_median_max=(1906, 2031)
-     headroom_ms_median_min=(694, 569)
-     loop_wrap=PASS
-     exact_mapping=PASS
-     cleanup=CLEAN
-
-   fps:
-     baseline=50.9
-     sustained=14.6
-     recovered=53.0
-     recovery_to_90_percent_seconds=5
-   ```
-
-**Code-readability checkpoint: PASS.** Reviewed before the Phase 2 gate:
-the temporal source-time resolver, explicit consumer-rebuild boundary,
-same-source no-op decision, bounded scheduler, candidate state transitions,
-and cleanup ownership. The fixed 16-second loop and the separation of
-manifest-defined source time from time-based presentation are explicit at the
-relevant runtime boundaries.
-
-**Status: PASS/CLOSED.** DTRS has measured the real server Streamlines
-behaviour on RTX 3080. The source clock remains manifest-defined per workload;
-the selected, defensible presentation clock is 2.6 seconds (0.384615 Hz)
-against the fixed 16-second loop. Exact mapping, loop wrap, no-op handling,
-sustained scheduling headroom, recovery, and cleanup are proven before any
-change to Flow or Stage 8 ownership.
-
-#### Phase 2.5 - Precomputed Streamlines cache feasibility ✅ — PASS/CLOSED
-
-Purpose: determine whether deterministic Kit-CAE Streamlines geometry can be
-precomputed once from the manifest-defined temporal VTI dataset, persisted as a
-derived visualization cache, and replayed substantially faster than runtime
-Streamlines recomputation. This is a bounded feasibility experiment; Phase 2
-runtime recomputation remains the proven fallback while cache production
-parameters are refined later.
-
-1. ✅ Establish the cache contract. Treat the VTI dataset as the authoritative
-   simulation source and the Streamlines cache as a derived artifact. Preserve
-   workload/dataset identity, manifest sample index, source time, USD timecode,
-   source VTI identity, Streamlines settings/seed configuration identity, and
-   generated curve topology/points for every cached state. Do not interpolate,
-   average, synthesize velocity data, or invent source samples.
-
-   Cache invalidation must at minimum distinguish changes to the source dataset
-   or manifest, source VTI identity, Streamlines seed/settings, and cache
-   schema/version.
-
-2. ✅ Build one complete representative cache from the existing Nominal 80-sample
-   dataset and the already-proven diagnostic Streamlines configuration. For each
-   real manifest sample run `VTI sample -> Kit-CAE Streamlines -> confirmed
-   UsdRT curves -> persistent cache`. Do not involve Flow, Smoke, Stage 8
-   workload switching, or RuntimePreview unless it is required solely for
-   validation. Record total build time, per-sample generation time, cache size
-   on disk, topology consistency, and failed or non-deterministic samples. The
-   cache is a build artifact and must not be recomputed during normal DTRS
-   startup.
-
-3. ✅ Prove restart persistence. Close and restart DTRS, then load the existing
-   Streamlines cache without executing the Kit-CAE Streamlines operator for
-   playback. Prove that every cached state resolves back to its exact manifest
-   sample identity.
-
-4. ✅ Prove temporal cached playback with the existing 16-second loop and the
-   manifest source clock. For the current Nominal dataset this means the exact
-   `80 samples / 16 s = 5 Hz` source sequence. At every source boundary display
-   the corresponding precomputed state, preserving sample order, loop wrap, and
-   phase semantics. Do not interpolate or execute runtime Streamlines
-   recomputation. Measure cached-state visible latency, sustained FPS, deadline
-   misses, timing drift, RAM, GPU/process memory, startup/load cost, and loop
-   consistency.
-
-5. ✅ Compare against the proven Phase 2 baseline:
-   `presentation_period_seconds=2.6`. Cache feasibility succeeds only if
-   playback is materially cheaper and sustains the current 5 Hz source cadence
-   without backlog or timing drift. Record whether measured cache-state latency
-   leaves credible headroom for a future 10-12 Hz source cadence; do not create
-   higher-cadence VTI datasets during this phase.
-
-6. ✅ Make an explicit Phase 2.5 decision before Phase 3 begins:
-
-   - `CACHE_PLAYBACK_VIABLE`: retain the Phase 2 runtime-recompute path as the
-     proven fallback; select precomputed Streamlines cache as the preferred
-     production direction; update Phase 3 architecture before implementing the
-     shared airflow source; and defer production seed/layout tuning plus full
-     four-workload cache generation to the appropriate later phase.
-   - `CACHE_PLAYBACK_NOT_VIABLE`: means that exact cached playback at the full
-     5 Hz source cadence is not viable. Preserve the Phase 2 2.6-second
-     runtime-recompute contract as proven fallback, retain the precomputed
-     cache architecture as the preferred production direction, and stop
-     density-reduction R&D in this phase.
-
-**Phase 2.5 conclusion: ACCEPTED.** `CACHE_PLAYBACK_NOT_VIABLE` rejects the
-full manifest source-boundary playback hypothesis on the current RTX 3080 path;
-it does not reject the precomputed Streamlines cache architecture.
-
-- The 256-curve cache measured cached switch-latency median `891 ms`.
-- The 128-curve diagnostic cache measured cached switch-latency median
-  `469 ms`. Geometry-density scaling was strong and approximately
-  proportional, but 5 Hz / 200 ms playback remained `NOT_VIABLE`.
-- The 128-curve probe preserved exact manifest mapping, loop wrap, persistent
-  cache playback after restart, zero runtime Kit-CAE Streamlines executions,
-  and zero RuntimePreview rebuilds.
-- Further density reduction is rejected: the predicted density required for
-  credible 5 Hz playback would materially compromise diagnostic Streamlines
-  readability without credible worst-case 5 Hz headroom.
-- The precomputed cache remains the preferred production direction because it
-  removes repeated Kit-CAE Streamlines computation from runtime and makes
-  geometry updates substantially cheaper than the accepted 2.6-second
-  runtime-recompute path. Phase 2 recomputation remains an explicit executable
-  fallback, not a presentation scheduler.
-- Do not freeze 128 curves or a cached presentation period as production
-  values. They are Phase 2.5 evidence, not the final production configuration.
-
-**Code-readability checkpoint: PASS.** Reviewed before the Phase 2.5 gate:
-the cache identity and invalidation contract, the authoritative-versus-derived
-data boundary, persistent cache ownership, restart lifecycle, and the guarantee
-that playback never silently recomputes Streamlines.
-
-**Status: PASS/CLOSED.** The full 5 Hz cached source-boundary playback
-hypothesis is rejected; the precomputed cache architecture is retained as the
-preferred production direction, and runtime Streamlines recomputation remains
-the Phase 2 fallback. Do not perform further density-reduction R&D in Phase
-2.5.
-
-#### Phase 2.75 - Streamlines runtime decomposition ✅ — PASS/CLOSED
-
-Purpose: refactor the now-large `app/streamlines/runtime.py` only after Phase
-2.5 establishes which production architecture survives. Drive the decomposition
-from that decision rather than speculative module boundaries.
-
-1. ✅ Begin only after Phase 2.5 records an explicit cache-playback decision, and
-   preserve every accepted Phase 1/2 contract and evidence. Preserve the proven
-   2.6-second runtime-recompute path as fallback unless Phase 2.5 evidence
-   explicitly makes it unnecessary.
-2. ✅ Repair the retained precomputed-cache production ownership: remove the
-   rejected full-5-Hz acceptance harness from shipping runtime and restore the
-   2.6-second recompute path as executable fallback behaviour.
-3. ✅ Repair `StreamlinesRuntimeMixin` and `RuntimeController` public behaviour
-   stable unless evidence requires a contract change. Do not combine the
-   refactor with visual features, seed tuning, AnimatedStreaks, workload-mode
-   implementation, or Phase 3 shared-source work.
-4. ✅ Prefer modules based on responsibilities actually discovered by Phase 2.5;
-   do not prescribe empty modules in advance. Preserve lifecycle cleanup,
-   Kit-CAE execution receipts, time/source mapping, logging semantics, and
-   focused tests.
-5. ✅ Run focused contract tests and one real Kit smoke acceptance before closure.
-
-**Status: PASS/CLOSED.** Static-source cleanliness uses the current
-`evidence.clean` contract; phase-to-exact-sample resolution is dependency-free;
-and cache production ownership is distinct from the closed 5-Hz experiment.
-The explicit 2.6-second recompute fallback preserves a confirmed visible
-`RuntimePreview` after disposable operator and seed cleanup. Cache load rejects
-every non-`DETACHED` Flow state until Phase 4 provides a controlled
-Smoke-to-Streamlines mode transition. The user-run DTRS startup reached
-`app ready` and `RTX ready` with Fabric Scene Delegate disabled and no
-`omni.cae.testing` runtime dependency.
-
-
-### Manual acceptance observability contract
-
-This contract applies to every manual or runtime acceptance workflow in
-checkpoints 3.2-3.6.
-
-Manual acceptance must never require the operator to infer whether DTRS is
-ready, busy, stalled, complete, or waiting for another action.
-
-Whenever a manual action is required, DTRS must expose the workflow through
-explicit structured log states.
-
-Required lifecycle:
-
-`READY
--> NEXT_ACTION
--> START
--> PROGRESS / WAITING
--> COMPLETE or FAIL
--> NEXT_ACTION if another linked action remains
--> TEST COMPLETE`.
-
-Rules:
-
-- Emit `READY` only when the application has actually reached the state in
-  which the requested manual action is valid.
-
-- Immediately after `READY`, emit an explicit `NEXT_ACTION` containing the
-  exact UI action required, preferably using the exact visible button label:
-
-  `NEXT_ACTION | Select "Streamlines" in "Visualization"`.
-
-- Do not ask the operator to press a button before the corresponding operation
-  is ready to be tested.
-
-- Immediately after the requested action is invoked, emit `START`. The operator
-  must never have to infer whether the button press was received.
-
-- Emit `PROGRESS` at meaningful internal stage transitions.
-
-- If an operation remains active without another meaningful stage transition,
-  emit `WAITING` approximately every 5 seconds with elapsed time and a concise
-  description of what DTRS is waiting for.
-
-  Example:
-
-  `DTRS STREAMLINES | CACHE_BUILD | WAITING`
-  `status=Generating cached state 43/80`
-  `elapsed_s=55.2`
-
-- Long-running operations must expose sufficient progress information where
-  deterministic progress is available, for example:
-  - current/total cache samples;
-  - current workload;
-  - current cadence candidate;
-  - current acceptance iteration.
-
-- Emit `COMPLETE` only when the current operation has actually finished and its
-  postconditions have been verified.
-
-- Emit `FAIL` with an explicit failure reason when the current operation cannot
-  complete. Do not leave the workflow in an ambiguous silent state after an
-  exception or rejected validation.
-
-- `COMPLETE` means the current operation/test step is finished; it does not
-  imply that the entire checkpoint acceptance is finished.
-
-- If another linked manual action is required after `COMPLETE` or a recoverable
-  `FAIL`, emit a new explicit:
-
-  `NEXT_ACTION | ...`
-
-  only after that action is valid.
-
-- If no further operator action is required, terminate the workflow with:
-
-  `TEST COMPLETE | <concise acceptance result>`
-  `No further manual action required.`
-
-- Never require the operator to remember the next step from documentation or a
-  previous console message. The current required action must always be visible
-  in the latest relevant log state.
-
-- Avoid per-frame/per-tick logging that would distort performance measurements.
-  `PROGRESS` and `WAITING` must provide observability without materially
-  affecting the runtime being measured.
-
-- A warning from Kit/USD/RTX is not itself evidence that a DTRS acceptance step
-  succeeded or failed. DTRS owns the authoritative `COMPLETE`, `FAIL`,
-  `NEXT_ACTION`, and `TEST COMPLETE` states for its own acceptance workflows.
-
-- Manual acceptance tooling is temporary diagnostic infrastructure unless the
-  same observability is useful in the final product. Do not couple production
-  runtime architecture to acceptance-only UI state unnecessarily.
-
-
-#### Phase 3 - Production Streamlines cache architecture ✅ — PASS/CLOSED
-
-Purpose: turn the retained precomputed-cache direction into the production
-Streamlines runtime contract. Keep the authoritative VTI dataset, the derived
-Streamlines cache, and the visible presentation cadence as three separate
-concerns. Reuse the existing manifest-backed Airflow Dataset Registry as the
-authoritative dataset-discovery owner, then establish shared logical airflow
-state for Flow and Streamlines without forcing both consumers through the same
-runtime data path.
-
-The phase is divided into six implementation checkpoints:
-
-1. authoritative dataset contract and full-manifest cache fidelity;
-2. production cached playback and measured presentation cadence;
-3. consumer-neutral airflow state;
-4. workload-aware Streamlines cache ownership;
-5. production Streamlines geometry profile and four-workload cache set;
-6. final architecture acceptance.
-
-The following invariants apply throughout Phase 3 rather than forming separate
-implementation steps:
-
-- the Phase 2 `2.6 s` runtime-recompute path remains explicit and executable;
-- preferred cached playback must never silently fall back to recomputation;
-- `/app/useFabricSceneDelegate = false` remains unchanged;
-- the standard Kit-CAE Streamlines operator remains the accepted operator type
-  unless new evidence explicitly requires reopening that decision.
-
-
-##### 3.1 - Authoritative dataset contract and full-manifest cache fidelity ✅ — PASS/CLOSED
-
-Establish one authoritative dataset and temporal contract before changing Flow
-ownership or implementing the production presentation scheduler.
-
-Reuse the existing Airflow Dataset Registry as the only owner of manifest
-discovery and parsing.
-
-The authoritative discovery path owns:
-
-- scanning the configured airflow dataset root for `manifest.toml`;
-- parsing and validating each manifest;
-- resolving stable `(scope, state)` dataset identity;
-- resolving the real VTI sequence;
-- validating sample count and temporal metadata;
-- exposing grid, source timing, sample interval, source cadence, sample count,
-  and logical loop duration through the resolved `AirflowDataset`.
-
-Do not introduce an independent Streamlines manifest-discovery implementation.
-
-Streamlines cache build and cache validation must consume an already resolved
-authoritative `AirflowDataset` through the common dataset-resolution seam.
-Streamlines must not independently search dataset directories, parse manifests,
-or infer dataset identity from directory names.
-
-At this checkpoint the architecture is:
-
-`manifest.toml files
--> Airflow Dataset Registry
--> resolved AirflowDataset
--> canonical temporal samples
--> Streamlines cache build / validation`.
-
-The larger workload/transition ownership move into shared airflow state is
-deferred to checkpoint 3.3. Do not combine that refactor with this checkpoint.
-
-Treat these temporal concepts as separate:
-
-- **Authoritative source timeline:** the resolved manifest-defined VTI dataset,
-  including workload/dataset identity, every real source sample, source timing,
-  sample count, and logical loop duration.
-- **Derived Streamlines cache:** deterministic geometry generated from the real
-  source samples.
-- **Presentation timeline:** a later runtime policy controlling how frequently
-  already-cached states become visible.
-
-Source cadence must not determine presentation cadence, and presentation cadence
-must not determine cache contents.
-
-Preserve one dependency-free canonical temporal resolver:
-
-`normalized phase
--> latest real source sample whose source_time <= phase`.
-
-The resolver must preserve:
-
-- exact source-sample identity;
-- exact loop wrap;
-- exact sample-boundary semantics;
-- same currently active sample -> `NO_OP`;
-- no interpolation;
-- no averaging;
-- no synthetic or invented source states.
-
-Do not hard-code the current dataset shape into Streamlines production logic.
-Values such as:
-
-- `80` samples;
-- `5 Hz`;
-- `0.2 s` sample interval;
-
-are current dataset facts, not Streamlines architecture constants.
-
-Make full-manifest cache coverage an explicit invariant.
-
-For every real sample in the resolved authoritative dataset, the cache builder
-must produce exactly one corresponding persisted geometry state:
-
-`real manifest sample
--> exact VTI selection
--> Kit-CAE Streamlines
--> confirmed UsdRT geometry
--> one persisted cached state`.
-
-Require:
-
-- `cache_sample_count == manifest_sample_count`;
-- `len(cache.states) == manifest_sample_count`;
-- contiguous exact sample indices;
-- no missing indices;
-- no duplicate indices;
-- no extra synthetic states;
-- exact workload and dataset identity;
-- exact source VTI identity for every cached state;
-- exact source-time correspondence;
-- exact USD-timecode correspondence.
-
-The persisted cache geometry time samples must match cache metadata and the
-authoritative temporal contract.
-
-Do not downsample cache construction to match current viewport performance.
-If a future dataset contains more real source samples, the corresponding derived
-cache contains more real cached states.
-
-Cache validation must compare the artifact against the same resolved
-`AirflowDataset` used by the source contract. At minimum, source or
-geometry-affecting changes must invalidate the cache when appropriate:
-
-- workload/dataset identity changes;
-- authoritative VTI sequence changes;
-- source VTI identity changes;
-- sample count or timing changes;
-- cache schema changes;
-- geometry-affecting Streamlines settings change.
-
-Presentation-only settings must not participate in cache identity.
-
-Changing a future presentation period must therefore leave an otherwise valid
-cache valid.
-
-**Testing requirement for checkpoint 3.1:**
-
-Every meaningful contract introduced or changed by this checkpoint must have:
-
-- at least one normal happy-path unit test;
-- at least four to five relevant boundary, malformed-input, stale-state, or
-  failure cases.
-
-Do not test only the current `80 samples / 5 Hz` dataset shape.
-
-Include synthetic temporal fixtures that prove the implementation is not tied to
-the current cadence, including where applicable:
-
-- current-style `80 × 0.2 s`;
-- slower-source `40 × 0.4 s`;
-- faster-source `160 × 0.1 s`;
-- a valid single-sample dataset;
-- invalid or inconsistent timing/sample-count input.
-
-Temporal resolver tests must include at minimum:
-
-- phase zero;
-- exactly on a source-sample boundary;
-- immediately before a boundary;
-- immediately after a boundary;
-- loop wrap;
-- repeated active sample -> `NO_OP`;
-- invalid/non-finite timing where applicable.
-
-Cache-fidelity tests must include failure cases such as:
-
-- missing cached state;
-- duplicate cached state;
-- hole in sample indices;
-- mismatched source VTI identity;
-- incorrect source time or USD timecode;
-- stale source signature;
-- stale geometry/settings signature.
-
-Negative tests must prove both rejection and absence of unintended side effects.
-Where relevant, prove:
-
-- no automatic cache rebuild;
-- no silent source substitution;
-- no Kit-CAE execution;
-- no mutation of an existing valid persisted cache.
-
-A manual full DTRS launch is not a default gate for checkpoint 3.1 if changes
-remain limited to plain dataset contracts, temporal resolution, cache metadata,
-cache validation, and related focused tests.
-
-If checkpoint 3.1 changes startup ownership, existing Flow Attach behaviour,
-Kit-facing source preparation, cache attachment/loading, or another live Kit
-runtime path, perform a short DTRS smoke acceptance for the affected path.
-
-Before closing checkpoint 3.1, validate one existing real Streamlines cache
-against the hardened contract where possible without rebuilding it merely for
-ceremony. Prove that manifest sample count, cache-state count, persisted USD time
-samples, source identities, source times, and timecodes agree.
-
-**Status: PASS/CLOSED.** Checkpoint 3.1 confirmed that one manifest-backed
-Airflow Dataset Registry is the
-authoritative dataset-discovery owner; Streamlines owns no independent manifest
-discovery; canonical temporal resolution is independent of Kit; every real
-authoritative source sample maps one-to-one to exactly one cached state; the
-implementation is not hard-coded to the current `80 / 5 Hz / 0.2 s` dataset;
-and presentation cadence has no influence on cache contents or cache identity.
-
-
-##### 3.2 - Production cached playback and presentation cadence ✅ — PASS/CLOSED
-
-Implement the production cached-state presentation path independently from
-authoritative source cadence.
-
-Use the validated cache and canonical temporal resolver from checkpoint 3.1.
-
-The production presentation scheduler is:
-
-`current normalized phase
--> latest real cached state at-or-before phase
--> same cached state = NO_OP
--> otherwise switch visible cached geometry`.
-
-On every presentation tick, resolve from the current logical phase.
-
-Do not queue historical cached states that were not displayed between ticks.
-If source cadence is faster than presentation cadence, skipped presentation
-states remain valid cached source representations but are simply not displayed.
-
-Preferred cached playback must:
-
-- perform no runtime Kit-CAE Streamlines execution;
-- perform no RuntimePreview rebuild;
-- require no live VTI import solely to display Streamlines;
-- never queue missed source states;
-- never accumulate a backlog;
-- resolve directly from current phase on each presentation tick;
-- preserve exact workload/cache identity;
-- preserve loop wrap;
-- preserve `NO_OP`.
-
-After the scheduler works correctly, perform one bounded cadence
-characterization on the reference workstation.
-
-The Phase 2.5 `469 ms` median switch latency for the 128-curve diagnostic cache
-makes `500 ms / 2 Hz` a measurement candidate, not an accepted production value.
-
-Test a small bounded descending candidate set, for example:
-
-- `1000 ms`;
-- `750 ms`;
-- `640 ms`;
-- `500 ms`.
-
-Do not recreate the old full-source-cadence feasibility harness and do not
-perform an open-ended search for the theoretical minimum period.
-
-For every candidate record and prove:
-
-- exact phase-to-cached-state mapping;
-- loop wrap;
-- `NO_OP`;
-- zero accumulated backlog;
-- zero scheduling drift;
-- zero missed presentation deadlines during the accepted run;
-- cached-state switch latency;
-- sustained viewport FPS;
-- GPU/process memory behaviour;
-- clean recovery after playback stops.
-
-Select the smallest stable period with credible timing headroom rather than the
-smallest value that happens to complete once. Prefer approximately 20% timing
-headroom over operating directly at measured switch latency.
-
-After measurement, persist the accepted presentation period as runtime
-configuration.
-
-Keep cache/geometry settings and presentation-only settings separate.
-
-**Cache/geometry-affecting settings include:**
-
-- operator type;
-- direction;
-- seed preset and placement;
-- seed density;
-- integration step sizes;
-- maximum steps/length;
-- width;
-- persisted velocity-derived data that changes cache geometry or attributes.
-
-**Runtime presentation settings include:**
-
-- cached presentation period;
-- presentation behaviour that does not change cached geometry.
-
-Changing the accepted presentation period must not invalidate or rebuild the
-cache.
-
-Focused scheduler/configuration tests must follow the same testing discipline as
-checkpoint 3.1: one happy path plus meaningful boundary/failure coverage rather
-than only the accepted cadence value.
-
-Checkpoint 3.2 requires real DTRS/Kit runtime acceptance because cached geometry
-switch latency, viewport FPS, scheduling headroom, and recovery are runtime
-properties.
-
-**Checkpoint 3.2 gate:** preferred cached playback selects existing real cached
-states from current phase without Kit-CAE recomputation, RuntimePreview rebuild,
-VTI import, backlog, or interpolation; one sustainable presentation period has
-been measured and persisted as presentation-only configuration; and changing
-that period does not alter cache identity.
-
-**Status: PASS/CLOSED.**
-
-```text
-Production cached playback:
-  accepted period        = 200 ms / 5 Hz
-  median switch          = 16 ms
-  max switch             = 78 ms
-  missed deadlines       = 0
-  max drift              = 15 ms
-  backlog                = 0
-  minimum FPS            = 41.9
-
-Temporal behaviour:
-  phase mapping          = PASS
-  NO_OP                  = PASS
-  loop wrap              = PASS
-  observed wrap          = 78 -> 0
-  clean stop             = PASS
-
-Preferred playback path:
-  runtime Kit-CAE        = 0
-  RuntimePreview rebuilds = 0
-  playback VTI imports   = 0
-
-Presentation config:
-  accepted period             = 0.2 s
-  stored in local config      = YES
-  base config modified        = NO
-  cache identity changed      = NO
-  source signature changed    = NO
-  settings signature changed  = NO
-  geometry mutated            = NO
-  cache rebuild               = NO
-
-Focused config/cache tests:
-  76 passed
-```
-
-
-##### 3.3 - Consumer-neutral airflow state ✅ — PASS/CLOSED
-
-Separate logical airflow state and temporal ownership from the Flow consumer
-without changing the accepted external Attach workflow.
-
-Build on the existing authoritative Airflow Dataset Registry from checkpoint
-3.1 rather than creating a second dataset-discovery system.
-
-The shared airflow layer owns logical state including:
-
-- workload identity;
-- dataset identity;
-- resolved authoritative `AirflowDataset`;
-- authoritative source-sample identity;
-- logical loop duration;
-- normalized phase;
-- latest-real-sample-at-or-before-phase resolution;
-- pending target state;
-- transition generation and supersession;
-- state/consumer commit verification;
-- failure rollback.
-
-Do not make shared airflow state synonymous with a live imported VTI prim.
-
-Flow and Streamlines consume the same logical state through different runtime
-paths:
-
-**Flow consumer:**
-
-`shared airflow state
--> temporal VTI source
--> Flow / Smoke`.
-
-**Preferred Streamlines consumer:**
-
-`shared airflow state
--> validated derived Streamlines cache
--> cached geometry presentation`.
-
-**Streamlines cache generation / explicit recompute fallback:**
-
-`shared airflow state
--> authoritative VTI source
--> standard Kit-CAE Streamlines`.
-
-VTI import and temporal VTI authoring therefore remain required for Flow, cache
-generation, and the explicit recompute fallback, but not for preferred cached
-Streamlines playback.
-
-Move only consumer-neutral workload/temporal responsibilities out of Flow.
-Do not casually relocate Flow-specific simulation behaviour merely to make the
-module tree symmetrical.
-
-Preserve the existing visible and functional Attach contract while ownership is
-separated.
-
-Run focused regression coverage for:
-
-- Attach;
-- Detach;
-- current workload mapping;
-- supersession;
-- failure rollback;
-- phase ownership;
-- existing Flow workload transitions.
-
-Because this checkpoint changes ownership underneath an already accepted live
-runtime path, complete it with a short real DTRS/Kit acceptance proving that
-existing Flow Attach and workload behaviour have not regressed.
-
-**Status: PASS/CLOSED.** Checkpoint 3.3 confirmed that workload and temporal
-truth belong to a consumer-neutral
-airflow layer backed by the existing authoritative dataset registry; Flow and
-Streamlines consume that state through separate appropriate runtime paths; and
-the accepted Flow Attach/workload behaviour remains unchanged.
-
-##### 3.4 - Workload-aware Streamlines cache ownership ✅ — PASS/CLOSED
-
-Generalize Streamlines cache identity and discovery from the representative
-Nominal cache to workload/dataset-aware production ownership.
-
-Remove production assumptions that:
-
-- Streamlines cache is permanently Nominal-only;
-- one hard-coded cache path represents every workload;
-- all workloads must have the same future source sample count or cadence.
-
-Define a cache identity/path/metadata contract that distinguishes at minimum:
-
-- workload;
-- dataset identity;
-- authoritative source signature;
-- cache schema version;
-- geometry/settings signature;
-- complete manifest sample coverage.
-
-For every configured workload, cache discovery must be able to classify the
-corresponding expected artifact without building it automatically.
-
-At minimum distinguish:
-
-- `VALID`;
-- `MISSING`;
-- `STALE`;
-- `INCOMPATIBLE`.
-
-The current workload set is:
-
-- Idle;
-- Nominal;
-- Surge;
-- Critical.
-
-Different workloads may legitimately use different future source sample counts
-or source cadences while preserving their logical loop contract.
-
-At this checkpoint establish and test ownership, discovery, identity,
-invalidation, and classification only.
-
-Do **not** yet build the final four production caches merely because the registry
-can identify them.
-
-Focused unit tests must include multiple workload identities and negative cases
-such as missing artifacts, wrong workload metadata, stale source signatures,
-settings mismatches, and incompatible schema versions.
-
-Startup/cache discovery must never automatically trigger an expensive rebuild.
-
-**Checkpoint 3.4 gate:** DTRS can deterministically identify the expected
-Streamlines cache for every workload, classify its validity without recomputing
-it, and keep all workload/source/settings identities distinct without relying on
-Nominal-only or fixed-cadence assumptions.
-
-**Status: PASS/CLOSED.** Ownership, read-only discovery, deterministic
-classification, and the guided inspection scenario were accepted. The scenario
-is retired; reusable manual-acceptance formatting remains available for 3.5.
-
-
-##### 3.5 - Production geometry profile and four-workload cache set ✅ — PASS/CLOSED
-
-Finalize the production Streamlines geometry profile before spending time
-building the complete four-workload cache set.
-
-Determine accepted production values for:
-
-- seed placement/preset;
-- direction;
-- integration step sizes;
-- maximum steps/length;
-- geometry density;
-- width;
-- velocity-derived scalar or presentation attributes that must be persisted in
-  the cache for later Phase 4 presentation.
-
-Do not automatically promote the Phase 2.5 `128 curves` diagnostic profile to
-production merely because it produced the best feasibility measurement.
-
-Geometry tuning must balance:
-
-- clear visual explanation of server airflow;
-- sufficient spatial readability;
-- cached-state switch cost;
-- practical cache size.
-
-Keep tuning bounded. Do not reopen broad operator or density R&D.
-
-Preserve the standard Kit-CAE Streamlines operator. Do not reopen NanoVDB versus
-standard operator comparison unless new measured evidence requires it.
-
-Every geometry-affecting setting must participate in the settings signature.
-Changing it must explicitly invalidate the corresponding cache.
-
-Once the production geometry/settings signature is accepted, build or validate
-one complete production cache for each workload:
-
-- Idle;
-- Nominal;
-- Surge;
-- Critical.
-
-Do not build the final four-cache set before the production geometry profile is
-accepted; otherwise later geometry changes would invalidate all four expensive
-artifacts.
-
-For every workload prove the full checkpoint 3.1 cache-fidelity contract:
-
-- every real manifest sample has one cached state;
-- no source samples are omitted;
-- no synthetic samples are added;
-- source identity is exact;
-- source time/timecode mapping is exact;
-- metadata and persisted USD time samples agree;
-- cache validation passes against that workload's authoritative
-  `AirflowDataset`.
-
-Record practical build evidence including:
-
-- sample count;
-- cache size;
-- generation-time median/max where useful;
-- failed samples;
-- topology consistency;
-- source signature;
-- settings signature;
-- final validation result.
-
-Do not automatically rebuild a different workload cache when one cache is
-missing or stale.
-
-**Checkpoint 3.5 gate:** one production Streamlines geometry profile is frozen
-and represented in cache identity, and valid complete workload-specific caches
-exist for Idle, Nominal, Surge, and Critical with one cached state for every
-authoritative real source sample.
-
-**Status: PASS/CLOSED.** Production profile v2, persisted raw `dtrs:speed`,
-and independently valid Idle/Nominal/Surge/Critical caches were accepted. The
-temporary guided profile/cache/sanity UI scenario is retired for Phase 3.6.
-
-
-##### 3.6 - Final Phase 3 architecture acceptance ✅ — PASS/CLOSED
-
-Verify the completed production Streamlines cache architecture before Phase 4
-introduces user-facing Smoke/Streamlines product-mode integration.
-
-Prove the complete architecture:
-
-- one manifest-backed Airflow Dataset Registry is the authoritative dataset
-  discovery owner;
-- Streamlines owns no independent manifest discovery/parsing path;
-- authoritative dataset/source state and derived cache ownership are distinct;
-- source cadence, cache fidelity, and presentation cadence are independent;
-- every real authoritative source sample has exactly one corresponding cached
-  Streamlines state;
-- production logic is not hard-coded to the current `80 samples / 5 Hz / 0.2 s`
-  dataset;
-- the canonical phase resolver preserves latest-real-sample semantics, loop
-  wrap, and `NO_OP`;
-- the selected presentation period is measured and stable;
-- changing presentation cadence does not invalidate a cache;
-- preferred cached playback performs zero runtime Kit-CAE Streamlines
-  executions;
-- preferred cached playback performs zero RuntimePreview rebuilds;
-- preferred cached playback requires no live VTI import solely for
-  presentation;
-- all four workload caches are discovered and validated independently;
-- missing/stale/incompatible caches are surfaced without automatic rebuilding
-  or silent recomputation;
-- the Phase 2 `2.6 s` runtime-recompute path remains callable and explicit;
-- `/app/useFabricSceneDelegate = false` remains unchanged;
-- cleanup remains idempotent and leaves no stale Streamlines runtime state;
-- existing Flow Attach, workload switching, supersession, and rollback have not
-  regressed after shared-state ownership changes.
-
-Run a final code-readability review around these ownership boundaries:
-
-`Airflow Dataset Registry
--> authoritative AirflowDataset
--> shared logical airflow state
--> Flow consumer / Streamlines consumer`.
-
-A first-time technical reader must be able to determine:
-
-- where manifests are discovered and validated;
-- what object represents authoritative dataset truth;
-- what owns workload and normalized phase;
-- why Streamlines cache is derived rather than authoritative;
-- why every real source sample is cached;
-- why runtime presentation may display only a subset of cached states;
-- why changing presentation cadence does not require rebuilding cache;
-- when VTI/Kit-CAE is required and when it is deliberately absent.
-
-The Phase 3 final acceptance uses focused unit/contract coverage plus real
-DTRS/Kit acceptance only for behaviour that genuinely depends on Kit, viewport,
-timing, Flow integration, or lifecycle state.
-
-Do not require full manual application launches for purely plain-data checks,
-but do not substitute unit tests for runtime evidence where runtime behaviour is
-the subject being accepted.
-
-**Phase 3 gate:** DTRS has a production Streamlines cache architecture built on
-one authoritative manifest-backed dataset system. Every real source sample is
-preserved in a workload-specific derived cache, while visible cached states are
-selected independently through a measured presentation cadence. Flow and
-Streamlines consume one shared logical airflow state through their appropriate
-runtime paths. Idle, Nominal, Surge, and Critical caches are independently
-identifiable and valid; preferred Streamlines playback performs no runtime
-Kit-CAE recomputation or VTI import solely for presentation; presentation
-configuration does not invalidate cache artifacts; the explicit `2.6 s`
-recompute fallback remains available; and existing Flow behaviour has not
-regressed. Phase 4 may begin only after these contracts pass their focused
-plain-data and required real-Kit acceptance.
-
-**Code-readability checkpoint -- apply before the Phase 3 gate:** Review the
-shared airflow-state contract, the authoritative-source versus derived-cache
-boundary, cache-build versus runtime-playback ownership, presentation-clock
-separation, cache invalidation rules, workload cache identity, and explicit
-recompute fallback. A first-time technical reader must be able to see why
-source cadence, cache fidelity, and presentation cadence are deliberately
-independent.
-
-**Status: PASS/CLOSED.** The real DTRS final acceptance passed cached playback,
-explicit recompute fallback, Attach, Critical, Nominal, Detach, and final
-cleanup. The temporary Phase 3 acceptance scenario is retired; its production
-architecture is the baseline for Phase 4.
-
-
-#### Phase 4 - Production modes and acceptance
-
-Purpose: integrate the production Streamlines cache architecture accepted in
-Phase 3 into normal DTRS operation.
-
-Expose Smoke and Streamlines as explicit user-facing airflow visualization modes
-over one shared logical airflow state, preserve workload and normalized temporal
-phase across mode and workload changes, compose correctly with X-Ray, and prove
-the result as a stable production interaction rather than a diagnostic workflow.
-
-Phase 4 must consume the accepted Phase 3 architecture rather than redesign it.
-
-The authoritative chain remains:
-
-Airflow Dataset Registry -> authoritative AirflowDataset -> shared logical airflow state -> Flow consumer / Streamlines consumer
-
-The Streamlines cache remains derived visualization data. Houdini-authored VTI
-remains authoritative source data.
-
-##### 4.1 - Production Visualization Mode state and Attach contract ✅ — PASS/CLOSED
-
-Introduce DTRS-owned Airflow Visualization Mode state.
-
-Production modes:
-
-Smoke
-Streamlines
-Off only if an internal neutral state is required for safe transitions
-
-The mode state must be enforced in RuntimeController, not only in OmniUI.
-
-Required invariants:
-
-Smoke and Streamlines must never be visibly active simultaneously;
-visualization mode is presentation state;
-changing mode must not change workload identity;
-changing mode must not change dataset/manifest identity;
-changing mode must not reset normalized logical airflow phase;
-changing mode is not equivalent to Attach/Detach;
-Attach/Detach remain lifecycle operations over the shared airflow runtime.
-
-Preserve the existing Attach workflow.
-
-After successful Attach, Smoke remains the default presentation:
-
-shared airflow state -> temporal VTI source -> Flow / Smoke
-
-Do not introduce a Streamlines-specific Attach.
-
-Existing Flow validation, temporal authoring, workload binding, rollback,
-supersession, timeline behaviour and Detach semantics must remain unchanged.
-
-Mode transitions must be transactional.
-
-Maintain enough state to distinguish at minimum:
-
-committed visualization mode;
-pending visualization mode;
-current mode-transition identity.
-
-The last valid presentation remains committed until the requested replacement
-has proved readiness.
-
-If a newer mode request arrives while a previous transition is pending, the
-latest valid request supersedes the previous one.
-
-Detach/shutdown must cancel any pending visualization transition and clean both
-presentation consumers safely.
-
-Streamlines readiness must not depend on completion of unrelated background VTI
-validation. Background Flow-source preparation may continue independently.
-
-4.1 gate: Attach still establishes the accepted shared airflow runtime with
-Smoke as its default presentation, while visualization mode exists as an
-independent transactional presentation state.
-
-**Status: PASS/CLOSED.** Real DTRS acceptance completed the production
-`Normal -> Smoke -> Heatmap -> Smoke -> Normal` sequence. It verified deferred
-Smoke commit until current-workload Flow readiness, Heatmap's configured
-all-target X-Ray override and manual-state restoration, clean final Flow
-teardown, and exactly one terminal acceptance record. The temporary 4.1 guided
-scenario is retired; the generic acceptance formatter/session infrastructure
-remains the reusable basis for Phase 4.2.
-
-**Post-4.1 Normal-mode performance repair — accepted:** after the Phase 4.1
-closure, Normal mode regressed from the Phase 3 post-validation baseline of
-about **75.6 avg / 62.7 min FPS** to **36.6 / 30.9 FPS**, with recurring
-roughly 520–705 ms stalls and visibly frozen fan motion. Disabling only the
-Visualization readiness refresh restored **83.0 / 75.8 FPS**, isolating the
-regression. The cause was a roughly 1 Hz UI readiness call synchronously
-revalidating the current Streamlines cache and SHA-256 hashing its roughly
-65.5 MB `.usdc` artifact on the Kit main thread. Strong cache provenance
-validation now belongs to the Streamlines cache owner: a deduplicated
-background receipt performs chunked hashing and records ownership,
-fingerprint, schema/source/settings compatibility, and classification. The UI
-projects that receipt as `CHECKING`/`VALID`/failure state without cache reads,
-hashing, USD composition, VTI I/O, timeline mutation, or Kit-CAE work. Manual
-post-repair Normal validation confirmed about **85 FPS**, smooth fan animation,
-and no recurring readiness stalls.
-
-**Status: PASS/CLOSED.** Persisted validation receipt acceptance used a controlled
-two-session
-acceptance confirmed safe reuse of previously strongly validated evidence and
-clean production-consumer lifecycle behaviour.
-
-```text
-Persisted VTI receipt reuse              PASS
-Persisted Streamlines receipt reuse      PASS
-No expensive startup revalidation        PASS
-Startup default = Normal                 PASS
-Manual consumer verification             PASS
-Return to clean Normal                   PASS
-Phase 4.2 regression after these changes PASS
-```
-
-The final line records the focused Phase 4.2 regression check completed after
-the receipt-reuse work and retained as part of the Phase 4.2 closure evidence.
-
-##### 4.2 - Transactional Smoke <-> Streamlines transitions and rollback ✅ — PASS/CLOSED
-
-Implement both visualization-mode transitions through one coherent transition
-mechanism.
-
-Smoke -> Streamlines
-
-When Streamlines is requested:
-
-preserve current workload and normalized phase;
-resolve the corresponding workload-specific Streamlines cache;
-require the cache to be VALID;
-resolve the latest real cached state at-or-before the preserved phase;
-prepare the persisted Streamlines presentation while Smoke remains the last
-committed valid presentation;
-prove the visible Streamlines state matches workload, dataset and resolved
-source-sample identity;
-start the Phase 3 accepted cached-presentation scheduler;
-only after readiness succeeds, quiesce/hide Smoke and commit Streamlines mode.
-
-Preferred activation must perform:
-
-no cache build/rebuild;
-no runtime Kit-CAE Streamlines execution;
-no RuntimePreview rebuild;
-no VTI import solely for Streamlines presentation;
-no interpolation, averaging or synthetic cached states.
-
-A live Flow temporal source may remain prepared for later return to Smoke, but
-Streamlines playback must not depend on it to remain visible.
-
-Streamlines -> Smoke
-
-When Smoke is requested:
-
-preserve workload and normalized phase;
-prepare or verify the existing Flow presentation at the corresponding logical
-airflow phase;
-reuse the already-prepared temporal Flow source when still valid;
-reconstruct Flow only when genuinely required and make that reconstruction
-explicit;
-prove Smoke readiness;
-stop the Streamlines scheduler cleanly;
-remove/hide Streamlines presentation state;
-commit Smoke mode.
-
-Do not rebuild the Flow temporal source merely because visualization mode
-changed when the accepted source is still valid.
-
-Failure behaviour
-
-A mode transition failure must preserve the last valid committed presentation.
-
-A missing, stale, incompatible, incomplete or unreadable Streamlines cache must
-never cause:
-
-silent Kit-CAE recomputation;
-automatic cache rebuilding;
-substitution of another workload or dataset;
-interpolation from another cache;
-unexplained disappearance of the previous valid presentation.
-
-For failed Smoke -> Streamlines activation:
-
-Smoke remains/restores visible;
-workload and normalized phase remain valid;
-mode does not commit to Streamlines;
-concise UI status and structured log explain the rejected cache/reason.
-
-For failed Streamlines -> Smoke reconstruction:
-
-the previous valid Streamlines presentation remains active until Smoke proves
-readiness;
-shared logical state is not silently reset.
-
-The preserved runtime-recompute path remains explicit-only. Cache failure must
-never invoke it automatically.
-
-4.2 gate: repeated Smoke <-> Streamlines transitions preserve logical airflow
-state, commit only after the new presentation proves readiness, and fail without
-destroying the previous valid presentation.
-
-**Status: PASS/CLOSED.** Real DTRS acceptance confirmed repeated transactional
-`Smoke -> Streamlines -> Smoke` switching, exclusive primary-presentation
-visibility, sustained cached and Flow temporal playback, retained-source reuse,
-clean rollback/lifecycle ownership, and final return to Normal without a
-presentation or scheduler orphan.
-
-##### Pre-4.3 - Independent Visualization Mode Activation ✅ — PASS/CLOSED
-
-Phase 4.2 intentionally centred on the transactional Smoke <-> Streamlines
-handoff and therefore retained temporary source-mode prerequisites. Production
-behaviour must instead treat Normal, Smoke, Streamlines and the current Heatmap
-preview as peer primary visualization modes.
-
-A healthy target mode must be requestable from any currently committed mode.
-The source mode provides cleanup and rollback context only; it is never an
-activation prerequisite.
-
-Gate:
-
-- direct Normal -> Streamlines activation without Flow;
-- direct Normal -> Heatmap activation;
-- supported mode-to-mode transitions do not depend on source-mode identity;
-- a failed target preserves or restores the previous proven presentation;
-- no orphan scheduler, stale pending transition or simultaneous visible primary
-  consumers remain after a transaction.
-
-Real DTRS guided acceptance evidence:
-
-```text
-Normal -> Streamlines without Smoke/Flow prerequisite     PASS
-Independent Streamlines persisted-cache activation       PASS
-Streamlines -> Normal cleanup                             PASS
-Normal -> Heatmap                                         PASS
-Heatmap -> Smoke                                          PASS
-Smoke -> Streamlines regression                           PASS
-Retained Flow optimization                               PASS
-Final Normal cleanup                                     PASS
-Pre-4.3 guided acceptance                                PASS
-```
-
-**Status: PASS/CLOSED.** The production selector completed the full peer-mode
-sequence with direct cached Streamlines activation, retained-Flow optimisation,
-exclusive primary presentation ownership and clean final Normal teardown.
-
-##### 4.3 - Workload-aware Streamlines runtime ✅ — PASS/CLOSED
-
-Pre-4.3 established Normal, Smoke, Streamlines, and Heatmap as independent
-primary visualization modes. Phase 4.3 therefore assumes Streamlines is already
-the committed visualization mode; workload switching must behave identically
-whether Streamlines was entered directly from Normal, from Smoke with retained
-Flow, or from another supported visualization mode.
-
-Workload selection continues to drive the shared logical airflow state
-independently from visualization mode.
-
-In Smoke mode, preserve the accepted Flow workload-transition behaviour.
-
-In Streamlines mode, a workload transition must consume the corresponding
-persisted workload-owned Streamlines cache directly. It must not require,
-attach, rebuild, or otherwise depend on Flow merely because the workload changed.
-
-The transition contract is:
-
-requested workload
--> shared pending airflow state
--> authoritative AirflowDataset
--> derived workload/dataset cache identity
--> require VALID target cache evidence
--> capture the shared logical airflow clock
--> resolve the target dataset's normalized loop phase
--> resolve the latest real cached state at-or-before that phase
--> prepare the target persisted presentation
--> prove target cache identity, visibility, and playback liveness
--> commit the shared workload transition
-
-The previously committed workload remains authoritative until the target
-Streamlines presentation has proved its postconditions.
-
-Required invariants:
-
-- no runtime Streamlines recomputation;
-- no automatic target-cache build or rebuild;
-- no Flow Attach solely for a Streamlines workload transition;
-- no VTI import solely for Streamlines presentation;
-- no index-based mapping between workload datasets;
-- no dependency on equal sample counts;
-- no dependency on equal source cadences;
-- the shared logical airflow clock is the cross-workload temporal contract;
-  each dataset resolves its own normalized loop phase from that clock;
-- only real manifest-backed cached states may be selected;
-- exactly one Streamlines playback scheduler may remain active after a completed
-  transition.
-
-If a workload change fails while Streamlines is active:
-
-- do not commit the requested workload;
-- keep the previously committed workload authoritative;
-- remove the failed target candidate;
-- if the single Streamlines presentation was already mutated, restore the
-  previous workload cache at the current shared phase;
-- restore and prove exactly one valid playback scheduler;
-- preserve Streamlines as the committed visualization mode when rollback succeeds;
-- report the requested workload, expected cache identity, failure stage, and
-  rejection reason.
-
-A failed transition must not report the previous presentation as healthy unless
-its rollback has actually been proven.
-
-Mode transitions and workload transitions must use compatible
-supersession/cancellation semantics. If a newer workload request arrives, or
-the user leaves Streamlines while a workload transition is pending, stale
-candidate work must lose commit authority.
-
-Rapid input must not leave:
-
-- stale pending airflow transitions;
-- a stale workload candidate committed after supersession;
-- mismatched committed workload and loaded cache identity;
-- multiple playback schedulers;
-- orphaned cache presentation state;
-- Streamlines workload work continuing after another visualization mode has
-  taken ownership.
-
-4.3 gate: while Streamlines remains the committed visualization mode, Idle,
-Nominal, Surge, and Critical can be selected through their independently
-validated persisted caches, including direct transitions between non-adjacent
-workloads, while preserving shared-clock phase correctness, authoritative
-workload state, transactional rollback, and exactly one live cached-playback
-scheduler.
-
-Real DTRS guided acceptance evidence:
-
-```text
-Nominal -> Idle -> Surge -> Critical -> Nominal      PASS
-workload/cache identity                              PASS
-shared-phase resolution                              PASS
-visible + advancing target cache                     PASS
-scheduler_tasks=1                                    PASS
-
-reference_swap                                       PASS
-session_sublayers_unchanged                          True
-root_sublayers_unchanged                             True
-server_scene_composition_mutations                   0
-
-cache_build                                          0
-recompute                                            0
-KitCAE                                               0
-VTI_import                                           0
-Flow_attach_due_to_transition                        0
-
-Final Normal cleanup                                 PASS
-TEST COMPLETE                                        PASS
-```
-
-**Status: PASS/CLOSED.** The production workload sequence confirmed exact
-workload/cache identity, shared-phase resolution, one visible advancing cached
-presentation and one scheduler. The accepted presentation is now a DTRS-owned
-static snapshot hierarchy, which performs no forbidden runtime work and returns
-cleanly to Normal.
-
-
-##### 4.4 - Production Streamlines geometry, velocity presentation, X-Ray coexistence and UI
-
-Phase 4.3 proves the runtime architecture:
-
-workload -> authoritative AirflowDataset -> validated workload-owned persisted
-cache -> static BasisCurves snapshots -> CachedPlaybackScheduler ->
-visibility-only snapshot switching.
-
-Do not reopen that architecture in Phase 4.4.
-
-However, the cache geometry used to prove the runtime path is still diagnostic
-and is not accepted as the final production Streamlines visual.
-
-Phase 4.4 therefore begins with one bounded final geometry-profile pass, then
-freezes the resulting cache-affecting contract before presentation styling,
-X-Ray coexistence and normal product UI are completed.
-
-
-###### 4.4.0 - Final production Streamlines geometry profile
-
-Create one readable server-scale Streamlines profile that communicates the
-airflow path through the machine rather than merely proving that cached
-Streamlines can be generated and played.
-
-The visual objective is:
-
-front intake -> internal server airflow path -> rear exhaust
-
-The result does not need to imply validated CFD, but it must read clearly as
-airflow moving through the server and be useful in the final Case 03 visual
-story.
-
-Use the existing standard Kit-CAE Streamlines operator and the existing
-authoritative Houdini-authored VTI datasets.
-
-Do not introduce:
-
-custom streamline integration;
-a second runtime renderer;
-synthetic velocity vectors;
-new simulation data;
-per-workload geometry profiles.
-
-Tune only the existing cache-affecting profile controls needed to obtain the
-smallest acceptable production result, including where necessary:
-
-seed placement/preset;
-operator type and direction;
-integration settings;
-maximum steps/length;
-geometry density;
-persisted width.
-
-Use one shared production geometry profile across Idle, Nominal, Surge and
-Critical.
-
-Prefer Nominal as the primary profile-authoring workload, then verify that the
-same shared profile remains structurally readable for Idle, Surge and Critical.
-
-This is a bounded visual-profile pass, not renewed Streamlines R&D.
-
-Once the profile is accepted:
-
-1. freeze the final cache-affecting settings;
-2. update the settings-signature contract if the frozen settings changed;
-3. explicitly rebuild all four workload caches once;
-4. validate all four rebuilt caches independently;
-5. run the existing cached-playback sanity at the accepted 200 ms presentation
-   period;
-6. do not reopen geometry tuning during the remainder of Phase 4.
-
-The frozen cache-affecting contract remains responsible for:
-
-seed placement/preset;
-operator type and direction;
-integration settings;
-maximum steps/length;
-geometry density;
-persisted widths;
-persisted attribute contract including `primvars:dtrs:speed`;
-workload/dataset cache identity.
-
-Any later geometry-affecting or persisted-attribute change must invalidate the
-corresponding cache through the settings-signature contract and require an
-explicit rebuild.
-
-4.4.0 gate: one shared frozen production profile produces readable server-scale
-airflow paths for all four workloads, all four rebuilt caches validate, and
-cached playback still passes without runtime Streamlines recomputation.
-
-**Phase 4.4A final geometry validation: PASS/CLOSED.** The tuning,
-seed-layout, immutable-candidate, four-workload Global, Volume delta and
-post-settle performance contracts passed without production cache generation.
-No further geometry tuning is required.
-
-Final accepted geometry contracts:
-
-```text
-VOLUME COVERAGE
-Sections                 24
-Seeds / Section          256
-Max Steps                20
-Cell Step Scale          1.0x
-effective DAV            0.01 / 0.2 / 0.5
-curves                   6144
-
-GLOBAL FLOW PATH
-Seed Count               256
-Max Steps                200
-Cell Step Scale          2.0x
-effective DAV            0.02 / 0.4 / 1.0
-```
-
-The production-facing Profile order is Volume Coverage, then Global Flow
-Path. Volume Coverage is the clean-session default; an explicit user
-preference remains authoritative for that session. Production cache
-materialisation is now the accepted persisted centerline cache -> static
-`BasisCurves` snapshots -> `CachedPlaybackScheduler` -> visibility-only
-snapshot switching path. The Nominal / Volume Coverage 80-sample, 5 Hz
-production instance passed full-loop, teardown and clean re-entry acceptance.
-Higher sample-count scaling and final velocity-material work remain out of
-scope.
-
-
-###### 4.4B Renderer temporal playback investigation — RESOLVED
-
-The production Streamlines cache contains real temporal geometry variation, but
-the initially expected USD renderer path did not produce reliable visible
-deformation in the installed Kit/RTX stack.
-
-This became a renderer-presentation investigation rather than a cache-generation
-problem.
-
-Problem
--------
-
-The persisted Streamlines caches were structurally valid and contained distinct
-geometry for different temporal samples, yet time-sampled `points` deformation
-remained visually static or unreliable in RTX.
-
-The failure therefore had to be separated into:
-
-- source/cache correctness;
-- USD composition correctness;
-- temporal sample selection;
-- renderer visibility of geometry deformation.
-
-Diagnostic sequence
--------------------
-
-The investigation progressively falsified the following explanations and
-approaches:
-
-1. Variable-topology time-sampled `BasisCurves`
-   - source geometry was temporally distinct;
-   - RTX reported point-count/topology problems;
-   - visible result could corrupt into spiked/"spaghetti" geometry.
-
-2. Constant-topology time-sampled `BasisCurves`
-   - curves were padded to a fixed renderer topology;
-   - persisted and composed sample hashes changed correctly;
-   - viewport nevertheless remained visually static and showed temporal flicker.
-
-3. Explicit Python per-tick point replacement
-   - proved that explicit state mutation was possible in principle;
-   - performance collapsed to unusable levels and could trigger RTX Device Lost;
-   - rejected as a production path.
-
-4. Prebaked time-sampled `UsdGeomMesh`
-   - replaced curves with a fixed-topology tube Mesh;
-   - source and live Mesh state hashes changed correctly;
-   - visible deformation still remained static;
-   - disabling Geometry Streaming did not resolve the issue.
-
-5. Renderer-refresh probes
-   - an Xform-only probe visibly moved the complete Streamlines object, proving
-     that transform changes reached RTX;
-   - two static copies of the same logical streamline from consecutive cached
-     samples rendered as visibly different shapes;
-   - offline displacement analysis confirmed meaningful real temporal deformation
-     in the persisted cache.
-
-These results isolated the problem to renderer handling of time-sampled internal
-geometry deformation rather than to the VTI source, Streamlines integration,
-cache identity, or temporal resolver.
-
-Decisive workaround
--------------------
-
-A final bounded experiment represented each temporal cache state as an immutable
-static `BasisCurves` snapshot and changed only USD visibility.
-
-The progression was:
-
-- two-state static A/B switching — visually successful;
-- ten consecutive full-density states at the production cadence — successful;
-- complete current 80-sample / 5 Hz loop — successful.
-
-The renderer therefore proved reliable when consuming immutable static geometry
-and visibility changes, while the same temporal shapes were unreliable when
-presented as time-sampled `points` deformation.
-
-Production decision
--------------------
-
-The accepted production representation is therefore:
-
-    VALID persisted centerline cache
-    -> materialize one static BasisCurves snapshot per real manifest state
-    -> resolve the current real cached sample through CachedPlaybackScheduler
-    -> keep exactly one snapshot visible
-    -> advance by visibility-only switching
-
-This is a renderer-presentation workaround, not a change to Streamlines
-semantics.
-
-Each snapshot still represents the real cached streamline result for the
-corresponding authoritative manifest sample. No interpolation, synthetic states,
-runtime Streamlines recomputation, VTI presentation import, Mesh conversion, or
-per-tick point-array copying is performed.
-
-The current Volume Coverage / Nominal 80-sample / 5 Hz instance subsequently
-passed the final production gate with:
-
-- all real samples observed;
-- 79 -> 0 wrap accepted;
-- one scheduler;
-- exactly one visible snapshot;
-- zero missed deadlines/backlog;
-- clean Normal teardown and clean re-entry;
-- manual viewport acceptance.
-
-Retired approaches
-------------------
-
-The following paths are explicitly non-production and were removed after the
-snapshot path passed final acceptance:
-
-- time-sampled renderer `BasisCurves` deformation;
-- explicit per-tick Python point copying;
-- prebaked time-sampled Mesh playback;
-- Xform / real-curve A/B / full-state renderer probes.
-
-Higher sample-count residency and scaling behaviour remains a separate future
-characterization problem and is not part of this resolved renderer investigation.
-
-
-
-###### 4.4.1 - Production velocity presentation
-
-Presentation configuration is independent from cache identity.
-
-Runtime-only presentation properties may include:
-
-accepted presentation period;
-physical velocity colour mapping;
-palette;
-brightness;
-opacity;
-other styling that does not alter persisted geometry or attributes.
-
-Changing presentation-only configuration must not invalidate or rebuild a cache.
-
-Keep the Phase 3 accepted 200 ms presentation period. Do not reopen 150/100 ms
-cadence exploration or broad performance tuning.
-
-Use persisted `primvars:dtrs:speed` as the production velocity source.
-
-The persisted value is raw physical speed associated with the cached
-Streamlines vertices. Runtime presentation must not require live VTI evaluation
-merely to recover velocity colour/scalar meaning.
-
-Define one configuration-backed velocity-to-visual mapping shared across all
-workloads.
-
-The same physical speed value must produce the same visual meaning in:
-
-Idle;
-Nominal;
-Surge;
-Critical.
-
-Do not normalize each workload or each frame independently to its own min/max.
-
-Before freezing the presentation mapping, inspect the persisted speed
-distribution across the four production caches and select one shared useful
-physical range and palette.
-
-Clamp documented out-of-range values rather than dynamically rescaling the
-palette.
-
-Prefer:
-
-persisted raw `dtrs:speed`
--> runtime physical mapping
--> production Streamlines material/presentation
-
-over baked per-workload colour.
-
-The preferred renderer path should consume the persisted speed primvar directly
-on the cached Streamlines geometry.
-
-If the installed Kit/RTX path cannot reliably render the required per-vertex
-velocity presentation, keep the same physical mapping contract and use the
-smallest runtime fallback that does not require VTI import, Streamlines
-recomputation or cache mutation.
-
-4.4.1 gate: the final Streamlines geometry has a readable velocity-driven visual
-language, and identical physical speed means identical visual output across all
-four workloads.
-
-
-###### 4.4.2 - Streamlines presentation ownership
-
-Keep production styling separate from cache loading, playback and workload
-transition ownership.
-
-The Streamlines subsystem should preserve these responsibility boundaries:
-
-`speed.py`
-- raw persisted speed validation only;
-- no palette or material policy.
-
-`presentation.py`
-- pure presentation configuration and validation;
-- physical speed -> visual mapping;
-- no Kit/USD ownership.
-
-`presentation_runtime.py`
-- Kit/USD production material or equivalent presentation backend;
-- apply/inspect/cleanup presentation state;
-- no cache construction or workload state machine.
-
-`cache.py` / `cache_runtime.py`
-- persisted cache identity, validation and local reference presentation;
-- no velocity palette policy.
-
-`playback_runtime.py`
-- accepted 200 ms scheduler and exact cached-state selection;
-- no material/palette logic.
-
-`workload_transition.py`
-- Phase 4.3 transactional cache switching;
-- no duplicate presentation state machine.
-
-`runtime.py`
-- remain a thin facade composing the focused Streamlines owners.
-
-If the production material graph requires enough implementation to justify a
-separate module, use a focused `presentation_material.py`; do not create it only
-for structural symmetry.
-
-Production presentation must use the existing stable Streamlines runtime subtree
-and must not reintroduce Session Layer sublayer swapping or broad server-scene
-recomposition.
-
-Workload cache changes must preserve the same production presentation contract
-rather than rebuilding styling for each workload.
-
-
-###### 4.4.3 - X-Ray coexistence
-
-X-Ray remains independent from Airflow Visualization Mode.
-
-Streamlines and X-Ray must own separate presentation state and separate cleanup.
-
-Prove:
-
-X-Ray ON/OFF does not reset the shared logical airflow phase;
-X-Ray ON/OFF does not restart or duplicate the Streamlines scheduler;
-Streamlines playback does not overwrite X-Ray Session Layer material state;
-Streamlines workload switching preserves active X-Ray state;
-Streamlines cleanup does not remove X-Ray materials/bindings;
-X-Ray cleanup does not remove Streamlines material, cache or playback state;
-repeated ON/OFF and mode switching does not accumulate stale Session Layer specs;
-/app/useFabricSceneDelegate = false remains unchanged.
-
-A representative coexistence path must work:
-
-Streamlines / Nominal
--> X-Ray ON
--> Idle
--> Surge
--> Critical
--> Nominal
--> X-Ray OFF
-
-while Streamlines remains visible and phase-correct.
-
-Existing enclosure visibility, camera, lighting, telemetry and other server
-presentation controls remain independent from airflow visualization mode.
-
-4.4.3 gate: Streamlines velocity presentation and X-Ray operate simultaneously
-without either subsystem corrupting the other's state, presentation or cleanup.
-
-
-###### 4.4.4 - Production Stage 09 UI
-
-Replace Stage 09 diagnostic interaction with the minimum normal product controls
-needed to use the completed server-scale airflow feature.
-
-This is not the final DTRS information-architecture or interaction-polish pass;
-that remains deferred to Stage 17.
-
-Primary Stage 09 user workflow:
-
-Attach
--> choose Normal, Smoke or Streamlines
--> change Workload if desired
--> optionally use X-Ray
--> observe
--> Detach
-
-Normal UI should communicate concise product state such as:
-
-active airflow visualization mode;
-active workload;
-active dataset/cache identity when Streamlines is active;
-transition/progress state while an asynchronous mode or workload change runs;
-concise actionable failure when a requested presentation cannot become ready.
-
-Do not expose normal users to obsolete Stage 09 feasibility, benchmark or guided
-acceptance terminology.
-
-Remove or hide normal-user controls whose only purpose was earlier development,
-including where applicable:
-
-manual cache-load actions;
-operator execution controls;
-cadence characterization controls;
-production-cache sanity controls;
-old Stage/Phase acceptance controls.
-
-Explicit cache build/rebuild and maintenance tooling may remain available in a
-developer/maintenance-only location.
-
-Do not add final palette editors, broad appearance customization or final UI
-polish merely because presentation settings are configuration-backed. Such
-interaction refinement belongs to the later UI stage unless required for this
-Stage 09 workflow.
-
-`STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS` remains `False`.
-
-Keep normal runtime diagnostics enabled, including:
-
-Dataset Registry;
-Workload Cache Mapping;
-background Airflow validation;
-Streamlines cache validation/reuse;
-runtime transition failures.
-
-Do not restore obsolete guided diagnostics merely to expose internal state in
-the user-facing UI.
-
-4.4.4 gate: Streamlines appears as an ordinary production visualization mode,
-not as a Streamlines development subsystem.
-
-
-###### 4.4.5 - Focused Phase 4.4 verification
-
-Use focused automated tests for deterministic presentation and ownership
-contracts.
-
-Do not duplicate all Phase 4.3 workload-transition tests.
-
-Required focused coverage includes:
-
-1. physical velocity mapping:
-   - the same `dtrs:speed` produces the same output regardless of workload;
-   - configured boundaries clamp deterministically;
-   - invalid presentation configuration is rejected;
-
-2. cache/presentation separation:
-   - changing palette, brightness or opacity does not change the
-     cache-affecting settings signature;
-   - presentation-only changes require zero cache rebuilds;
-   - geometry-affecting settings remain covered by the cache signature;
-
-3. persisted speed contract:
-   - missing, malformed or invalid `primvars:dtrs:speed` rejects production
-     velocity presentation explicitly;
-   - no live VTI fallback;
-   - no Kit-CAE recompute;
-   - no automatic cache rebuild;
-
-4. workload presentation continuity:
-   - Nominal -> Critical or another representative workload swap keeps the same
-     production presentation policy/material ownership;
-   - the target cache's persisted speed drives the new state;
-   - exactly one playback scheduler remains active;
-
-5. X-Ray isolation:
-   - X-Ray ON/OFF does not reset Streamlines phase or scheduler;
-   - workload switching while X-Ray is active preserves X-Ray;
-   - Streamlines cleanup cannot remove X-Ray-owned presentation;
-   - X-Ray cleanup cannot remove Streamlines-owned presentation;
-
-6. repeated lifecycle:
-   - repeated Streamlines / Normal / Smoke / Streamlines and X-Ray cycles leave
-     no duplicate materials, bindings, presentation prims, schedulers or stale
-     Session Layer state.
-
-Production Streamlines presentation must continue to perform zero:
-
-runtime Streamlines geometry recomputation;
-automatic cache rebuild;
-Kit-CAE Streamlines execution;
-RuntimePreview rebuild;
-VTI import solely for presentation.
-
-
-###### 4.4.6 - Guided Kit acceptance
-
-Reuse the existing generic manual acceptance infrastructure.
-
-Do not create another acceptance framework.
-
-Retire the completed Phase 4.3 guided scenario before enabling the Phase 4.4
-scenario.
-
-Use:
-
-READY
--> NEXT_ACTION
--> START
--> bounded PROGRESS / WAITING
--> COMPLETE or FAIL
--> NEXT_ACTION
--> TEST COMPLETE
-
-READY only when:
-
-the final production Streamlines geometry profile is frozen;
-all four rebuilt workload caches are VALID;
-all four caches expose valid persisted `primvars:dtrs:speed`;
-the production presentation configuration is valid;
-committed visualization is Normal;
-no visualization or airflow transition is pending.
-
-Representative real Kit sequence:
-
-Normal
--> Streamlines / Nominal
--> confirm production airflow geometry and velocity presentation
--> X-Ray ON
--> Idle
--> Surge
--> Critical
--> Nominal
--> X-Ray OFF
--> Normal
-
-For the initial Streamlines activation prove:
-
-production cache identity is correct;
-production geometry is visible;
-persisted speed primvar is valid;
-production velocity presentation is active;
-scheduler task count is exactly one;
-the cached sample advances;
-no runtime recompute/build/Kit-CAE/VTI presentation import occurred.
-
-The manual visual gate must explicitly confirm that the final geometry reads as
-airflow travelling from the server intake through the server toward exhaust.
-A coloured but spatially useless diagnostic cluster is not a production PASS.
-
-For each workload change while X-Ray is active prove:
-
-requested workload == committed workload;
-loaded cache identity matches the committed workload;
-the same production velocity-mapping identity remains active;
-X-Ray remains active;
-Streamlines remains visible and advancing;
-scheduler task count remains exactly one;
-no cache build or runtime recomputation occurs.
-
-For X-Ray OFF prove:
-
-X-Ray-owned bindings are removed;
-Streamlines production presentation remains intact;
-Streamlines phase/playback continues rather than restarting.
-
-Final Normal must prove:
-
-committed visualization is Normal;
-no visualization or airflow transition is pending;
-Streamlines is hidden/clean;
-Streamlines scheduler count is zero;
-Streamlines timeline ownership is released;
-X-Ray is inactive;
-no stale production-presentation state remains.
-
-Use `WAITING` only for genuinely long operations, approximately every five
-seconds, with no frame/tick log spam.
-
-On any failed required postcondition:
-
-emit `FAIL` with the exact stage and reason;
-preserve the last valid presentation where possible;
-stop the guided scenario;
-do not emit `TEST COMPLETE`.
-
-After all required postconditions pass, emit exactly once:
-
-TEST COMPLETE | Phase 4.4 production Streamlines presentation and X-Ray coexistence passed.
-No further manual action required.
-
-
-4.4 gate: DTRS presents a frozen production Streamlines geometry profile that
-visually communicates server airflow, uses persisted raw speed data through one
-workload-independent physical presentation mapping, switches all four validated
-workload caches without runtime recomputation, composes cleanly with X-Ray, and
-is exposed through normal Stage 09 product controls rather than diagnostic
-Streamlines tooling.
-
-
-
-##### 4.5 - Production acceptance matrix
-
-Use focused tests for deterministic state/error contracts and real DTRS/Kit
-acceptance only for behaviour that genuinely depends on runtime presentation,
-timing, Flow, viewport or lifecycle state.
-
-Do not create another acceptance framework.
-
-Reuse the generic:
-
-READY -> NEXT_ACTION -> START -> PROGRESS / WAITING -> COMPLETE or FAIL -> NEXT_ACTION -> TEST COMPLETE
-
-contract.
-
-Focused acceptance coverage
-
-At minimum preserve/add coverage for:
-
-Smoke XOR Streamlines invariant;
-visualization mode does not modify workload/dataset/logical phase;
-mode-transition supersession;
-workload-transition supersession while Streamlines is active;
-Detach/shutdown cancellation of pending mode transitions;
-MISSING cache rejection;
-STALE cache rejection;
-INCOMPATIBLE cache rejection;
-rejected cache causes zero build and zero silent recompute;
-failed transition preserves previous valid presentation;
-presentation period/config does not invalidate production caches;
-X-Ray and Streamlines cleanup ownership remains independent;
-repeated cleanup remains idempotent;
-no duplicate callbacks/tasks/prims after repeated transitions.
-
-Do not manually corrupt production caches merely to reproduce deterministic
-negative cases already covered by focused tests.
-
-Real DTRS production acceptance
-
-Run one guided production scenario that exercises the normal product workflow.
-
-A representative sequence should cover:
-
-Attach -> Smoke -> Streamlines -> all four workloads in Streamlines mode -> X-Ray ON/OFF -> logical loop wrap -> Smoke -> Streamlines -> Smoke -> Detach
-
-Exact workload order may follow the current starting workload, but
-Idle/Nominal/Surge/Critical must all be proven.
-
-Across this scenario prove:
-
-exactly one airflow visualization mode is committed/visible;
-workload identity remains correct;
-normalized phase is preserved across mode changes;
-normalized phase is preserved across workload changes;
-Streamlines always resolves the latest real cached state;
-all four workload cache identities validate independently;
-workload cache switching is phase-based, not index-based;
-returning to Smoke does not silently restart logical airflow time;
-preferred Streamlines playback performs zero Kit-CAE executions;
-preferred Streamlines playback performs zero RuntimePreview rebuilds;
-preferred Streamlines playback performs zero VTI imports solely for
-presentation;
-no cache rebuild occurs;
-scheduler remains at the accepted 200 ms presentation period;
-missed deadlines and backlog do not accumulate;
-loop wrap maps correctly from logical end to beginning;
-repeated mode changes leave no stale Smoke/Streamlines presentation;
-no duplicate prims, sublayers, callbacks or playback tasks accumulate;
-final Detach and repeated cleanup are clean.
-Production runtime evidence
-
-Measure production behaviour rather than old feasibility harnesses.
-
-Record at minimum:
-
-baseline viewport FPS;
-sustained Smoke FPS;
-sustained Streamlines FPS;
-cached-state switch median/max latency;
-scheduler missed deadlines/backlog;
-GPU memory;
-process memory;
-Smoke -> Streamlines latency;
-Streamlines -> Smoke latency;
-workload-switch latency while Streamlines is active;
-recovery after switching back to Smoke;
-recovery after repeated Smoke/Streamlines cycles;
-final active task/prim ownership after Detach.
-
-Use steady-state evidence; do not treat one-time initialization spikes as
-sustained runtime performance.
-
-Do not reopen density/operator/cadence R&D from this acceptance.
-
-The accepted runtime must preserve the timing headroom demonstrated in Phase 3
-and show no accumulating scheduler, memory or lifecycle degradation after
-repeated switching.
-
-Acceptance terminal
-
-Emit the final terminal only after all required real-runtime postconditions have
-passed.
-
-Exactly once:
-
-TEST COMPLETE | Phase 4 production airflow modes acceptance passed. No further manual action required.
-
-Do not make the terminal depend on unrelated background work after the final
-required postcondition.
-
-On failure:
-
-emit FAIL with exact stage and reason;
-preserve the last valid presentation where possible;
-stop the guided acceptance;
-do not emit TEST COMPLETE.
-
-4.5 gate: the full production interaction passes focused contract coverage
-and real Kit/DTRS acceptance without hidden recomputation, cache rebuild,
-state corruption or lifecycle accumulation.
-
-##### 4.6 - Code readability and Stage 09 closure
-
-Before closing Stage 09 / DC-49, perform one narrow readability review of the
-final production architecture.
-
-A first-time technical reader must be able to understand:
-
-where visualization mode is owned;
-why visualization mode is independent from workload and logical airflow time;
-how Smoke XOR Streamlines is enforced outside the UI;
-how committed versus pending presentation state works;
-how mode supersession/cancellation works;
-how Streamlines workload switching selects a derived cache;
-how failed cache/mode transitions preserve the previous valid presentation;
-why Streamlines playback does not require runtime VTI/Kit-CAE;
-why Flow may still use VTI/Kit-CAE;
-why presentation cadence/config does not alter cache identity;
-how X-Ray remains independent;
-what Detach/shutdown cleans.
-
-Improve only names/docstrings/responsibility boundaries that are genuinely
-unclear.
-
-Do not perform a broad cleanup/refactor after acceptance.
-
-Verify as a Stage 09 closure condition:
-
-STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = False;
-Dataset Registry startup diagnostics remain enabled;
-Workload Cache Mapping diagnostics remain enabled;
-normal background Airflow validation remains enabled;
-error reporting remains enabled;
-restored diagnostics do not interfere with production mode lifecycle;
-obsolete Stage 09 acceptance/debug UI is absent from normal operation.
-
-Close Stage 09 / DC-49 only after implementation supports a public technical
-claim equivalent to:
-
-"The same workload and logical temporal airflow state drives either RTX Flow
-smoke or a validated precomputed Streamlines representation. Houdini-authored
-VTI remains the authoritative simulation source, while workload-specific
-Streamlines caches preserve every real source state as derived visualization
-data. DTRS presents those cached states through an independently measured
-runtime cadence with phase-preserving visualization-mode and workload
-switching."
-
-The public explanation must clearly distinguish:
-
-Houdini-authored VTI as authoritative simulation data;
-Streamlines caches as derived visualization data;
-cached presentation cadence as a runtime performance choice;
-Smoke and Streamlines as mutually exclusive presentation modes over one shared
-logical airflow state.
-
-Do not imply:
-
-validated engineering CFD;
-live sensor-driven physics;
-runtime Streamlines recomputation during preferred cached playback;
-stronger physical validation than the project actually provides.
-
-Phase 4 / Stage 09 gate: DTRS exposes Smoke and Streamlines as stable
-production visualization modes over one shared workload and logical temporal
-airflow state. Mode and workload transitions preserve normalized phase,
-Streamlines uses independently validated workload-specific caches without
-runtime recomputation, all four workloads pass, failure preserves the previous
-valid presentation, X-Ray coexists cleanly, lifecycle cleanup remains
-idempotent, production runtime performance is stable, and normal UI no longer
-exposes Stage 09 diagnostic workflow.
-
-Stage 09 may close only after this gate passes.
-
-Optional after the base Phase 4 gate - Animated Streaks
-
-Animated Streaks are not part of the required Phase 4 architecture or acceptance.
-
-Consider them only after the base Streamlines production mode has passed.
-
-If implemented:
-
-build them on top of the accepted cached Streamlines presentation;
-preserve the same workload/cache/normalized-phase semantics;
-keep them configuration-backed;
-do not change cache identity unless the installed implementation genuinely
-requires different persisted geometry;
-prove no Smoke/Streamlines mode leakage;
-measure their additional runtime cost separately.
-
-If they do not materially improve airflow readability, or reduce runtime
-stability, leave them out of Case 03.
-
-Base Streamlines acceptance and Stage 09 closure must not depend on Animated
-Streaks.
-
-Done when
-
-DTRS can:
-
-Attach -> present Smoke by default -> switch transactionally to validated cached Streamlines -> change Idle/Nominal/Surge/Critical while preserving logical phase -> combine Streamlines with X-Ray -> return transactionally to Smoke -> repeat mode/workload changes without stale state -> Detach cleanly
-
-while:
-
-one manifest-backed dataset system remains authoritative;
-every real Houdini-authored source sample remains preserved in its derived
-workload cache;
-Streamlines uses the Phase 3 accepted cached presentation path;
-preferred Streamlines playback performs no runtime Kit-CAE recomputation,
-RuntimePreview rebuild or VTI import solely for presentation;
-workload cache switching is normalized-phase based;
-physical velocity colour meaning remains fixed across workloads through
-persisted primvars:dtrs:speed;
-missing/stale/incompatible caches fail explicitly without automatic rebuild or
-silent fallback;
-X-Ray and airflow presentation remain independent;
-cleanup survives mode switching, Detach, reload and shutdown;
-production behaviour remains within the accepted RTX 3080 runtime envelope.
 
 
 
@@ -3160,9 +748,37 @@ remain unavailable rather than being invented. Preserve the existing telemetry
 quality semantics (`measured`, `estimated`, `derived`, `synthetic`, `stale`,
 `unavailable`).
 
-X-Ray and Heatmap eligibility are independent capabilities. At single-server
-detail level, X-Ray takes presentation precedence when a primitive supports
-both.
+Stage 10 uses one documented absolute temperature scale in degrees Celsius for
+the complete server. The same temperature must always map to the same colour,
+regardless of workload, component family, or thermal zone. Do not apply
+per-workload, per-component, or per-region normalization.
+
+Heatmap temperatures are a derived spatial interpolation, not a claim that
+each rendered vertex has a physical temperature sensor. For a semantic target,
+the Heatmaps package calculates:
+
+```text
+display_temperature_celsius = component_telemetry_celsius
+    + lerp(delta_min_celsius, delta_max_celsius, thermal_weight)
+```
+
+`component_telemetry_celsius` is the source temperature for the exact telemetry
+identity, such as GPU 1. The package selects `delta_min_celsius` and
+`delta_max_celsius` from an explicit Heatmaps matrix keyed by workload and the
+target's thermal component/zone. `thermal_weight=0` resolves to the lower
+delta endpoint; `thermal_weight=1` resolves to the upper endpoint. The derived
+display temperature then uses the one server-wide Celsius scale above.
+
+The input telemetry quality remains visible. The resulting field must be
+described in the UI, legend, and diagnostics as a derived spatial
+interpolation from component telemetry and Houdini-authored thermal metadata,
+never as direct per-part measurement.
+
+Heatmap replaces the current Heatmap placeholder as its own DTRS UI/runtime
+primary mode. It is an Engineering X-Ray-dependent primary presentation: DTRS
+must not activate a standalone non-X-Ray Heatmap or treat it as an overlay. At
+single-server detail level, the X-Ray material takes presentation precedence
+when a primitive supports both capabilities.
 
 The GPU enclosure/shroud is the intentional dual-purpose case: it carries
 Heatmap metadata but remains X-Ray-transparent at single-server level so its
@@ -3206,11 +822,13 @@ without rendering yet.
 
 #### Phase 10.2 - Scalar mapping and vertical slice
 
-- implement fixed documented scalar ranges, normalization, clamping, colour
-  mapping, quality handling, and missing-data behavior;
-- do not normalize independently per workload;
-- define how runtime telemetry and authored `thermal_weight` produce the
-  display scalar without claiming measured temperature at every surface point;
+- implement the one fixed documented server-wide Celsius scale, clamping,
+  colour mapping, quality handling, and missing-data behavior;
+- preserve the same-temperature-to-same-colour contract without per-workload,
+  per-component, or per-region normalization;
+- implement the telemetry-anchored derived spatial interpolation defined in
+  the thermal contract; do not claim measured temperature at every surface
+  point;
 - keep `temperature_preview` outside the runtime calculation;
 - cover the mapping logic with focused tests;
 - implement the reusable Heatmap renderer and prove the complete path on one
@@ -3243,13 +861,18 @@ bindings only.
 
 #### Phase 10.4 - Composition and lifecycle
 
-- verify Heatmap together with Engineering X-Ray;
+- require every Heatmap activation to apply the Engineering X-Ray presentation;
+- do not implement a standalone non-X-Ray Heatmap mode;
 - enforce single-server X-Ray precedence on dual-purpose geometry, especially
   the GPU enclosure/shroud;
 - ensure suppression affects presentation only and does not remove thermal
   capability or metadata;
-- verify Heatmap with cached Stage 9 Streamlines;
-- verify `X-Ray + Heatmap + Streamlines` together;
+- verify Heatmap and cached Stage 9 Streamlines are mutually exclusive primary
+  modes: entering Heatmap releases the Streamlines scheduler, snapshot root,
+  and material binding; entering Streamlines releases Heatmap-owned state and
+  the Heatmap X-Ray presentation;
+- verify failed Heatmap/Streamlines transitions roll back to the preceding
+  healthy primary presentation without duplicate X-Ray bindings or tasks;
 - add only the necessary runtime controls, legend, quality/missing-data state,
   and diagnostics;
 - verify clean behavior across metric changes, workload changes,
@@ -3257,7 +880,9 @@ bindings only.
 - remove only Heatmap-owned runtime state and restore the correct authored or
   higher-priority presentation.
 
-Gate: all three presentation systems coexist without stale or corrupted state.
+Gate: Heatmap always owns its X-Ray presentation, and Heatmap/Streamlines
+transitions leave exactly one healthy primary presentation without stale or
+corrupted state.
 
 
 #### Phase 10.5 - Acceptance and release
@@ -3272,7 +897,7 @@ Gate: all three presentation systems coexist without stale or corrupted state.
 - release DTRS `0.5.0`.
 
 
-### Acceptance
+### Stage 10 Acceptance
 
 Stage 10 is complete when:
 
@@ -3281,8 +906,10 @@ Stage 10 is complete when:
 2. `thermal_weight` remains an authored `[0, 1]` spatial distribution and
    `temperature_preview` remains authoring/debug data only.
 
-3. Documented DTRS telemetry drives the correct thermal regions through a
-   deterministic, workload-independent scalar mapping.
+3. Documented DTRS telemetry drives the correct thermal regions through the
+   defined derived spatial interpolation and one deterministic server-wide
+   Celsius mapping: the same display temperature always produces the same
+   colour, without per-workload, per-component, or per-region normalization.
 
 4. Telemetry quality, stale state, and missing data are represented truthfully;
    unavailable component temperatures are not invented.
@@ -3296,8 +923,9 @@ Stage 10 is complete when:
    enclosure/shroud stays transparent while retaining its Heatmap capability
    for future coarser visualization levels.
 
-8. Heatmap, X-Ray, and cached Streamlines operate together without corrupting
-   one another's presentation, runtime state, or cleanup.
+8. Heatmap always operates through its X-Ray presentation. Heatmap and cached
+   Streamlines are mutually exclusive primary modes; transitions and failures
+   preserve the preceding healthy presentation and leave no stale state.
 
 9. Enable/disable, metric changes, workload changes, stage reload, and shutdown
    leave no stale Heatmap state and do not modify production asset layers.
@@ -3311,6 +939,473 @@ Heatmap over Houdini-authored thermal distributions without inventing
 measurements or implying validated thermal simulation.
 
 
+### Post-Stage 10 Enhancement - Thermal-Aware Flow Smoke
+
+This enhancement begins only after Stage 10 Heatmap is complete and its
+thermal metadata, telemetry binding, scalar mapping, palette, lifecycle, and
+acceptance contracts are stable.
+
+It is not a replacement for the Heatmap and does not introduce another primary
+Visualization mode.
+
+The purpose is to connect two already-proven visual systems:
+
+`telemetry-driven component thermal state`
+`-> authored Heatmap distribution`
+`-> thermal influence injected into the existing Flow simulation`
+`-> temperature-aware smoke colour`
+
+The result should make airflow and thermal state read as parts of one system:
+cold intake smoke enters the server, passes thermal sources, acquires thermal
+colour, and is advected by the existing Houdini-authored velocity field.
+
+This remains an engineering visualisation. The Flow temperature channel is a
+temperature-derived presentation scalar seeded from component telemetry; it
+must not be presented as a measured or validated per-voxel air-temperature
+field.
+
+
+#### Architecture contract
+
+Do not create:
+
+- a second Flow simulation;
+- another telemetry binding system inside `smoke`;
+- a second Heatmap scalar/palette implementation;
+- RGB values authored independently for Heatmap and Flow;
+- workload-specific thermal-smoke logic;
+- high-density emitters corresponding to every thermal-weight vertex.
+
+Reuse:
+
+- the existing Flow velocity simulation and smoke tracers;
+- the Stage 10 semantic thermal registry and telemetry bindings;
+- the Stage 10 fixed scalar ranges and normalization;
+- the Stage 10 thermal colour palette;
+- the existing Flow lifecycle and performance instrumentation.
+
+Thermal Smoke is a secondary Smoke presentation option:
+
+`Smoke colour = Neutral | Thermal`
+
+It must not become a new primary `VisualizationMode`.
+
+
+#### Stage 10 compatibility requirements
+
+Stage 10 should leave the following reusable boundaries so this enhancement
+does not require a Heatmap refactor.
+
+`heatmaps/scalar.py`
+
+- remains dependency-light and independent from Kit/material code;
+- owns the canonical fixed thermal scalar mapping;
+- exposes the normalized thermal display scalar used by presentation systems;
+- exposes the canonical palette/control-point representation required to map
+  the same scalar to the same colour;
+- contains no USD material or Flow-specific logic.
+
+`heatmaps/bindings.py`
+
+- remains the single owner of semantic thermal-region -> telemetry binding;
+- preserves repeated hardware identity;
+- preserves telemetry quality and unavailable state;
+- contains no Flow-specific bindings.
+
+`heatmaps/discovery.py`
+
+- remains the owner of the authored thermal metadata contract;
+- preserves deterministic prim identity, `thermal_zone`,
+  `thermal_component`, and `thermal_weight` information needed for bounded
+  spatial sampling;
+- must not add Flow-specific presentation policy.
+
+`heatmaps/runtime.py`
+
+- exposes a small immutable/plain-data thermal-state snapshot sufficient for
+  other presentation consumers;
+- the snapshot should expose resolved component identity, telemetry binding,
+  normalized thermal state, quality/availability, and target identity without
+  exposing Heatmap material internals;
+- other systems must not inspect Heatmap private runtime state.
+
+`heatmaps/material.py`
+
+- remains surface presentation only;
+- Thermal Smoke must not import or reuse Heatmap material-binding code.
+
+This establishes:
+
+`heatmaps scalar/binding state`
+`-> reusable thermal presentation contract`
+
+rather than:
+
+`smoke`
+`-> Heatmap material implementation`.
+
+
+#### Smoke implementation ownership
+
+Add:
+
+`src/digital_twin_runtime_suite/app/smoke/thermal.py`
+
+This module owns the translation from the reusable Stage 10 thermal state into
+a bounded Flow thermal-source description.
+
+Responsibilities:
+
+- consume the public Stage 10 thermal-state snapshot;
+- select thermal source regions supported at single-server detail level;
+- generate a sparse, bounded set of source samples from authored thermal
+  distributions;
+- preserve repeated component identity;
+- convert canonical normalized thermal scalars into Flow temperature source
+  values;
+- enforce a configurable maximum sample/source count;
+- exclude unavailable regions instead of fabricating temperatures;
+- avoid using presentation-proxy geometry such as the single-server GPU shroud
+  as an additional thermal source when that would double-count internal GPU
+  sources.
+
+It contains no direct telemetry-provider queries and no Flow lifecycle
+orchestration.
+
+
+`smoke/flow.py`
+
+Extend the existing low-level Flow authoring helpers.
+
+Responsibilities:
+
+- create/update DTRS-owned sparse temperature Point Emitter data;
+- author temperature and temperature coupling only;
+- keep smoke, fuel, burn, divergence, and self-velocity contribution disabled
+  for these thermal sources;
+- apply the shared thermal palette to the native Flow temperature colormap;
+- validate that authored Flow state retained the requested values;
+- remove only DTRS-owned thermal-source/colormap runtime opinions during
+  cleanup.
+
+Existing passive smoke tracers remain unchanged.
+
+
+`smoke/runtime.py`
+
+Extend `SmokeRuntimeMixin` with Thermal Smoke presentation lifecycle.
+
+Responsibilities:
+
+- expose `Neutral` and `Thermal` smoke-colour modes;
+- enable Thermal only against an already prepared/attached Flow source;
+- request the current public thermal-state snapshot from the Heatmap subsystem;
+- build/update sparse thermal sources through `smoke/thermal.py`;
+- apply them through `smoke/flow.py`;
+- refresh source values when telemetry/workload changes without rebuilding the
+  Flow simulation;
+- restore neutral smoke presentation cleanly;
+- rollback to the last valid Neutral state if Thermal activation fails;
+- prevent duplicate thermal emitters/tasks after repeated Apply or rapid mode
+  changes;
+- clean thermal state on Flow detach, stage reload, Normal/Streamlines
+  transition, and shutdown.
+
+Thermal Smoke activation must not perform Flow Attach, VTI import, Streamlines
+cache work, or Flow reconstruction unless the existing Smoke transition already
+requires that operation.
+
+
+#### Renderer proof before full implementation
+
+Before expanding across the server, perform one bounded Kit-side proof.
+
+Use:
+
+- one existing attached Flow simulation;
+- the existing passive smoke tracer;
+- one representative thermal source;
+- one simple low/high temperature change;
+- the Stage 10 palette.
+
+Prove that the installed Kit/Flow renderer can visibly map the advected
+temperature channel through the required colormap while preserving the current
+smoke-density presentation.
+
+Do not build full-server source generation until this proof succeeds.
+
+Gate:
+
+`existing smoke + one thermal source -> visibly advected temperature colour`
+
+must work without a second Flow simulation or runtime Flow reset.
+
+
+#### Full-server implementation
+
+After the renderer proof:
+
+- create sparse thermal sources only for supported Stage 10 thermal regions;
+- begin with GPU, CPU, and PSU sources;
+- expand to other components only when they have truthful Stage 10 bindings and
+  visible value;
+- reuse the same fixed scalar mapping and palette used by Heatmap;
+- keep source density bounded; do not mirror every authored
+  `thermal_weight` point into Flow;
+- workload changes update source scalar values through the existing telemetry
+  path;
+- the Houdini velocity field remains the sole airflow velocity source.
+
+The goal is readable thermal transport, not reconstructing CFD heat transfer.
+
+
+#### Automated tests
+
+Extend existing Heatmap tests where the shared contract is involved:
+
+`tests/heatmaps/test_heatmap_scalar.py`
+
+- canonical normalization remains deterministic;
+- identical normalized scalar produces the canonical palette result;
+- scalar/palette behavior is workload-independent.
+
+`tests/heatmaps/test_heatmap_runtime.py`
+
+- public thermal-state snapshot exposes supported component state without
+  exposing material/runtime internals;
+- quality and unavailable state survive the snapshot unchanged.
+
+Add focused Smoke tests, preferably under `tests/smoke/`:
+
+`test_thermal_smoke_sources.py`
+
+- sparse source generation from thermal-state snapshots;
+- repeated hardware identity;
+- bounded source count;
+- unavailable-region exclusion;
+- correct normalized temperature values;
+- no duplicated source identities.
+
+`test_thermal_smoke_flow.py`
+
+- thermal emitters author temperature coupling only;
+- smoke/fuel/burn/self-velocity coupling stays disabled;
+- canonical palette is translated to the Flow colormap correctly;
+- cleanup removes only Thermal-Smoke-owned opinions.
+
+`test_thermal_smoke_runtime.py`
+
+- Neutral -> Thermal -> Neutral Happy Path;
+- telemetry/workload refresh updates thermal sources without Flow reset;
+- repeated Apply is idempotent;
+- failure rolls back to valid Neutral smoke;
+- detach/reload/shutdown leaves no thermal-source state behind.
+
+Extend visualization-mode tests to prove that Thermal Smoke remains a secondary
+Smoke setting and does not become another primary visualization mode.
+
+
+#### Required boundary cases
+
+In addition to the Happy Path, automated tests must cover at least these
+boundary cases:
+
+1. **No truthful thermal source**
+   - all candidate regions are unavailable;
+   - Thermal activation must not invent source temperatures;
+   - report unavailable or remain Neutral according to the Stage 10
+     missing-data policy.
+
+2. **Mixed valid and unavailable regions**
+   - valid components continue to contribute;
+   - unavailable components are skipped;
+   - no whole-server failure is caused by one optional missing binding.
+
+3. **Invalid/stale/out-of-range telemetry**
+   - use the exact Stage 10 scalar/quality policy;
+   - do not silently promote stale data or create NaN/invalid Flow values;
+   - clamping, rejection, or suppression must match the canonical thermal
+     contract.
+
+4. **Rapid supersession**
+   - workload or Neutral/Thermal mode changes while a previous update is
+     pending;
+   - the latest committed request wins;
+   - no duplicate emitters, tasks, or stale source values remain.
+
+5. **Presentation/lifecycle exit**
+   - transition from Thermal Smoke to Normal or Streamlines, Flow Detach, stage
+     reload, and shutdown;
+   - thermal emitters and colormap overrides are cleaned while unrelated Flow,
+     Heatmap, X-Ray, and Streamlines state remains owned by their respective
+     subsystems.
+
+Additional Case 03 guard:
+
+- the GPU shroud may remain Heatmap-capable for future rack/hall use, but at
+  single-server level it must not become an extra Thermal Smoke source if the
+  internal GPU thermal regions already represent that device.
+
+
+#### Performance acceptance
+
+Use the existing Flow viewport-performance sampler; do not introduce a second
+profiling system.
+
+Run a fixed-camera A/B comparison using the same:
+
+- workload;
+- airflow dataset;
+- voxel resolution;
+- raymarch quality;
+- smoke tuning;
+- camera;
+- measurement duration.
+
+Compare:
+
+A. `Neutral Smoke`
+B. `Thermal Smoke`
+
+Record at minimum:
+
+- average FPS;
+- minimum FPS;
+- average frame time;
+- GPU memory use.
+
+Initial performance guardrail:
+
+- Thermal Smoke should remain within approximately 10% of the Neutral Smoke
+  average-FPS baseline at the accepted fixed camera/settings;
+- a larger regression requires source-density or renderer tuning before the
+  feature is accepted;
+- no performance claim is made until measured on the production RTX 3080
+  configuration.
+
+If source count materially changes active Flow allocation, characterize that
+separately instead of attributing the entire regression to colour mapping.
+
+
+#### Guided Kit acceptance
+
+Use the existing reusable `GuidedAcceptanceSession` /
+`format_manual_acceptance_event()` mechanism.
+
+The guided workflow belongs in a focused extension workflow, not in
+`smoke/runtime.py`, `heatmaps/runtime.py`, or `extension.py`.
+
+Suggested workflow:
+
+`thermal_smoke_acceptance.py`
+
+Automatic preflight before READY must verify:
+
+- Stage 10 thermal contract is available;
+- production server stage is loaded;
+- current workload has at least one valid thermal source;
+- no conflicting visualization transition is pending;
+- Flow/Smoke can be selected normally;
+- fixed performance camera/bookmark is available.
+
+Only then emit:
+
+`READY`
+
+followed by:
+
+`NEXT_ACTION | Select "Smoke" in "Visualization".`
+
+After Smoke is visibly prepared and stable:
+
+`NEXT_ACTION | Set "Smoke colour" to "Thermal" and press "Apply".`
+
+The workflow then automatically verifies:
+
+- one existing Flow simulation remains in use;
+- no Flow reset/re-Attach occurred;
+- thermal source prims exist exactly once;
+- valid source values match the Stage 10 thermal snapshot;
+- Flow temperature presentation is active;
+- the canonical thermal palette is installed;
+- playback continues;
+- performance sampling is live.
+
+Then emit:
+
+`NEXT_ACTION | Change workload to "Critical".`
+
+After the workload transition, automatically verify:
+
+- telemetry identity changed to the committed workload state;
+- thermal source values changed through the shared Stage 10 mapping;
+- source geometry/identity was not rebuilt unnecessarily;
+- Flow playback remained live;
+- no duplicate source prims appeared.
+
+Then emit:
+
+`NEXT_ACTION | Set "Smoke colour" to "Neutral" and press "Apply".`
+
+Automatically verify:
+
+- thermal source influence is disabled/removed;
+- neutral smoke colour is restored;
+- the original Flow source remains valid;
+- no stale thermal presentation remains.
+
+Then emit:
+
+`NEXT_ACTION | Select "Normal" in "Visualization".`
+
+Automatically verify final cleanup and emit exactly one terminal result:
+
+`TEST COMPLETE | PASS`
+
+or:
+
+`TEST COMPLETE | FAIL`
+
+After `TEST COMPLETE`, emit no further manual action.
+
+
+#### Thermal Smoke Enhancement Acceptance
+
+This enhancement is complete when:
+
+1. Thermal Smoke reuses the accepted Stage 10 thermal scalar and palette
+   contract rather than implementing a second mapping.
+
+2. Thermal Smoke uses the existing Flow simulation and existing Houdini
+   velocity field.
+
+3. Sparse Flow temperature sources are driven only by truthful Stage 10 thermal
+   state.
+
+4. The existing passive smoke emitters remain smoke-only and are not converted
+   into fake thermal sensors.
+
+5. Thermal colour visibly advects through the server airflow rather than merely
+   recolouring the entire volume uniformly.
+
+6. Neutral/Thermal switching does not rebuild or re-Attach Flow.
+
+7. Workload changes update thermal influence through the existing telemetry
+   path.
+
+8. Missing, stale, or unavailable data follows the Stage 10 quality policy and
+   never fabricates a valid-looking thermal result.
+
+9. Neutral Smoke, Thermal Smoke, Heatmap, X-Ray, Streamlines, reload, detach,
+   and shutdown retain clean subsystem ownership and cleanup.
+
+10. Fixed-camera performance evidence shows the measured Thermal Smoke cost
+    relative to the accepted Neutral Smoke baseline.
+
+Done when DTRS can use the same telemetry-derived thermal language for both
+surface Heatmap presentation and Flow smoke colouring, while keeping thermal
+transport explicitly a presentation layer rather than claiming validated
+per-voxel air-temperature simulation.
 
 
 ### Stage 11 - Scale Navigation Foundation Slice
@@ -3585,8 +1680,8 @@ presentation, consider an A/B presentation-slot handoff:
 - keep exactly one authoritative playback scheduler after completion;
 - measure the additional CPU/GPU memory cost before accepting the refinement.
 
-This is presentation polish only and is not required for Stage 9 / Phase 4
-correctness or acceptance.
+This is presentation polish only. It was not required for Stage 9 / Phase 4
+correctness or acceptance and remains deferred.
 
 
 ---

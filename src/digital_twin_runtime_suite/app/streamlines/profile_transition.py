@@ -6,7 +6,13 @@ import asyncio
 from dataclasses import dataclass
 from typing import Callable
 
-from digital_twin_runtime_suite.app.streamlines.profile import StreamlinesProfileId
+from digital_twin_runtime_suite.app.streamlines.profile import (
+    DEFAULT_STREAMLINES_PROFILE,
+    StreamlinesProfileId,
+)
+from digital_twin_runtime_suite.app.streamlines.profile_state import (
+    StreamlinesProfileState,
+)
 from digital_twin_runtime_suite.app.visualization_mode.model import VisualizationMode
 
 StatusCallback = Callable[[str], None]
@@ -39,13 +45,41 @@ class StreamlinesProfileTransitionEvidence:
 class StreamlinesProfileTransitionMixin:
     """Switch only persisted profile cache references under the shared lock."""
 
+    def reset_streamlines_profile_transition_state(self) -> None:
+        """Reset production profile state while retaining the UI preference."""
+
+        existing = getattr(self, "_streamlines_profile_preference", None)
+        preferred = (
+            existing.snapshot.preferred_profile
+            if existing is not None
+            else DEFAULT_STREAMLINES_PROFILE
+        )
+        self._streamlines_profile_preference = StreamlinesProfileState(preferred)
+        self._streamlines_last_profile_transition_evidence = None
+
+    def streamlines_profile_preference_snapshot(self):
+        """Return the preferred production profile without presentation work."""
+
+        return self._streamlines_profile_preference.snapshot
+
+    def set_streamlines_profile_preference(
+        self,
+        profile_id: StreamlinesProfileId,
+    ):
+        """Persist an inactive profile choice without touching cached playback."""
+
+        return self._streamlines_profile_preference.set_preference(profile_id)
+
     async def request_streamlines_profile_transition_in_kit(
         self,
         profile_id: StreamlinesProfileId,
         status_callback: StatusCallback | None = None,
     ) -> StreamlinesProfileTransitionResult:
         profile_id = StreamlinesProfileId(profile_id)
-        if self.visualization_snapshot().committed is not VisualizationMode.STREAMLINES:
+        if self.visualization_snapshot().committed not in {
+            VisualizationMode.STREAMLINES,
+            VisualizationMode.STREAMLINES_XRAY,
+        }:
             self._streamlines_profile_preference.set_preference(profile_id)
             return self._streamlines_profile_transition_result(
                 True,
@@ -140,7 +174,6 @@ class StreamlinesProfileTransitionMixin:
                 raise RuntimeError(
                     "Target profile cache failed playback liveness proof."
                 )
-            self.apply_streamlines_presentation_in_kit()
             if not self._streamlines_profile_preference.commit(transition):
                 raise RuntimeError("Streamlines profile commit was superseded.")
         except Exception as error:
@@ -215,7 +248,6 @@ class StreamlinesProfileTransitionMixin:
             if not proof.sample_advanced:
                 return False
             self.set_streamlines_cached_presentation_visible_in_kit(True)
-            self.apply_streamlines_presentation_in_kit()
             self._streamlines_profile_preference.mark_loaded(previous)
             return True
         except Exception:

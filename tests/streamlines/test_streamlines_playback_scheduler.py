@@ -76,6 +76,29 @@ def test_scheduler_supports_one_phase_aligned_initial_deadline() -> None:
     assert tuple(tick.deadline_seconds for tick in scheduler.ticks) == (0.25, 0.75)
 
 
+def test_initial_kit_frame_overshoot_does_not_count_as_a_missed_deadline() -> None:
+    """The first aligned deadline is a Kit-frame wake-up, not steady cadence."""
+
+    clock = _Clock(first_sleep_overshoot_seconds=0.25)
+    phases: list[float] = []
+    scheduler = _scheduler(
+        clock,
+        phases,
+        target_ticks=2,
+        period_seconds=0.2,
+        initial_delay_seconds=0.15,
+    )
+
+    asyncio.run(_start_and_stop(scheduler))
+
+    assert tuple(round(phase, 3) for phase in phases) == (0.4, 0.6)
+    assert tuple(round(tick.deadline_seconds, 3) for tick in scheduler.ticks) == (
+        0.4,
+        0.6,
+    )
+    assert scheduler.report().missed_deadlines == 0
+
+
 def test_scheduler_counts_repeated_no_ops_without_queueing() -> None:
     clock = _Clock()
     phases: list[float] = []
@@ -378,12 +401,14 @@ def _scheduler(
 
 
 class _Clock:
-    def __init__(self) -> None:
+    def __init__(self, *, first_sleep_overshoot_seconds: float = 0.0) -> None:
         self.now = 0.0
+        self._first_sleep_overshoot_seconds = first_sleep_overshoot_seconds
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
 
     async def sleep(self, seconds: float) -> None:
-        self.advance(seconds)
+        self.advance(seconds + self._first_sleep_overshoot_seconds)
+        self._first_sleep_overshoot_seconds = 0.0
         await asyncio.sleep(0)

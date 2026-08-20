@@ -38,37 +38,23 @@ class StreamlinesWorkflow:
             task.cancel()
         self._profile_task = asyncio.ensure_future(self._transition_profile(profile_id))
 
-    def preview_material(
+    def apply_material_settings(
         self,
         *,
         opacity: float,
         emission_intensity: float,
         lighting_influence: float,
     ) -> None:
-        """Replace an in-flight material preview with the latest UI request."""
+        """Replace an in-flight material application with the latest UI request."""
 
         self.cancel_material_preview()
         self._material_preview_task = asyncio.ensure_future(
-            self._preview_material(
+            self._apply_material_settings(
                 opacity=opacity,
                 emission_intensity=emission_intensity,
                 lighting_influence=lighting_influence,
             )
         )
-
-    def accept_material_candidate(self) -> None:
-        """Accept the controller-owned immutable presentation candidate."""
-
-        try:
-            candidate = self._controller.accept_streamlines_material_candidate()
-            message = (
-                "Material candidate accepted for this session: "
-                f"signature={candidate.signature[:12]}."
-            )
-        except Exception as error:
-            message = f"Material candidate acceptance failed: {error}"
-            self._log_error(message)
-        self._report_material_status(message)
 
     def cancel_material_preview(self) -> None:
         """Cancel delayed material evidence after a newer UI action."""
@@ -78,36 +64,6 @@ class StreamlinesWorkflow:
             task.cancel()
         self._material_preview_task = None
         self._controller.cancel_streamlines_material_preview_measurement()
-
-    def final_acceptance_expected_action(self) -> str | None:
-        """Return the controller-owned final-gate action due from the user."""
-
-        expected = getattr(
-            self._controller,
-            "streamlines_snapshot_playback_acceptance_expected_action",
-            None,
-        )
-        return expected() if expected else None
-
-    def confirm_final_acceptance(self) -> bool:
-        """Forward visual acceptance without giving UI control of gate state."""
-
-        confirm = getattr(
-            self._controller,
-            "confirm_streamlines_snapshot_playback_acceptance",
-            None,
-        )
-        return bool(confirm and confirm())
-
-    def reject_final_acceptance(self, reason: str) -> bool:
-        """Forward one visual rejection to the controller-owned terminal gate."""
-
-        reject = getattr(
-            self._controller,
-            "reject_streamlines_snapshot_playback_acceptance",
-            None,
-        )
-        return bool(reject and reject(reason))
 
     def cancel(self) -> None:
         """Cancel every workflow-owned Streamlines task during teardown."""
@@ -142,33 +98,38 @@ class StreamlinesWorkflow:
         if committed is not None:
             self._restore_profile_selection(committed)
 
-    async def _preview_material(
+    async def _apply_material_settings(
         self,
         *,
         opacity: float,
         emission_intensity: float,
         lighting_influence: float,
     ) -> None:
+        presentation = None
+        receipt = None
         try:
             presentation = self._controller.streamlines_presentation_contract(
                 opacity=opacity,
                 emission_intensity=emission_intensity,
                 lighting_influence=lighting_influence,
             )
-            receipt = await self._controller.apply_streamlines_material_preview_in_kit(
+            receipt = await self._controller.apply_streamlines_material_settings_in_kit(
                 presentation,
                 status_callback=self._report_status,
             )
+            local_path = self._controller.save_streamlines_material_settings(
+                presentation
+            )
             message = (
-                "Material preview complete: bound=True; cache_build=0; "
-                "cache_rebuild=0; "
-                f"fps_avg={receipt.viewport_fps_average}; "
-                f"signature={receipt.material.presentation_signature[:12]}."
+                "Material settings applied and saved locally: bound=True; "
+                "cache_build=0; cache_rebuild=0; "
+                f"signature={receipt.material.presentation_signature[:12]}; "
+                f"config={local_path.name}."
             )
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            message = f"Material preview failed: {error}"
+            message = f"Material settings apply failed: {error}"
             self._log_error(message)
         finally:
             if self._material_preview_task is asyncio.current_task():

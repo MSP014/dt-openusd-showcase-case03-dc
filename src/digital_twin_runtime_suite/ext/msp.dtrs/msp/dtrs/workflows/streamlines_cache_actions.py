@@ -20,6 +20,53 @@ def _with_dtrs_local_timestamp(message: str) -> str:
 class StreamlinesCacheWorkflowMixin:
     """Own cancellable cache-build tasks without changing cache semantics."""
 
+    def _schedule_build_validate_production_cache_set(self) -> None:
+        """Build only non-valid production targets in one cancellable task."""
+
+        if self._airflow_task and not self._airflow_task.done():
+            self._set_streamlines_status("Airflow operation is already in progress.")
+            return
+        self._set_streamlines_cache_buttons_enabled(False)
+        self._airflow_task = asyncio.ensure_future(
+            self._build_validate_production_cache_set()
+        )
+
+    async def _build_validate_production_cache_set(self) -> None:
+        """Run the sole production cache-set builder behind the UI boundary."""
+
+        try:
+            build_cache_set = (
+                self._controller.build_validate_production_cache_set_in_kit
+            )
+            result = await build_cache_set(
+                status_callback=self._set_streamlines_status,
+            )
+            if not result.success:
+                raise RuntimeError(result.message)
+            ready_entries = (
+                self._controller.streamlines_production_speed_readiness_snapshot()
+            )
+            proposal = await self._controller.collect_streamlines_speed_scale_proposal(
+                status_callback=self._set_streamlines_status,
+                ready_entries=ready_entries,
+            )
+            message = (
+                f"{result.message} Shared speed scale saved locally: "
+                f"{proposal.scale.minimum:.6g}..{proposal.scale.maximum:.6g} "
+                f"{proposal.scale.units}."
+            )
+            self._set_streamlines_status(message)
+            self._set_streamlines_material_status(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            message = f"Production Streamlines cache-set build failed: {error}"
+            self._set_streamlines_status(message)
+            self._set_streamlines_material_status(message)
+            carb.log_error(_with_dtrs_local_timestamp(message))
+        finally:
+            self._set_streamlines_cache_buttons_enabled(True)
+
     def _schedule_build_constant_topology_prototype(self) -> None:
         """Launch only the Volume Coverage / Nominal prototype build."""
 

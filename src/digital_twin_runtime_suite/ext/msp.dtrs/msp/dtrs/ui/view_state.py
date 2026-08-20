@@ -1,4 +1,4 @@
-"""Read-only View-state rendering and short final-acceptance UI adapters."""
+"""Read-only View-state rendering and transient UI values."""
 
 from __future__ import annotations
 
@@ -39,14 +39,6 @@ class ViewStateUiMixin:
                     text = f"{entry.state}: {entry.message}"
                     label.text = _compact_text(text)
                     label.tooltip = text
-            announce = getattr(
-                self._controller,
-                "announce_streamlines_snapshot_playback_acceptance_ready",
-                None,
-            )
-            if announce:
-                announce()
-            self._sync_streamlines_final_acceptance_action()
         else:
             for label in self._visualization_readiness_labels.values():
                 label.text = _compact_text(message)
@@ -54,11 +46,12 @@ class ViewStateUiMixin:
         snapshot = self._controller.visualization_snapshot()
         combo_model = self._combo_index_model(self._visualization_combo)
         if combo_model:
+            displayed_mode = snapshot.committed
+            if snapshot.pending is not None:
+                displayed_mode = snapshot.pending.target
             self._updating_visualization_mode = True
             try:
-                combo_model.set_value(
-                    tuple(VisualizationMode).index(snapshot.committed)
-                )
+                combo_model.set_value(tuple(VisualizationMode).index(displayed_mode))
             finally:
                 self._updating_visualization_mode = False
         self._sync_xray_target_controls()
@@ -80,57 +73,6 @@ class ViewStateUiMixin:
             checkbox = self._xray_target_checkboxes.get(group_id)
             if checkbox:
                 checkbox.enabled = not override_active
-
-    def _sync_streamlines_final_acceptance_action(self) -> None:
-        """Expose final-gate controls only while manual visual approval is due."""
-
-        workflow = self._streamlines_workflow
-        expected_action = (
-            workflow.final_acceptance_expected_action() if workflow else None
-        )
-        active = expected_action in {"first_visual", "reentry_visual"}
-        frame = self._streamlines_final_acceptance_frame
-        if frame is not None:
-            frame.visible = active
-        confirm = self._streamlines_final_acceptance_confirm_button
-        failure = self._streamlines_final_acceptance_failure_button
-        reason = self._streamlines_final_acceptance_failure_reason
-        for control in (confirm, failure, reason):
-            if control is not None:
-                control.enabled = active
-        if not active:
-            return
-        reentry = expected_action == "reentry_visual"
-        if confirm is not None:
-            confirm.text = (
-                "Confirm Clean Re-entry" if reentry else "Confirm Clean Playback"
-            )
-        if failure is not None:
-            failure.text = (
-                "Report Clean Re-entry Failure"
-                if reentry
-                else "Report Clean Playback Failure"
-            )
-
-    def _confirm_streamlines_final_acceptance(self) -> None:
-        """Forward the current final-gate visual approval to its owner."""
-
-        if not self._streamlines_workflow.confirm_final_acceptance():
-            self._set_streamlines_status(
-                "Complete the active final playback proof before confirming."
-            )
-        self._sync_streamlines_final_acceptance_action()
-
-    def _reject_streamlines_final_acceptance(self) -> None:
-        """Forward one explicit final-gate visual rejection as terminal evidence."""
-
-        field = self._streamlines_final_acceptance_failure_reason
-        reason = field.model.get_value_as_string().strip() if field is not None else ""
-        if not self._streamlines_workflow.reject_final_acceptance(reason):
-            self._set_streamlines_status(
-                "Complete the active final playback proof before reporting it."
-            )
-        self._sync_streamlines_final_acceptance_action()
 
     @staticmethod
     def _health_colour(health: str) -> int:

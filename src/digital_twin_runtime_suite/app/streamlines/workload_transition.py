@@ -448,7 +448,11 @@ class StreamlinesWorkloadTransitionMixin:
 
         snapshot = self.visualization_snapshot()
         return bool(
-            snapshot.committed is VisualizationMode.STREAMLINES
+            snapshot.committed
+            in {
+                VisualizationMode.STREAMLINES,
+                VisualizationMode.STREAMLINES_XRAY,
+            }
             and snapshot.pending is None
         )
 

@@ -51,11 +51,12 @@ def test_background_validation_is_sequential_and_current_workload_first(tmp_path
     assert result.failed == 0
     assert logs[0] == "\n".join(
         (
-            "DTRS AIRFLOW BACKGROUND VALIDATION | START",
-            "Current workload: Nominal",
-            "Order: server/load_normal, server/load_idle, server/load_surge, "
+            "DTRS AIRFLOW BACKGROUND VALIDATION",
+            "process=DATASET PREFLIGHT | state=START",
+            "current_workload=Nominal",
+            "order=server/load_normal, server/load_idle, server/load_surge, "
             "server/load_critical",
-            "Mode: sequential",
+            "mode=sequential",
         )
     )
     assert sum("receipt_source=FRESH" in line for line in logs) == 4
@@ -103,11 +104,17 @@ def test_background_validation_reuses_existing_preflight_receipt(tmp_path):
     )
 
     assert result.validated == 0
-    assert any("REUSED | selector=server/load_normal" in line for line in logs)
+    assert any(
+        "process=DATASET PREFLIGHT | state=REUSED" in line
+        and "selector=server/load_normal" in line
+        for line in logs
+    )
     assert any("receipt_source=FRESH" in line for line in logs)
     assert any("current_cache_location=SESSION" in line for line in logs)
     assert any("validation_executed=False" in line for line in logs)
-    assert not any("| BEGIN | selector=server/load_normal" in line for line in logs)
+    assert not any(
+        "state=BEGIN" in line and "selector=server/load_normal" in line for line in logs
+    )
 
 
 def test_next_process_reuses_persisted_vti_without_worker_call(tmp_path):
@@ -325,13 +332,15 @@ def test_manual_attach_preempts_background_and_resumes_it_after_lease(tmp_path):
         for log in logs
     )
     assert any(
-        "REQUEUED | selector=server/load_idle | attempt_preserved=True" in log
+        "state=REQUEUED" in log
+        and "selector=server/load_idle" in log
+        and "attempt_preserved=True" in log
         for log in logs
     )
     assert any("PRIORITY PASS | selector=server/load_critical" in log for log in logs)
-    assert any("RESUME | next=server/load_idle" in log for log in logs)
+    assert any("state=RESUME" in log and "next=server/load_idle" in log for log in logs)
     assert any(
-        "Background validated: 3\nPriority validated: 1\nTotal validated: 4" in log
+        "background_validated=3\npriority_validated=1\ntotal_validated=4" in log
         for log in logs
     )
 
@@ -370,7 +379,9 @@ def test_manual_attach_hit_preempts_background_without_running_target_preflight(
     asyncio.run(exercise())
 
     assert calls.count("load_critical") == 0
-    assert any("REUSED | selector=server/load_critical" in log for log in logs)
+    assert any(
+        "state=REUSED" in log and "selector=server/load_critical" in log for log in logs
+    )
     assert not any(
         "PRIORITY PASS | selector=server/load_critical" in log for log in logs
     )

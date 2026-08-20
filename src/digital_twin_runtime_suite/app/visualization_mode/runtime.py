@@ -22,6 +22,13 @@ from digital_twin_runtime_suite.app.visualization_mode.state import (
 )
 
 _HEATMAP_XRAY_OVERRIDE_OWNER = "heatmap_preview"
+_STREAMLINES_XRAY_OVERRIDE_OWNER = "streamlines_xray"
+_STREAMLINES_PRIMARY_MODES = frozenset(
+    (
+        VisualizationMode.STREAMLINES,
+        VisualizationMode.STREAMLINES_XRAY,
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -123,7 +130,13 @@ class VisualizationModeRuntimeMixin:
                     VisualizationMode.STREAMLINES,
                     streamlines.classification,
                     streamlines.message,
-                    streamlines.classification == "VALID",
+                    streamlines.classification in {"VALID", "CHECKING"},
+                ),
+                VisualizationReadiness(
+                    VisualizationMode.STREAMLINES_XRAY,
+                    streamlines.classification,
+                    f"{streamlines.message} X-Ray overlay uses current settings.",
+                    streamlines.classification in {"VALID", "CHECKING"},
                 ),
                 VisualizationReadiness(
                     VisualizationMode.HEATMAP,
@@ -173,9 +186,9 @@ class VisualizationModeRuntimeMixin:
         """Request one primary presentation without changing airflow semantics."""
 
         target = VisualizationMode(mode)
-        if target is VisualizationMode.STREAMLINES:
+        if target in _STREAMLINES_PRIMARY_MODES:
             readiness = self.visualization_readiness().for_mode(target)
-            if readiness.state != "VALID":
+            if readiness.state not in {"VALID", "CHECKING"}:
                 return self._result(
                     False,
                     "Streamlines cache is " f"{readiness.state}: {readiness.message}",
@@ -204,6 +217,11 @@ class VisualizationModeRuntimeMixin:
                         transition,
                         status_callback,
                     )
+                elif target is VisualizationMode.STREAMLINES_XRAY:
+                    result = await self._activate_streamlines_xray_mode(
+                        transition,
+                        status_callback,
+                    )
                 else:
                     result = await self._activate_heatmap_preview_mode()
             except Exception as error:
@@ -215,7 +233,7 @@ class VisualizationModeRuntimeMixin:
         if result.success and self._visualization_mode_state.commit(
             transition.transition_id
         ):
-            if target is VisualizationMode.STREAMLINES:
+            if target in _STREAMLINES_PRIMARY_MODES:
                 metadata = getattr(self, "_streamlines_loaded_cache_metadata", None)
                 if metadata is not None:
                     from digital_twin_runtime_suite.app.streamlines.profile import (
@@ -256,12 +274,32 @@ class VisualizationModeRuntimeMixin:
     async def _activate_normal_mode(self) -> VisualizationModeResult:
         """Remove the primary Flow consumer while preserving independent X-Ray."""
 
+        previous_mode = self._visualization_mode_state.committed
+        released_streamlines_xray = False
+        if previous_mode is VisualizationMode.STREAMLINES_XRAY:
+            release = self.release_streamlines_xray_override_in_kit()
+            if not release.success:
+                return self._result(False, release.message)
+            released_streamlines_xray = True
+        elif previous_mode is VisualizationMode.HEATMAP:
+            release = self.release_heatmap_xray_override_in_kit()
+            if not release.success:
+                return self._result(False, release.message)
         if (
-            self._visualization_mode_state.committed is VisualizationMode.STREAMLINES
+            previous_mode in _STREAMLINES_PRIMARY_MODES
             or getattr(self, "_streamlines_cache_playback_contract", None) is not None
             or self.streamlines_cached_presentation_is_prepared_in_kit()
         ):
-            await self.cleanup_streamlines_cached_presentation_in_kit()
+            try:
+                await self.cleanup_streamlines_cached_presentation_in_kit()
+                self.release_streamlines_presentation_material_in_kit()
+            except Exception as error:
+                if released_streamlines_xray:
+                    self.restore_streamlines_xray_override_in_kit()
+                return self._result(
+                    False,
+                    f"Normal cleanup could not release Streamlines: {error}",
+                )
         before_detach = self.primary_visualization_presentation_snapshot_in_kit()
         streamlines_failure = before_detach.normal_failure_reason()
         if (
@@ -277,9 +315,6 @@ class VisualizationModeRuntimeMixin:
             result = await self.detach_simulation_cache_in_kit()
             if not result.success:
                 return self._result(False, result.message)
-        release = self.release_heatmap_xray_override_in_kit()
-        if not release.success:
-            return self._result(False, release.message)
         final_snapshot = self.primary_visualization_presentation_snapshot_in_kit()
         failure = final_snapshot.normal_failure_reason()
         if failure is not None:
@@ -296,7 +331,7 @@ class VisualizationModeRuntimeMixin:
     ) -> VisualizationModeResult:
         """Choose direct Smoke attach or the transactional Streamlines return."""
 
-        if self._visualization_mode_state.committed is VisualizationMode.STREAMLINES:
+        if self._visualization_mode_state.committed in _STREAMLINES_PRIMARY_MODES:
             context = self._capture_visualization_transition_context()
             return await self._activate_smoke_from_streamlines_mode(
                 transition,
@@ -331,10 +366,14 @@ class VisualizationModeRuntimeMixin:
         self,
         transition,
         status_callback: Callable[[str], None] | None,
+        *,
+        with_xray_overlay: bool = False,
     ) -> VisualizationModeResult:
         """Prepare and prove persisted Streamlines from any committed source."""
 
         previous_mode = self._visualization_mode_state.committed
+        if previous_mode is VisualizationMode.STREAMLINES_XRAY:
+            return self._deactivate_streamlines_xray_mode()
         binding, airflow_dataset, context = (
             self._capture_visualization_transition_target()
         )
@@ -405,6 +444,10 @@ class VisualizationModeRuntimeMixin:
                 "cached-playback scheduler is active.",
             )
             await self._quiesce_previous_mode_for_streamlines(previous_mode)
+            if with_xray_overlay:
+                overlay = self.apply_streamlines_xray_override_in_kit()
+                if not overlay.success:
+                    raise RuntimeError(overlay.message)
             if not self._visualization_transition_is_current(transition):
                 raise RuntimeError("Visualization request was superseded.")
             attach_calls = (
@@ -429,13 +472,74 @@ class VisualizationModeRuntimeMixin:
             if rollback is not None:
                 message += f" Rollback failed: {rollback}"
             return self._result(False, message)
+        presentation_name = (
+            "Streamlines + X-Ray" if with_xray_overlay else "Streamlines"
+        )
         return self._result(
             True,
-            "Streamlines visualization is active; cache_build=0; KitCAE=0; "
+            f"{presentation_name} visualization is active; cache_build=0; KitCAE=0; "
             "RuntimePreview=0; VTI_import=0; rebuild=0; flow_attach_calls=0; "
             f"initial_sample={advance_proof.initial_sample_identity}; "
             f"advanced_sample={advance_proof.advanced_sample_identity}; "
             f"scheduler_tasks={advance_proof.scheduler_tasks}.",
+        )
+
+    async def _activate_streamlines_xray_mode(
+        self,
+        transition,
+        status_callback: Callable[[str], None] | None,
+    ) -> VisualizationModeResult:
+        """Overlay X-Ray on an existing Streamlines view or prepare both safely."""
+
+        if self._visualization_mode_state.committed is VisualizationMode.STREAMLINES:
+            if (
+                self._active_streamlines_playback_task_count() != 1
+                or not self.streamlines_cached_presentation_is_visible_in_kit()
+            ):
+                return self._result(
+                    False,
+                    "Streamlines + X-Ray requires one visible cached scheduler.",
+                )
+            overlay = self.apply_streamlines_xray_override_in_kit()
+            if not overlay.success:
+                return self._result(False, overlay.message)
+            if self.xray_target_snapshot().override_owner != (
+                _STREAMLINES_XRAY_OVERRIDE_OWNER
+            ):
+                self.release_streamlines_xray_override_in_kit()
+                return self._result(
+                    False,
+                    "Streamlines + X-Ray overlay ownership proof failed.",
+                )
+            return self._result(
+                True,
+                "Streamlines + X-Ray is active; existing cached playback "
+                "continues with scheduler_tasks=1.",
+            )
+        return await self._activate_streamlines_mode(
+            transition,
+            status_callback,
+            with_xray_overlay=True,
+        )
+
+    def _deactivate_streamlines_xray_mode(self) -> VisualizationModeResult:
+        """Return to the existing Streamlines playback without rebuilding it."""
+
+        if (
+            self._active_streamlines_playback_task_count() != 1
+            or not self.streamlines_cached_presentation_is_visible_in_kit()
+        ):
+            return self._result(
+                False,
+                "Streamlines playback is unavailable while removing X-Ray.",
+            )
+        release = self.release_streamlines_xray_override_in_kit()
+        if not release.success:
+            return self._result(False, release.message)
+        return self._result(
+            True,
+            "Streamlines visualization is active; cached playback continues "
+            "with scheduler_tasks=1.",
         )
 
     async def _quiesce_previous_mode_for_streamlines(self, previous_mode) -> None:
@@ -487,6 +591,7 @@ class VisualizationModeRuntimeMixin:
     ) -> VisualizationModeResult:
         """Release Streamlines time ownership, then prove sustained retained Flow."""
 
+        previous_mode = self._visualization_mode_state.committed
         reused = self._retained_flow_source_matches(context)
         reconstructed = False
         reconciled = False
@@ -607,6 +712,12 @@ class VisualizationModeRuntimeMixin:
             return await self._restore_streamlines_after_smoke_resume_failure(
                 "Flow timeline stopped after the sustained Smoke resume proof."
             )
+        if previous_mode is VisualizationMode.STREAMLINES_XRAY:
+            release = self.release_streamlines_xray_override_in_kit()
+            if not release.success:
+                return await self._restore_streamlines_after_smoke_resume_failure(
+                    "Streamlines + X-Ray release failed: " + release.message
+                )
         return self._result(
             True,
             "Smoke visualization is active; "
@@ -732,15 +843,25 @@ class VisualizationModeRuntimeMixin:
         """Prove Heatmap preview, then release any previous primary consumer."""
 
         previous_mode = self._visualization_mode_state.committed
+        released_streamlines_xray = False
+        if previous_mode is VisualizationMode.STREAMLINES_XRAY:
+            release = self.release_streamlines_xray_override_in_kit()
+            if not release.success:
+                return self._result(False, release.message)
+            released_streamlines_xray = True
         applied = self.apply_heatmap_xray_override_in_kit()
         if not applied.success:
+            if released_streamlines_xray:
+                self.restore_streamlines_xray_override_in_kit()
             return self._result(False, applied.message)
         if self._flow_lifecycle_state != "DETACHED":
             detached = await self.detach_simulation_cache_in_kit()
             if not detached.success:
                 self.release_heatmap_xray_override_in_kit()
+                if released_streamlines_xray:
+                    self.restore_streamlines_xray_override_in_kit()
                 return self._result(False, detached.message)
-        if previous_mode is VisualizationMode.STREAMLINES:
+        if previous_mode in _STREAMLINES_PRIMARY_MODES:
             try:
                 await self.stop_streamlines_cached_playback_in_kit()
                 if self._active_streamlines_playback_task_count() != 0:
@@ -759,6 +880,10 @@ class VisualizationModeRuntimeMixin:
                 rollback = await self._restore_streamlines_after_target_failure(
                     str(error)
                 )
+                if released_streamlines_xray:
+                    restored = self.restore_streamlines_xray_override_in_kit()
+                    if not restored.success:
+                        rollback += f" X-Ray rollback failed: {restored.message}"
                 return self._result(False, rollback)
         return self._result(
             True,

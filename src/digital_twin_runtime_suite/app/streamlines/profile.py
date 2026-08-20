@@ -8,8 +8,6 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
-PROFILE_STATE_FROZEN = "FROZEN"
-
 
 class StreamlinesProfileId(str, Enum):
     """Identify one production-facing Streamlines geometry intent."""
@@ -195,28 +193,3 @@ class ProductionStreamlinesProfile:
 
 
 PRODUCTION_STREAMLINES_PROFILE = ProductionStreamlinesProfile()
-
-
-@dataclass(frozen=True)
-class ProductionStreamlinesProfileState:
-    """Source-controlled acceptance state for the immutable production profile."""
-
-    profile: ProductionStreamlinesProfile = PRODUCTION_STREAMLINES_PROFILE
-    state: str = PROFILE_STATE_FROZEN
-    previewed: bool = True
-
-    @property
-    def frozen(self) -> bool:
-        """Return whether this session may promote production caches."""
-
-        return self.state == PROFILE_STATE_FROZEN
-
-    def mark_previewed(self) -> "ProductionStreamlinesProfileState":
-        """Retain the accepted profile after an optional maintenance preview."""
-
-        return self
-
-    def freeze(self) -> "ProductionStreamlinesProfileState":
-        """Return the already accepted source-controlled production profile."""
-
-        return self

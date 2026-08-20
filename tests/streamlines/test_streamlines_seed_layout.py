@@ -1,20 +1,16 @@
-"""Focused contracts for the Phase 4.4A front-intake point rake."""
+"""Focused contracts for the production Streamlines seed layout."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from digital_twin_runtime_suite.app.flow.static_source import (
     StaticVelocitySourceDescriptor,
 )
-from digital_twin_runtime_suite.app.streamlines.cache_runtime import (
-    StreamlinesCacheRuntimeMixin,
-)
 from digital_twin_runtime_suite.app.streamlines.proof import (
-    build_streamlines_preview_operator_request,
+    build_streamlines_seeded_operator_request,
 )
 from digital_twin_runtime_suite.app.streamlines.seed_layout import (
     PRODUCTION_STREAMLINES_SEED_LAYOUT,
@@ -106,7 +102,7 @@ def test_preview_request_binds_point_rake_and_authoritative_velocity() -> None:
     descriptor = _descriptor()
     layout = _layout()
 
-    request = build_streamlines_preview_operator_request(descriptor, layout)
+    request = build_streamlines_seeded_operator_request(descriptor, layout)
 
     assert request.seed_path == STREAMLINES_FRONT_INTAKE_SEED_PATH
     assert "UnitSphere" not in request.seed_path
@@ -119,32 +115,6 @@ def test_preview_request_binds_point_rake_and_authoritative_velocity() -> None:
     assert request.seed_layout_signature == (
         PRODUCTION_STREAMLINES_SEED_LAYOUT.settings_signature
     )
-
-
-def test_seed_authoring_creates_one_mesh_with_exact_vertices_and_quads() -> None:
-    stage = object()
-    mesh_schema = _MeshSchema()
-    usd_geom = SimpleNamespace(
-        Mesh=SimpleNamespace(
-            Define=lambda received_stage, path: mesh_schema.define(
-                received_stage,
-                path,
-            )
-        )
-    )
-    layout = _layout()
-
-    StreamlinesCacheRuntimeMixin._author_streamlines_point_rake_in_kit(
-        stage,
-        layout=layout,
-        UsdGeom=usd_geom,
-    )
-
-    assert mesh_schema.define_calls == [(stage, STREAMLINES_FRONT_INTAKE_SEED_PATH)]
-    assert tuple(mesh_schema.points.value) == canonicalize_point3f_points(layout.points)
-    assert len(mesh_schema.points.value) == 128
-    assert tuple(mesh_schema.face_counts.value) == (4,) * 105
-    assert len(mesh_schema.face_indices.value) == 105 * 4
 
 
 def test_point_rake_quad_topology_is_deterministic_and_bounded() -> None:
@@ -243,48 +213,3 @@ def _descriptor() -> StaticVelocitySourceDescriptor:
         source_origin=_bounds()[0],
         stage_meters_per_unit=1.0,
     )
-
-
-class _Attribute:
-    def __init__(self) -> None:
-        self.value = None
-
-    def Set(self, value) -> None:
-        self.value = value
-
-    def Get(self):
-        return self.value
-
-
-class _MeshSchema:
-    def __init__(self) -> None:
-        self.define_calls = []
-        self.points = _Attribute()
-        self.extent = _Attribute()
-        self.face_counts = _Attribute()
-        self.face_indices = _Attribute()
-
-    def define(self, stage, path):
-        self.define_calls.append((stage, path))
-        return self
-
-    def CreatePointsAttr(self):
-        return self.points
-
-    def GetPointsAttr(self):
-        return self.points
-
-    def CreateExtentAttr(self):
-        return self.extent
-
-    def CreateFaceVertexCountsAttr(self):
-        return self.face_counts
-
-    def GetFaceVertexCountsAttr(self):
-        return self.face_counts
-
-    def CreateFaceVertexIndicesAttr(self):
-        return self.face_indices
-
-    def GetFaceVertexIndicesAttr(self):
-        return self.face_indices

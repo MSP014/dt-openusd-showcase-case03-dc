@@ -94,14 +94,12 @@ def test_discovers_registry_by_manifest_identity_in_deterministic_order(tmp_path
     ]
     assert format_airflow_dataset_registry(registry) == "\n".join(
         (
-            "========================================",
             "DTRS AIRFLOW DATASET REGISTRY",
             "Discovered: 4",
             "server/load_idle",
             "server/load_normal",
             "server/load_surge",
             "server/load_critical",
-            "========================================",
         )
     )
 

@@ -55,6 +55,11 @@ class _Runtime(StreamlinesWorkloadTransitionMixin):
         self.reference_history = [self.reference_asset]
         self.visible = True
         self.scheduler_tasks = 1
+        self.snapshot_roots = ("/DTRS_StreamlinesSnapshots/Nominal",)
+        self.material_bindings = {
+            self.snapshot_roots[0]: "/DTRS_Looks/StreamlinesVelocity"
+        }
+        self._xray_override_owner = None
         self.classifications = {workload: "VALID" for workload in self.datasets}
         self.prepare_count = 0
         self.cleanup_count = 0
@@ -119,6 +124,9 @@ class _Runtime(StreamlinesWorkloadTransitionMixin):
         )
         self.reference_asset = f"{binding.dataset_identity}/streamlines_cache.usdc"
         self.reference_history.append(self.reference_asset)
+        root = f"/DTRS_StreamlinesSnapshots/{binding.workload_mode}"
+        self.snapshot_roots = (root,)
+        self.material_bindings = {root: "/DTRS_Looks/StreamlinesVelocity"}
         self._streamlines_cache_active_sample_index = expected_sample_index
         sample = self._streamlines_cache_playback_contract.samples[
             expected_sample_index
@@ -201,6 +209,9 @@ class _Runtime(StreamlinesWorkloadTransitionMixin):
     def visualization_flow_attach_call_count(self):
         return self.flow_attach_calls
 
+    def xray_target_snapshot(self):
+        return SimpleNamespace(override_owner=self._xray_override_owner)
+
     @staticmethod
     def _streamlines_cached_sample_identity(sample) -> str:
         return f"index={sample.sample_index}; source={sample.source_vti.name}"
@@ -250,6 +261,31 @@ def test_all_four_workloads_switch_through_independent_persisted_caches():
         assert runtime.reference_asset == (
             f"server/{_Cache.states[workload]}/streamlines_cache.usdc"
         )
+
+
+def test_streamlines_xray_workload_switch_keeps_one_snapshot_and_material():
+    runtime = _Runtime()
+    runtime._visualization_committed = VisualizationMode.STREAMLINES_XRAY
+    runtime._xray_override_owner = "streamlines_xray"
+
+    for workload in ("Idle", "Surge", "Critical", "Nominal"):
+        result = asyncio.run(
+            runtime.request_streamlines_workload_transition_in_kit(workload)
+        )
+
+        root = f"/DTRS_StreamlinesSnapshots/{workload}"
+        assert result.success is True
+        assert runtime.visualization_snapshot().committed is (
+            VisualizationMode.STREAMLINES_XRAY
+        )
+        assert runtime.xray_target_snapshot().override_owner == "streamlines_xray"
+        assert runtime._airflow_state.committed.workload_mode == workload
+        assert runtime._streamlines_cache_playback_contract.workload == workload
+        assert runtime.snapshot_roots == (root,)
+        assert runtime.material_bindings == {root: "/DTRS_Looks/StreamlinesVelocity"}
+        assert runtime.scheduler_tasks == 1
+        assert runtime.cache_builds == runtime.kit_cae_executions == 0
+        assert runtime.vti_imports == 0
 
 
 @pytest.mark.parametrize("classification", ("MISSING", "STALE", "INCOMPATIBLE"))
@@ -374,6 +410,7 @@ def test_same_healthy_workload_is_a_true_no_op():
     ("mode", "expected_owner"),
     (
         (VisualizationMode.STREAMLINES, "streamlines"),
+        (VisualizationMode.STREAMLINES_XRAY, "streamlines"),
         (VisualizationMode.SMOKE, "flow"),
         (VisualizationMode.NORMAL, "flow"),
         (VisualizationMode.HEATMAP, "flow"),

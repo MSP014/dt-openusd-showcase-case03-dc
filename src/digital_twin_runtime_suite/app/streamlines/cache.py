@@ -36,6 +36,7 @@ CACHE_PLAYBACK_SOURCE_CURVES_PATH = f"{CACHE_PLAYBACK_SOURCE_PATH}/Geometry"
 CACHE_PLAYBACK_CURVES_PATH = f"{CACHE_PLAYBACK_ROOT_PATH}/Geometry"
 CACHE_BUILD_OPERATOR_PATH = "/DTRS_KitCAE/Streamlines/CacheBuilder"
 CACHE_BUILD_SEED_PATH = "/DTRS_KitCAE/StreamlineSeeds/CacheBuildProfileGrid"
+SPEED_EVIDENCE_QUANTILE_COUNT = 101
 
 
 @dataclass(frozen=True)
@@ -230,6 +231,104 @@ class StreamlinesCacheState:
 
 
 @dataclass(frozen=True)
+class StreamlinesCacheSpeedEvidence:
+    """Compact authentic-vertex speed evidence authored during a Volume build."""
+
+    value_count: int
+    minimum: float
+    p01: float
+    p05: float
+    p50: float
+    p95: float
+    p99: float
+    maximum: float
+    quantile_values: tuple[float, ...]
+    critical_state_indices: tuple[int, ...] = ()
+    critical_state_p99_values: tuple[float, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a compact JSON-safe cache-side presentation evidence record."""
+
+        return {
+            "value_count": self.value_count,
+            "minimum": self.minimum,
+            "p01": self.p01,
+            "p05": self.p05,
+            "p50": self.p50,
+            "p95": self.p95,
+            "p99": self.p99,
+            "maximum": self.maximum,
+            "quantile_values": list(self.quantile_values),
+            "critical_state_indices": list(self.critical_state_indices),
+            "critical_state_p99_values": list(self.critical_state_p99_values),
+        }
+
+    @classmethod
+    def from_dict(cls, data: object) -> "StreamlinesCacheSpeedEvidence":
+        """Parse build-time speed evidence without loading any USD arrays."""
+
+        if not isinstance(data, dict):
+            raise ValueError("Cache speed evidence must be an object.")
+        quantiles = tuple(float(value) for value in data["quantile_values"])
+        state_indices = tuple(
+            int(value) for value in data.get("critical_state_indices", ())
+        )
+        state_p99 = tuple(
+            float(value) for value in data.get("critical_state_p99_values", ())
+        )
+        evidence = cls(
+            value_count=int(data["value_count"]),
+            minimum=float(data["minimum"]),
+            p01=float(data["p01"]),
+            p05=float(data["p05"]),
+            p50=float(data["p50"]),
+            p95=float(data["p95"]),
+            p99=float(data["p99"]),
+            maximum=float(data["maximum"]),
+            quantile_values=quantiles,
+            critical_state_indices=state_indices,
+            critical_state_p99_values=state_p99,
+        )
+        evidence._validate()
+        return evidence
+
+    def _validate(self) -> None:
+        """Reject malformed compact evidence before it can choose a palette scale."""
+
+        values = (
+            self.minimum,
+            self.p01,
+            self.p05,
+            self.p50,
+            self.p95,
+            self.p99,
+            self.maximum,
+            *self.quantile_values,
+            *self.critical_state_p99_values,
+        )
+        if self.value_count <= 0 or any(
+            not math.isfinite(value) or value < 0.0 for value in values
+        ):
+            raise ValueError("Cache speed evidence contains invalid values.")
+        if len(self.quantile_values) != SPEED_EVIDENCE_QUANTILE_COUNT:
+            raise ValueError("Cache speed evidence quantile count is invalid.")
+        if tuple(sorted(self.quantile_values)) != self.quantile_values:
+            raise ValueError("Cache speed evidence quantiles are not ordered.")
+        if not (
+            self.minimum
+            <= self.p01
+            <= self.p05
+            <= self.p50
+            <= self.p95
+            <= self.p99
+            <= self.maximum
+        ):
+            raise ValueError("Cache speed evidence percentiles are inconsistent.")
+        if len(self.critical_state_indices) != len(self.critical_state_p99_values):
+            raise ValueError("Critical speed-state evidence is incomplete.")
+
+
+@dataclass(frozen=True)
 class StreamlinesCacheMetadata:
     """Persistent identity and completeness receipt for a derived cache."""
 
@@ -248,6 +347,7 @@ class StreamlinesCacheMetadata:
     geometry_sha256: str
     states: tuple[StreamlinesCacheState, ...]
     profile_id: str = StreamlinesProfileId.GLOBAL_FLOW_PATH.value
+    speed_evidence: StreamlinesCacheSpeedEvidence | None = None
 
     @property
     def valid(self) -> bool:
@@ -274,6 +374,9 @@ class StreamlinesCacheMetadata:
             "geometry_file_name": self.geometry_file_name,
             "geometry_sha256": self.geometry_sha256,
             "states": [state.to_dict() for state in self.states],
+            "speed_evidence": (
+                self.speed_evidence.to_dict() if self.speed_evidence else None
+            ),
         }
 
     @classmethod
@@ -306,6 +409,11 @@ class StreamlinesCacheMetadata:
             geometry_sha256=str(data["geometry_sha256"]),
             states=tuple(
                 StreamlinesCacheState.from_dict(state) for state in raw_states
+            ),
+            speed_evidence=(
+                StreamlinesCacheSpeedEvidence.from_dict(data["speed_evidence"])
+                if data.get("speed_evidence") is not None
+                else None
             ),
         )
 
@@ -443,6 +551,7 @@ def build_streamlines_cache_metadata(
     *,
     geometry_file_name: str,
     geometry_sha256: str,
+    speed_evidence: StreamlinesCacheSpeedEvidence | None = None,
 ) -> StreamlinesCacheMetadata:
     """Create a VALID receipt only when every real manifest sample is cached."""
 
@@ -467,6 +576,7 @@ def build_streamlines_cache_metadata(
         geometry_file_name=geometry_file_name,
         geometry_sha256=geometry_sha256,
         states=ordered_states,
+        speed_evidence=speed_evidence,
     )
 
 

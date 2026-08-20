@@ -20,6 +20,7 @@ from digital_twin_runtime_suite.app.config import (
     RotationConfig,
     RuntimeConfig,
     SmokeTuningConfig,
+    StreamlinesPresentationConfig,
     ValidationReceiptReuseConfig,
     VisibilityGroupConfig,
     chassis_presentation_with_operator_state,
@@ -812,6 +813,28 @@ def test_runtime_controller_persists_200ms_streamlines_presentation_period(
         controller.config.simulation_cache.streamlines_presentation_period_seconds
         == 0.2
     )
+
+
+def test_runtime_controller_persists_fixed_velocity_presentation_scale(tmp_path):
+    config_path = _write_runtime_config(tmp_path)
+    controller = RuntimeController(config_path)
+    current = controller.config.streamlines_presentation
+    presentation = StreamlinesPresentationConfig(
+        speed_min=0.0,
+        speed_max=7.5,
+        speed_units=current.speed_units,
+        opacity=current.opacity,
+        emission_intensity=current.emission_intensity,
+        lighting_influence=current.lighting_influence,
+        palette=current.palette,
+    )
+
+    local_path = controller.save_streamlines_presentation_override(presentation)
+    reloaded = RuntimeConfig.load(config_path)
+
+    assert local_path.exists()
+    assert reloaded.streamlines_presentation == presentation
+    assert "[streamlines.presentation]" in local_path.read_text(encoding="utf-8")
 
 
 def test_runtime_controller_saves_camera_override(tmp_path):

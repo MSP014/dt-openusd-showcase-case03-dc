@@ -424,11 +424,13 @@ class FlowRuntimeMixin(
                 status_callback=status_callback,
             )
         try:
-            transition = self._airflow_state.begin(
-                self._airflow_state.resolve_target(binding)
-            )
+            target = self._airflow_state.resolve_target(binding)
+            # Streamlines can already have proven and committed this logical
+            # target while Flow itself remains detached.  Attach must reconcile
+            # that physical/runtime divergence, not mistake it for a no-op.
+            transition = self._airflow_state.begin(target, force=True)
             if transition is None:
-                raise RuntimeError("Attach target is already committed or pending.")
+                raise RuntimeError("Attach target is already pending.")
             validation_lease = await self.acquire_airflow_validation_for_attach(binding)
         except BackgroundValidationError as error:
             return self._finalize_airflow_failure(

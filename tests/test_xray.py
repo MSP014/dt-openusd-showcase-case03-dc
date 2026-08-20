@@ -248,6 +248,61 @@ def test_heatmap_target_override_restores_manual_xray_selection(tmp_path, monkey
     assert controller.xray_target_snapshot().effective_target_ids == {"chassis"}
 
 
+def test_streamlines_xray_override_uses_last_applied_ui_material(tmp_path, monkeypatch):
+    from pxr import Usd, UsdGeom, UsdShade
+
+    carb = ModuleType("carb")
+    carb.log_error = lambda _message: None
+    carb.log_warn = lambda _message: None
+    monkeypatch.setitem(sys.modules, "carb", carb)
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    groups = (
+        XRayTargetGroupConfig("chassis", "Chassis", (XRAY_CHASSIS_ROOT_PATH,)),
+        XRayTargetGroupConfig("fans", "Fans", ("/blackwell_rig/fans",)),
+    )
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            xray_target_groups=groups,
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.Mesh.Define(stage, f"{XRAY_CHASSIS_ROOT_PATH}/Panel")
+    UsdGeom.Mesh.Define(stage, "/blackwell_rig/fans/p120_01/geo/render/body")
+    _install_omni_usd_stage(monkeypatch, stage)
+    material = replace(
+        controller.config.chassis_presentation.materials.xray,
+        facing_color=(0.13, 0.27, 0.41),
+        edge_emission=4.0,
+    )
+
+    assert controller.apply_manual_xray_material_in_kit(material, {"chassis"}).success
+    applied = controller.apply_streamlines_xray_override_in_kit()
+
+    assert applied.success
+    assert controller.xray_target_snapshot().override_owner == "streamlines_xray"
+    assert controller.xray_target_snapshot().effective_target_ids == {
+        "chassis",
+        "fans",
+    }
+    shader = UsdShade.Shader.Get(
+        stage,
+        f"{RuntimeController.XRAY_MATERIAL_PATH}/Shader",
+    )
+    assert tuple(shader.GetInput("facing_color").Get()) == pytest.approx(
+        material.facing_color
+    )
+    assert shader.GetInput("edge_emission").Get() == pytest.approx(
+        material.edge_emission
+    )
+
+    released = controller.release_streamlines_xray_override_in_kit()
+
+    assert released.success
+    assert controller.xray_target_snapshot().effective_target_ids == {"chassis"}
+
+
 def test_empty_effective_xray_targets_stop_activity_without_material_deletion(
     tmp_path,
     monkeypatch,

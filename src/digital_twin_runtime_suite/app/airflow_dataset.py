@@ -116,17 +116,15 @@ def discover_airflow_dataset_registry(
 
 
 def format_airflow_dataset_registry(datasets: tuple[AirflowDataset, ...]) -> str:
-    """Return the concise startup diagnostic for manifest-backed datasets."""
+    """Return content for the isolated startup dataset-registry diagnostic."""
 
     lines = [
-        "========================================",
         "DTRS AIRFLOW DATASET REGISTRY",
         f"Discovered: {len(datasets)}",
     ]
     lines.extend(
         f"{dataset.manifest.scope}/{dataset.manifest.state}" for dataset in datasets
     )
-    lines.append("========================================")
     return "\n".join(lines)
 
 

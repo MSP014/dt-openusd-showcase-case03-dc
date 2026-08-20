@@ -51,59 +51,125 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         """Apply operator selection while respecting a temporary override."""
 
         self._xray_target_state.set_manual_target_ids(target_ids)
-        return self.apply_xray_material_in_kit(
-            xray,
-            self._xray_target_state.snapshot.effective_target_ids,
+        result = self.apply_xray_material_in_kit(
+            xray, self._xray_target_state.snapshot.effective_target_ids
         )
+        if result.success:
+            # A temporary presentation owner must use the operator's last
+            # successfully applied UI settings, not reset to base TOML values.
+            self._active_xray_material_config = xray
+        return result
 
     def apply_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
         """Temporarily expose every configured X-Ray group for Heatmap preview."""
+
+        return self._apply_xray_override_in_kit("heatmap_preview")
+
+    def release_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
+        """Release Heatmap targets and restore the preserved manual selection."""
+
+        return self._release_xray_override_in_kit(
+            "heatmap_preview",
+            "Heatmap",
+        )
+
+    def restore_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
+        """Reapply the existing Heatmap preview after a later mode step fails."""
+
+        return self._restore_xray_override_in_kit(
+            "heatmap_preview",
+            "Heatmap",
+        )
+
+    def apply_streamlines_xray_override_in_kit(self) -> XRayApplyResult:
+        """Overlay configured X-Ray targets while cached Streamlines play."""
+
+        return self._apply_xray_override_in_kit("streamlines_xray")
+
+    def release_streamlines_xray_override_in_kit(self) -> XRayApplyResult:
+        """Release only the Streamlines + X-Ray temporary target owner."""
+
+        return self._release_xray_override_in_kit(
+            "streamlines_xray",
+            "Streamlines + X-Ray",
+        )
+
+    def restore_streamlines_xray_override_in_kit(self) -> XRayApplyResult:
+        """Restore a failed Streamlines + X-Ray transition's overlay."""
+
+        return self._restore_xray_override_in_kit(
+            "streamlines_xray",
+            "Streamlines + X-Ray",
+        )
+
+    def _apply_xray_override_in_kit(self, owner: str) -> XRayApplyResult:
+        """Give one primary presentation temporary access to all X-Ray groups."""
 
         snapshot = self._xray_target_state.snapshot
         target_ids = frozenset(
             group.group_id for group in self._configured_xray_target_groups()
         )
-        if not self._xray_target_state.activate_override(
-            "heatmap_preview",
-            target_ids,
-        ):
+        if not self._xray_target_state.activate_override(owner, target_ids):
             return XRayApplyResult(False, "Another X-Ray target override is active.")
         result = self.apply_xray_material_in_kit(
-            self.config.chassis_presentation.materials.xray,
+            self._active_xray_material_config_in_kit(),
             self._xray_target_state.snapshot.effective_target_ids,
         )
         if not result.success:
             self._xray_target_state.restore(snapshot)
         return result
 
-    def release_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
-        """Release Heatmap targets and restore the preserved manual selection."""
+    def _release_xray_override_in_kit(
+        self,
+        owner: str,
+        presentation_name: str,
+    ) -> XRayApplyResult:
+        """Restore manual targets without releasing another owner's overlay."""
 
         snapshot = self._xray_target_state.snapshot
         if snapshot.override_owner is None:
-            return XRayApplyResult(True, "No Heatmap X-Ray override is active.")
-        if not self._xray_target_state.release_override("heatmap_preview"):
+            return XRayApplyResult(
+                True,
+                f"No {presentation_name} X-Ray override is active.",
+            )
+        if not self._xray_target_state.release_override(owner):
             return XRayApplyResult(
                 False,
                 "A different X-Ray target override is active.",
             )
         result = self.apply_xray_material_in_kit(
-            self.config.chassis_presentation.materials.xray,
+            self._active_xray_material_config_in_kit(),
             self._xray_target_state.snapshot.effective_target_ids,
         )
         if not result.success:
             self._xray_target_state.restore(snapshot)
         return result
 
-    def restore_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
-        """Reapply the existing Heatmap preview after a later mode step fails."""
+    def _restore_xray_override_in_kit(
+        self,
+        owner: str,
+        presentation_name: str,
+    ) -> XRayApplyResult:
+        """Reapply a named existing overlay after another mode target failed."""
 
         snapshot = self._xray_target_state.snapshot
-        if snapshot.override_owner != "heatmap_preview":
-            return XRayApplyResult(False, "Heatmap X-Ray override is unavailable.")
+        if snapshot.override_owner != owner:
+            return XRayApplyResult(
+                False,
+                f"{presentation_name} X-Ray override is unavailable.",
+            )
         return self.apply_xray_material_in_kit(
-            self.config.chassis_presentation.materials.xray,
+            self._active_xray_material_config_in_kit(),
             snapshot.effective_target_ids,
+        )
+
+    def _active_xray_material_config_in_kit(self) -> XRayMaterialConfig:
+        """Return the latest applied UI material or the startup config default."""
+
+        return getattr(
+            self,
+            "_active_xray_material_config",
+            self.config.chassis_presentation.materials.xray,
         )
 
     def apply_xray_material_in_kit(
