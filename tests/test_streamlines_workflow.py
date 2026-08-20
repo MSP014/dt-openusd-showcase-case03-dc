@@ -59,7 +59,7 @@ def test_cancel_stops_tasks_and_controller_measurement():
     profile_task = _Task()
     material_task = _Task()
     workflow._profile_task = profile_task
-    workflow._material_preview_task = material_task
+    workflow._material_apply_task = material_task
 
     workflow.cancel()
 
@@ -103,7 +103,7 @@ class _Controller:
     def set_streamlines_profile_preference(self, profile_id) -> None:
         self.preference = profile_id
 
-    def cancel_streamlines_material_preview_measurement(self) -> None:
+    def cancel_streamlines_material_apply(self) -> None:
         self.measurement_cancelled = True
 
     def streamlines_presentation_contract(self, **kwargs):

@@ -43,6 +43,51 @@ def test_guided_receipt_instruction_uses_the_shared_status_block():
     ]
 
 
+def test_disabling_reuse_clears_checkpoint_and_starts_fresh_validation():
+    controller = _AcceptanceController()
+    workflow, _messages = _workflow(controller)
+    workflow._checkpoint = {"baseline_identities": controller.identities}
+    controller.checkpoint = workflow._checkpoint
+    started = []
+    workflow.start_background_work = lambda: started.append("fresh")
+    controller.save_validation_receipt_reuse_override = lambda **_kwargs: Path(
+        "receipts.local.toml"
+    )
+
+    workflow.save_reuse_settings(reuse_vti=False, reuse_streamlines=False)
+
+    assert controller.checkpoint_cleared is True
+    assert workflow.checkpoint is None
+    assert workflow.acceptance_owns_actions is False
+    assert started == ["fresh"]
+
+
+def test_startup_discards_stale_checkpoint_when_reuse_is_disabled():
+    controller = _AcceptanceController()
+    controller.config.validation_receipts.reuse_verified_vti_receipts = False
+    workflow, _messages = _workflow(controller)
+    workflow._checkpoint = {"baseline_identities": controller.identities}
+
+    workflow.initialize_acceptance()
+
+    assert controller.checkpoint_cleared is True
+    assert workflow.checkpoint is None
+    assert workflow.acceptance_owns_actions is True
+
+
+def test_startup_clears_stale_checkpoint_before_guidance_is_suppressed():
+    controller = _AcceptanceController()
+    controller.config.validation_receipts.reuse_verified_vti_receipts = False
+    workflow, _messages = _workflow(controller, guided_actions_allowed=lambda: False)
+    workflow._checkpoint = {"baseline_identities": controller.identities}
+
+    workflow.initialize_acceptance()
+
+    assert controller.checkpoint_cleared is True
+    assert workflow.checkpoint is None
+    assert workflow.acceptance_owns_actions is False
+
+
 def test_matrix_gate_suppresses_competing_validation_receipt_guidance():
     controller = _AcceptanceController()
     controller.config.validation_receipts.reuse_verified_vti_receipts = False
@@ -60,50 +105,66 @@ def test_matrix_gate_suppresses_competing_validation_receipt_guidance():
     assert workflow.acceptance_owns_actions is False
 
 
-def test_streamlines_receipt_progress_uses_structured_diagnostic_lines():
+def test_streamlines_receipt_progress_uses_replaceable_progress_state():
+    reporter = _ProgressReporter()
+    workflow, messages = _workflow(
+        _AcceptanceController(),
+        progress_reporter=reporter,
+    )
+    workflow._report_streamlines_receipt_progress(
+        workload="Idle",
+        profile="volume_coverage",
+        classification="VALID",
+        completed=1,
+        total=8,
+    )
+
+    assert messages == []
+    assert reporter.states[-1].fraction == 0.125
+    assert reporter.states[-1].current == 1
+    assert reporter.states[-1].total == 8
+    assert reporter.states[-1].metadata["workload"] == "Idle"
+
+
+def test_streamlines_receipt_sweep_emits_one_terminal_summary():
+    reporter = _ProgressReporter()
+    workflow, messages = _workflow(
+        _AcceptanceController(),
+        progress_reporter=reporter,
+    )
+
+    receipts = asyncio.run(workflow._run_streamlines_receipt_sweep())
+
+    assert len(receipts) == 8
+    assert len(messages) == 2
+    assert "DTRS STREAMLINES CACHE VALIDATION" in messages[0]
+    assert "process=PERSISTED CACHE RECEIPTS | state=START" in messages[0]
+    assert "process=PERSISTED CACHE RECEIPTS | state=COMPLETE" in messages[1]
+    assert "caches_valid=8/8" in messages[1]
+    assert reporter.states[-1].current == 8
+    assert reporter.states[-1].total == 8
+
+
+def test_airflow_history_omits_per_dataset_validation_events():
     workflow, messages = _workflow(_AcceptanceController())
 
-    workflow._emit_status_block(
-        workflow._format_streamlines_receipt_progress(
-            "Streamlines receipt: workload=Idle; profile=volume_coverage; "
-            "status=CHECKING"
-        )
+    workflow._report_airflow_validation_event(
+        "DTRS AIRFLOW BACKGROUND VALIDATION\n" "process=DATASET PREFLIGHT | state=START"
+    )
+    workflow._report_airflow_validation_event(
+        "DTRS AIRFLOW VALIDATION\n" "process=DATASET PREFLIGHT | state=VALIDATED"
+    )
+    workflow._report_airflow_validation_event(
+        "DTRS AIRFLOW DATASET FAMILY\n" "process=COMPATIBILITY CHECK | state=PASS"
+    )
+    workflow._report_airflow_validation_event(
+        "DTRS AIRFLOW BACKGROUND VALIDATION\n"
+        "process=DATASET PREFLIGHT | state=COMPLETE"
     )
 
-    assert messages[-1].splitlines() == [
-        "",
-        "====================",
-        "DTRS VALIDATION RECEIPTS",
-        "process=CACHE VALIDATION | state=PROGRESS",
-        "workload=Idle",
-        "profile=volume_coverage",
-        "status=CHECKING | Local time: fixed",
-        "====================",
-    ]
-
-
-def test_startup_summary_separates_cache_matrix_health_from_receipt_work():
-    controller = _AcceptanceController()
-    controller.cache_matrix_entries = tuple(
-        SimpleNamespace(classification=classification)
-        for classification in ("VALID",) + ("MISSING",) * 7
-    )
-    controller._metrics.streamlines.fresh_validated = 8
-    workflow, messages = _workflow(controller)
-
-    asyncio.run(workflow.report_startup_summary())
-
-    summary = messages[-1]
-    assert "process=STARTUP SUMMARY | state=COMPLETE" in summary
-    assert "Streamlines cache matrix:" in summary
-    assert "  state=INCOMPLETE" in summary
-    assert "  valid=1/8" in summary
-    assert "  missing=7" in summary
-    assert "  stale=0" in summary
-    assert "  incompatible=0" in summary
-    assert "  required_action=Build / Validate Production Cache Set" in summary
-    assert "Streamlines receipt checks:" in summary
-    assert "  fresh_validated=8" in summary
+    assert len(messages) == 2
+    assert "state=START" in messages[0]
+    assert "state=COMPLETE" in messages[1]
 
 
 def test_session_two_restores_receipts_without_requesting_visualization():
@@ -206,7 +267,7 @@ def test_cancel_clears_only_workflow_owned_tasks():
     controller = _AcceptanceController()
     workflow, _messages = _workflow(controller)
     task = _Task()
-    workflow._summary_task = task
+    workflow._streamlines_receipt_sweep_task = task
 
     workflow.cancel()
 
@@ -214,7 +275,12 @@ def test_cancel_clears_only_workflow_owned_tasks():
     assert controller.background_validation_stopped is True
 
 
-def _workflow(controller, *, guided_actions_allowed=lambda: True):
+def _workflow(
+    controller,
+    *,
+    progress_reporter=None,
+    guided_actions_allowed=lambda: True,
+):
     module = _load_workflow()
     messages = []
     workflow = module.ValidationReceiptWorkflow(
@@ -225,6 +291,7 @@ def _workflow(controller, *, guided_actions_allowed=lambda: True):
         append_local_timestamp=lambda message: f"{message} | Local time: fixed",
         log_error=messages.append,
         include_airflow_diagnostics=False,
+        progress_reporter=progress_reporter,
         guided_actions_allowed=guided_actions_allowed,
     )
 
@@ -242,6 +309,18 @@ class _Task:
 
     def cancel(self) -> None:
         self.cancelled = True
+
+
+class _ProgressReporter:
+    def __init__(self) -> None:
+        self.states = []
+        self.finished = False
+
+    def progress(self, state) -> None:
+        self.states.append(state)
+
+    def finish(self) -> None:
+        self.finished = True
 
 
 class _AcceptanceController:
@@ -311,6 +390,26 @@ class _AcceptanceController:
 
     def streamlines_production_cache_matrix_readiness_snapshot(self):
         return self.cache_matrix_entries
+
+    async def ensure_configured_streamlines_cache_validations_in_background(
+        self,
+        *,
+        status_callback,
+    ):
+        receipts = []
+        for workload in ("Idle", "Nominal", "Surge", "Critical"):
+            for profile in ("volume_coverage", "global_flow_path"):
+                status_callback(
+                    "Streamlines receipt: "
+                    f"workload={workload}; profile={profile}; status=CHECKING"
+                )
+                status_callback(
+                    "Streamlines receipt: "
+                    f"workload={workload}; profile={profile}; status=VALID; "
+                    "receipt_source=FRESH"
+                )
+                receipts.append(SimpleNamespace())
+        return tuple(receipts)
 
     async def request_visualization_mode_in_kit(self, mode, status_callback=None):
         self.visualization_requests.append(mode)

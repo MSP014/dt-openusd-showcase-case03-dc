@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from bisect import bisect_right
 from dataclasses import dataclass
-from statistics import median
 from typing import Iterable
 
 from digital_twin_runtime_suite.app.streamlines.cache import (
@@ -46,15 +45,6 @@ class SpeedScaleCoverage:
     below_percent: float
     inside_percent: float
     above_percent: float
-
-
-@dataclass(frozen=True)
-class SpeedScaleProposalEvidence:
-    """Manifest-selected Critical/Volume p99 evidence for one shared scale."""
-
-    state_indices: tuple[int, ...]
-    state_p99_values: tuple[float, ...]
-    candidate_maximum: float
 
 
 @dataclass(frozen=True)
@@ -170,79 +160,12 @@ def fixed_scale_coverage(
     )
 
 
-def proposed_speed_max(
-    distributions: Iterable[SpeedDistribution],
-) -> float:
-    """Use the largest Volume Coverage p99 as one fixed upper bound."""
-
-    values = tuple(item.p99 for item in distributions)
-    if not values:
-        raise ValueError("At least one Volume Coverage distribution is required.")
-    return max(values)
-
-
-def distributed_manifest_state_indices(
-    metadata: StreamlinesCacheMetadata,
-    *,
-    count: int = 5,
-) -> tuple[int, ...]:
-    """Select evenly distributed real manifest states without cadence assumptions."""
-
-    sample_count = metadata.sample_count
-    if len(metadata.states) != sample_count:
-        raise ValueError("Cache metadata state count is inconsistent.")
-    return distributed_state_indices(sample_count, count=count)
-
-
-def distributed_state_indices(
-    sample_count: int,
-    *,
-    count: int = 5,
-) -> tuple[int, ...]:
-    """Select evenly distributed state indexes without a metadata dependency."""
-
-    if count <= 0:
-        raise ValueError("Distributed state count must be positive.")
-    if sample_count < count:
-        raise ValueError(
-            "Persisted cache has too few manifest states for speed-scale analysis."
-        )
-    return tuple(
-        round(index * (sample_count - 1) / (count - 1)) for index in range(count)
-    )
-
-
-def speed_scale_candidate_from_critical_volume(
-    state_distributions: Iterable[SpeedDistribution],
-    *,
-    state_indices: Iterable[int],
-) -> SpeedScaleProposalEvidence:
-    """Derive one fixed maximum from five Critical/Volume state p99 values."""
-
-    distributions = tuple(state_distributions)
-    indices = tuple(state_indices)
-    if len(distributions) != len(indices) or not distributions:
-        raise ValueError("Critical/Volume speed-scale evidence is incomplete.")
-    p99_values = tuple(item.p99 for item in distributions)
-    candidate = float(median(p99_values))
-    if not math.isfinite(candidate) or candidate <= 0.0:
-        raise ValueError("Critical/Volume speed-scale candidate is invalid.")
-    return SpeedScaleProposalEvidence(indices, p99_values, candidate)
-
-
 def build_streamlines_cache_speed_evidence(
     accumulator: SpeedDistributionAccumulator,
-    *,
-    critical_state_indices: Iterable[int] = (),
-    critical_state_accumulators: Iterable[SpeedDistributionAccumulator] = (),
 ) -> StreamlinesCacheSpeedEvidence:
     """Freeze Volume build evidence from raw speeds already held by the builder."""
 
     distribution = accumulator.finish()
-    state_accumulators = tuple(critical_state_accumulators)
-    state_indices = tuple(critical_state_indices)
-    if len(state_indices) != len(state_accumulators):
-        raise ValueError("Critical speed-state accumulators are incomplete.")
     return StreamlinesCacheSpeedEvidence(
         value_count=distribution.value_count,
         minimum=distribution.minimum,
@@ -253,10 +176,6 @@ def build_streamlines_cache_speed_evidence(
         p99=distribution.p99,
         maximum=distribution.maximum,
         quantile_values=accumulator.quantile_values(),
-        critical_state_indices=state_indices,
-        critical_state_p99_values=tuple(
-            state_accumulator.finish().p99 for state_accumulator in state_accumulators
-        ),
     )
 
 

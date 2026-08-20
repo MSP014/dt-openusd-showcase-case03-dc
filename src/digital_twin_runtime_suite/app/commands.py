@@ -940,10 +940,17 @@ class RuntimeController(
             binding
         )
 
-    async def run_background_airflow_validation(self, log: Callable[[str], None]):
-        """Run the existing session coordinator without exposing arbitration."""
+    async def run_background_airflow_validation(
+        self,
+        log: Callable[[str], None],
+        progress_callback: Callable[[str, int, int, str], None] | None = None,
+    ):
+        """Run VTI preflight while projecting optional per-file live progress."""
 
-        result = await self.start_background_airflow_validation().run(log)
+        result = await self.start_background_airflow_validation().run(
+            log,
+            progress_callback=progress_callback,
+        )
         if not result.cancelled and result.failed == 0:
             try:
                 family = self.validate_registered_airflow_dataset_family()

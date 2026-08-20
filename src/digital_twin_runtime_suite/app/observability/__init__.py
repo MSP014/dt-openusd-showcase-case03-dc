@@ -6,6 +6,7 @@ from .reporting import (
     DtrsEventSink,
     ProgressReporter,
 )
+from .status_bar import KitStatusBarProgressSink
 from .terminal import (
     TerminalProgressRenderer,
     format_live_progress_preview,
@@ -18,6 +19,7 @@ __all__ = (
     "DurableEvent",
     "EventKind",
     "EventSeverity",
+    "KitStatusBarProgressSink",
     "ProgressReporter",
     "ProgressState",
     "TerminalProgressRenderer",

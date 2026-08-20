@@ -41,11 +41,6 @@ _DTRS_OBSERVABILITY_REPORTING_LOG_CHANNEL_LEVEL = (
     "/observability/logs/channels/digital_twin_runtime_suite.app.observability.*"
 )
 
-# Stage 09 closure restores the registry, workload-mapping, and background
-# validation logs. They make shared Flow state observable without changing
-# production lifecycle ownership or suppressing errors.
-STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS = False
-
 
 def _resolve_token_path(value: str) -> Path:
     tokens = carb.tokens.get_tokens_interface()
@@ -95,7 +90,6 @@ class DigitalTwinRuntimeSuiteExtension(
     def on_startup(self, ext_id: str) -> None:
         self._window = None
         self._controller = None
-        self._suppress_airflow_diagnostics = STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS
         self._status_label = None
         self._lighting_status_label = None
         self._asset_label = None
@@ -112,10 +106,10 @@ class DigitalTwinRuntimeSuiteExtension(
         self._reuse_vti_receipts_model = None
         self._reuse_streamlines_receipts_model = None
         self._validation_receipt_status_label = None
+        self._validation_receipt_progress_labels = {}
         self._streamlines_profile_combo = None
         self._streamlines_workflow = None
-        self._streamlines_material_preview_button = None
-        self._live_progress_preview_subscription = None
+        self._streamlines_material_apply_button = None
         self._updating_streamlines_profile_combo = False
         self._streamlines_material_tuning_combos = {}
         self._streamlines_material_status_label = None
@@ -211,6 +205,35 @@ class DigitalTwinRuntimeSuiteExtension(
             f"{self._settings.get_as_bool('/app/useFabricSceneDelegate')}"
         )
         self._build_controller()
+        from digital_twin_runtime_suite.app.observability import (
+            DtrsEventSink,
+            KitStatusBarProgressSink,
+            ProgressReporter,
+            TerminalProgressRenderer,
+        )
+
+        observability_terminal = TerminalProgressRenderer()
+        observability_status_bar = KitStatusBarProgressSink.from_kit()
+        self._observability_reporter = ProgressReporter(
+            event_sinks=(
+                DtrsEventSink(
+                    # Kit's current console suppresses INFO even with channel
+                    # overrides. Keep guided developer-gate milestones visible.
+                    log_info=carb.log_warn,
+                    log_warning=carb.log_warn,
+                    log_error=carb.log_error,
+                    append_local_timestamp=_with_dtrs_local_timestamp,
+                ),
+            ),
+            progress_sinks=(
+                observability_terminal.publish,
+                observability_status_bar,
+            ),
+            finish_sinks=(
+                observability_terminal.finish,
+                observability_status_bar.finish,
+            ),
+        )
         from msp.dtrs.workflows.validation_receipts import (
             ValidationReceiptWorkflow,
         )
@@ -224,36 +247,10 @@ class DigitalTwinRuntimeSuiteExtension(
             log_error=lambda message: carb.log_error(
                 _with_dtrs_local_timestamp(message)
             ),
-            include_airflow_diagnostics=not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS,
+            include_airflow_diagnostics=True,
+            progress_reporter=self._observability_reporter,
         )
         self._validation_workflow.load_checkpoint()
-        from digital_twin_runtime_suite.app.observability import (
-            DtrsEventSink,
-            EventKind,
-            ProgressReporter,
-            TerminalProgressRenderer,
-            format_live_progress_preview,
-        )
-
-        observability_terminal = TerminalProgressRenderer()
-        self._observability_reporter = ProgressReporter(
-            event_sinks=(
-                DtrsEventSink(
-                    # Kit's current console suppresses INFO even with channel
-                    # overrides. Keep guided developer-gate milestones visible.
-                    log_info=carb.log_warn,
-                    log_warning=carb.log_warn,
-                    log_error=carb.log_error,
-                    append_local_timestamp=_with_dtrs_local_timestamp,
-                ),
-            ),
-            progress_sinks=(observability_terminal.publish,),
-            finish_sinks=(observability_terminal.finish,),
-        )
-        self._subscribe_live_progress_preview(
-            EventKind,
-            format_live_progress_preview,
-        )
         from msp.dtrs.workflows.visualization import VisualizationWorkflow
 
         self._visualization_workflow = VisualizationWorkflow(
@@ -282,6 +279,9 @@ class DigitalTwinRuntimeSuiteExtension(
             self._telemetry_config_path
         )
         self._build_window()
+        self._observability_reporter.add_progress_sink(
+            self._set_validation_receipt_live_progress
+        )
         self._validation_workflow.initialize_acceptance()
         if self._validation_workflow.checkpoint is None:
             self._validation_workflow.start_background_work()
@@ -305,7 +305,7 @@ class DigitalTwinRuntimeSuiteExtension(
                 self._streamlines_workflow.cancel()
             cancel_material = getattr(
                 self._controller,
-                "cancel_streamlines_material_preview_measurement",
+                "cancel_streamlines_material_apply",
                 None,
             )
             if cancel_material:
@@ -320,7 +320,6 @@ class DigitalTwinRuntimeSuiteExtension(
         if self._telemetry_task:
             self._telemetry_task.cancel()
             self._telemetry_task = None
-        self._live_progress_preview_subscription = None
         if self._controller:
             try:
                 receipt = (
@@ -347,42 +346,6 @@ class DigitalTwinRuntimeSuiteExtension(
         if self._window:
             self._window.visible = False
             self._window = None
-
-    def _subscribe_live_progress_preview(
-        self,
-        event_kind,
-        format_preview,
-    ) -> None:
-        """Emit one non-operational preview after Kit reports the app ready."""
-
-        try:
-            from carb.eventdispatcher import get_eventdispatcher
-            from omni.kit.app import GLOBAL_EVENT_APP_READY
-
-            def publish_preview(_event) -> None:
-                reporter = getattr(self, "_observability_reporter", None)
-                if reporter is not None:
-                    # This is an explicit development preview, not routine
-                    # progress. Warning keeps the requested test example visible
-                    # in the current warn-filtered Kit console.
-                    reporter.event(
-                        event_kind.WARNING,
-                        "OBSERVABILITY | LIVE PROGRESS PREVIEW",
-                        format_preview(),
-                    )
-
-            self._live_progress_preview_subscription = (
-                get_eventdispatcher().observe_event(
-                    event_name=GLOBAL_EVENT_APP_READY,
-                    on_event=publish_preview,
-                    observer_name="msp.dtrs.live_progress_preview",
-                )
-            )
-        except (AttributeError, ImportError, RuntimeError) as error:
-            carb.log_error(
-                "DTRS live-progress preview could not subscribe to "
-                f"Kit app-ready: {error}"
-            )
 
     def _build_controller(self) -> None:
         source_root_setting = self._settings.get_as_string(
@@ -437,13 +400,12 @@ class DigitalTwinRuntimeSuiteExtension(
                 )
             )
         else:
-            if not STAGE09_SUPPRESS_AIRFLOW_DIAGNOSTICS:
-                carb.log_warn(
-                    format_dtrs_status_block(
-                        registry_log,
-                        append_local_timestamp=_with_dtrs_local_timestamp,
-                    )
+            carb.log_warn(
+                format_dtrs_status_block(
+                    registry_log,
+                    append_local_timestamp=_with_dtrs_local_timestamp,
                 )
+            )
         self._set_application_title_version(self._controller.config)
         telemetry_config_path = (
             config_path.parent / "telemetry_provider.toml"

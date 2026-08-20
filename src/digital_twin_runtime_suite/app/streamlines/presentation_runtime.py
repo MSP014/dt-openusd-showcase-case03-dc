@@ -40,8 +40,8 @@ class StreamlinesMaterialSnapshot:
 
 
 @dataclass(frozen=True)
-class StreamlinesMaterialPreviewReceipt:
-    """One latest-wins preview receipt without playback-performance sampling."""
+class StreamlinesMaterialApplyReceipt:
+    """One latest-wins material-settings receipt without scheduler work."""
 
     material: StreamlinesMaterialSnapshot
 
@@ -57,12 +57,12 @@ class StreamlinesPresentationRuntimeMixin:
     def reset_streamlines_presentation_runtime_state(self) -> None:
         """Clear session-only material state at lifecycle boundaries."""
 
-        self.cancel_streamlines_material_preview_measurement()
+        self.cancel_streamlines_material_apply()
         self._streamlines_material_create_count = 0
         self._streamlines_material_apply_count = 0
         self._streamlines_material_snapshot = None
         self._streamlines_material_active_presentation = None
-        self._streamlines_material_preview_generation = 0
+        self._streamlines_material_apply_generation = 0
 
     def streamlines_presentation_contract(
         self,
@@ -186,27 +186,27 @@ class StreamlinesPresentationRuntimeMixin:
         presentation: StreamlinesPresentation,
         *,
         status_callback: StatusCallback | None = None,
-    ) -> StreamlinesMaterialPreviewReceipt:
+    ) -> StreamlinesMaterialApplyReceipt:
         """Apply settings after one Kit update, without scheduler work."""
 
-        self.cancel_streamlines_material_preview_measurement()
-        self._streamlines_material_preview_generation += 1
-        generation = self._streamlines_material_preview_generation
+        self.cancel_streamlines_material_apply()
+        self._streamlines_material_apply_generation += 1
+        generation = self._streamlines_material_apply_generation
         snapshot = self.apply_streamlines_presentation_in_kit(presentation)
         await self._await_streamlines_material_viewport_update()
-        self._require_current_streamlines_material_preview(generation)
+        self._require_current_streamlines_material_apply(generation)
         if status_callback:
             status_callback(
                 "Material settings applied: one snapshot-set material; "
                 "cache_build=0; snapshot_rebuild=0; KitCAE=0; VTI_import=0."
             )
-        return StreamlinesMaterialPreviewReceipt(snapshot)
+        return StreamlinesMaterialApplyReceipt(snapshot)
 
-    def cancel_streamlines_material_preview_measurement(self) -> None:
+    def cancel_streamlines_material_apply(self) -> None:
         """Invalidate a stale material application before it reports completion."""
 
-        self._streamlines_material_preview_generation = (
-            getattr(self, "_streamlines_material_preview_generation", 0) + 1
+        self._streamlines_material_apply_generation = (
+            getattr(self, "_streamlines_material_apply_generation", 0) + 1
         )
 
     @staticmethod
@@ -218,8 +218,8 @@ class StreamlinesPresentationRuntimeMixin:
             return
         await omni.kit.app.get_app().next_update_async()
 
-    def _require_current_streamlines_material_preview(self, generation: int) -> None:
-        if generation != self._streamlines_material_preview_generation:
+    def _require_current_streamlines_material_apply(self, generation: int) -> None:
+        if generation != self._streamlines_material_apply_generation:
             raise asyncio.CancelledError
 
     def streamlines_material_snapshot(self) -> StreamlinesMaterialSnapshot | None:
@@ -318,15 +318,14 @@ class StreamlinesPresentationRuntimeMixin:
             finally:
                 stage.SetEditTarget(previous_target)
         self._streamlines_material_snapshot = None
-        self._streamlines_material_candidate = None
         self._streamlines_material_active_presentation = None
-        self.cancel_streamlines_material_preview_measurement()
+        self.cancel_streamlines_material_apply()
 
     def release_streamlines_presentation_material_in_kit(self) -> None:
         """Release material state only when Streamlines returns to Normal.
 
         Workload and profile transitions replace snapshots while retaining the
-        accepted material. Only Normal releases the material prim, preview
+        accepted material. Only Normal releases the material prim, apply
         task, and material snapshot together.
         """
 

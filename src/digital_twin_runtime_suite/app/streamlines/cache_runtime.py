@@ -106,7 +106,6 @@ from digital_twin_runtime_suite.app.streamlines.speed import (
 from digital_twin_runtime_suite.app.streamlines.speed_distribution import (
     SpeedDistributionAccumulator,
     build_streamlines_cache_speed_evidence,
-    distributed_state_indices,
     persisted_speed_chunks,
     validate_persisted_speed_cache,
 )
@@ -1742,15 +1741,6 @@ class StreamlinesCacheRuntimeMixin:
             if profile_id is StreamlinesProfileId.VOLUME_COVERAGE
             else None
         )
-        critical_speed_state_indices = (
-            distributed_state_indices(source.sample_count)
-            if volume_speed_accumulator is not None and source.workload == "Critical"
-            else ()
-        )
-        critical_speed_state_accumulators = {
-            index: SpeedDistributionAccumulator()
-            for index in critical_speed_state_indices
-        }
         try:
             stage.SetEditTarget(stage.GetSessionLayer())
             author_streamlines_seed_mesh_in_kit(
@@ -1813,9 +1803,6 @@ class StreamlinesCacheRuntimeMixin:
                     )
                 if volume_speed_accumulator is not None:
                     volume_speed_accumulator.add(execution.speed_magnitudes)
-                    state_accumulator = critical_speed_state_accumulators.get(index)
-                    if state_accumulator is not None:
-                        state_accumulator.add(execution.speed_magnitudes)
                 padded = pad_streamlines_sample_for_renderer(
                     profile_id=profile_id,
                     points=evidence.runtime_point_positions,
@@ -1931,12 +1918,7 @@ class StreamlinesCacheRuntimeMixin:
         speed_evidence = None
         if volume_speed_accumulator is not None:
             speed_evidence = build_streamlines_cache_speed_evidence(
-                volume_speed_accumulator,
-                critical_state_indices=critical_speed_state_indices,
-                critical_state_accumulators=tuple(
-                    critical_speed_state_accumulators[index]
-                    for index in critical_speed_state_indices
-                ),
+                volume_speed_accumulator
             )
         metadata = build_streamlines_cache_metadata(
             source,

@@ -24,12 +24,12 @@ class StreamlinesWorkflow:
         self._restore_profile_selection = restore_profile_selection
         self._log_error = log_error
         self._profile_task = None
-        self._material_preview_task = None
+        self._material_apply_task = None
 
     def request_profile(self, profile_id, *, streamlines_active: bool) -> None:
         """Persist an inactive preference or transition an active presentation."""
 
-        self.cancel_material_preview()
+        self.cancel_material_apply()
         if not streamlines_active:
             self._controller.set_streamlines_profile_preference(profile_id)
             return
@@ -47,8 +47,8 @@ class StreamlinesWorkflow:
     ) -> None:
         """Replace an in-flight material application with the latest UI request."""
 
-        self.cancel_material_preview()
-        self._material_preview_task = asyncio.ensure_future(
+        self.cancel_material_apply()
+        self._material_apply_task = asyncio.ensure_future(
             self._apply_material_settings(
                 opacity=opacity,
                 emission_intensity=emission_intensity,
@@ -56,14 +56,14 @@ class StreamlinesWorkflow:
             )
         )
 
-    def cancel_material_preview(self) -> None:
-        """Cancel delayed material evidence after a newer UI action."""
+    def cancel_material_apply(self) -> None:
+        """Cancel a stale material-only apply task and its completion guard."""
 
-        task = self._material_preview_task
+        task = self._material_apply_task
         if task is not None and not task.done():
             task.cancel()
-        self._material_preview_task = None
-        self._controller.cancel_streamlines_material_preview_measurement()
+        self._material_apply_task = None
+        self._controller.cancel_streamlines_material_apply()
 
     def cancel(self) -> None:
         """Cancel every workflow-owned Streamlines task during teardown."""
@@ -71,7 +71,7 @@ class StreamlinesWorkflow:
         if self._profile_task is not None:
             self._profile_task.cancel()
         self._profile_task = None
-        self.cancel_material_preview()
+        self.cancel_material_apply()
 
     async def _transition_profile(self, profile_id) -> None:
         try:
@@ -132,6 +132,6 @@ class StreamlinesWorkflow:
             message = f"Material settings apply failed: {error}"
             self._log_error(message)
         finally:
-            if self._material_preview_task is asyncio.current_task():
-                self._material_preview_task = None
+            if self._material_apply_task is asyncio.current_task():
+                self._material_apply_task = None
         self._report_material_status(message)
