@@ -34,7 +34,6 @@ def test_streamlines_xray_mode_follows_streamlines_in_selector_order():
         "Smoke",
         "Streamlines",
         "Streamlines + X-Ray",
-        "Heatmap",
     )
 
 
@@ -154,33 +153,6 @@ class _Runtime(VisualizationModeRuntimeMixin):
             True,
             "Flow workload reconciled.",
             VisualizationMode.STREAMLINES,
-        )
-
-    def apply_heatmap_xray_override_in_kit(self):
-        self._override_owner = "heatmap_preview"
-        self._override_targets = frozenset({"chassis", "fans"})
-        return VisualizationModeResult(
-            True,
-            "X-Ray override applied.",
-            VisualizationMode.NORMAL,
-        )
-
-    def release_heatmap_xray_override_in_kit(self):
-        self._override_owner = None
-        self._override_targets = frozenset()
-        return VisualizationModeResult(
-            True,
-            "X-Ray override released.",
-            VisualizationMode.NORMAL,
-        )
-
-    def restore_heatmap_xray_override_in_kit(self):
-        self._override_owner = "heatmap_preview"
-        self._override_targets = frozenset({"chassis", "fans"})
-        return VisualizationModeResult(
-            True,
-            "X-Ray override restored.",
-            VisualizationMode.NORMAL,
         )
 
     def apply_streamlines_xray_override_in_kit(self):
@@ -665,7 +637,6 @@ def test_readiness_uses_only_current_workload_receipt_and_read_only_cache(monkey
     assert readiness.for_mode(VisualizationMode.STREAMLINES).state == "STALE"
     assert readiness.for_mode(VisualizationMode.STREAMLINES_XRAY).state == "STALE"
     assert runtime._cache_mutations == 0
-    assert readiness.for_mode(VisualizationMode.HEATMAP).state == "PREVIEW_READY"
 
 
 def test_repeated_readiness_never_calls_strong_streamlines_inspection(monkeypatch):
@@ -752,18 +723,6 @@ def test_cache_failure_readiness_never_mutates_streamlines_runtime(
     assert runtime._cache_mutations == 0
 
 
-def test_heatmap_preserves_manual_xray_selection_and_uses_all_configured_targets():
-    runtime = _Runtime()
-
-    result = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
-
-    assert result.success is True
-    assert runtime.xray_target_snapshot().manual_target_ids == frozenset({"chassis"})
-    assert runtime.xray_target_snapshot().effective_target_ids == frozenset(
-        {"chassis", "fans"}
-    )
-
-
 def test_normal_to_smoke_preserves_independent_manual_xray_selection():
     runtime = _Runtime()
 
@@ -783,20 +742,12 @@ def test_normal_to_smoke_preserves_independent_manual_xray_selection():
         ("Streamlines", "Normal"),
         ("Normal", "Streamlines + X-Ray"),
         ("Streamlines + X-Ray", "Normal"),
-        ("Normal", "Heatmap"),
-        ("Heatmap", "Normal"),
         ("Smoke", "Streamlines"),
         ("Streamlines", "Smoke"),
         ("Smoke", "Streamlines + X-Ray"),
         ("Streamlines + X-Ray", "Smoke"),
-        ("Smoke", "Heatmap"),
-        ("Heatmap", "Smoke"),
-        ("Streamlines", "Heatmap"),
-        ("Heatmap", "Streamlines"),
         ("Streamlines", "Streamlines + X-Ray"),
         ("Streamlines + X-Ray", "Streamlines"),
-        ("Streamlines + X-Ray", "Heatmap"),
-        ("Heatmap", "Streamlines + X-Ray"),
     ),
 )
 def test_supported_mode_graph_activates_target_independently(source, target):
@@ -818,7 +769,6 @@ def test_supported_mode_graph_activates_target_independently(source, target):
         "Smoke": (True, False, None, 0),
         "Streamlines": (False, True, None, 1),
         "Streamlines + X-Ray": (False, True, "streamlines_xray", 1),
-        "Heatmap": (False, False, "heatmap_preview", 0),
     }
     expected = visible[target]
     assert runtime._smoke_visible is expected[0]
@@ -884,39 +834,6 @@ def test_direct_normal_to_streamlines_uses_only_persisted_cache_playback():
     assert runtime._mesh_selector_calls == 0
     assert runtime._timeline_set_current_time_calls == 0
     assert runtime._streamlines_controls_timeline is False
-
-
-def test_broken_smoke_target_does_not_block_streamlines_or_heatmap():
-    runtime = _Runtime()
-    runtime._attach_failure = True
-
-    smoke = asyncio.run(runtime.request_visualization_mode_in_kit("Smoke"))
-    streamlines = asyncio.run(runtime.request_visualization_mode_in_kit("Streamlines"))
-    heatmap = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
-
-    assert smoke.success is False
-    assert streamlines.success is True
-    assert heatmap.success is True
-    assert runtime.visualization_snapshot().committed is VisualizationMode.HEATMAP
-
-
-def test_failed_heatmap_to_smoke_keeps_heatmap_override_active():
-    runtime = _Runtime()
-    assert asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap")).success
-
-    async def _fail_attach():
-        return VisualizationModeResult(
-            False,
-            "Current workload Flow validation failed.",
-            VisualizationMode.HEATMAP,
-        )
-
-    runtime.attach_simulation_cache_in_kit = _fail_attach
-    result = asyncio.run(runtime.request_visualization_mode_in_kit("Smoke"))
-
-    assert result.success is False
-    assert runtime.visualization_snapshot().committed is VisualizationMode.HEATMAP
-    assert runtime.xray_target_snapshot().override_owner == "heatmap_preview"
 
 
 def test_smoke_streamlines_round_trip_returns_to_normal_cleanly():
@@ -1427,32 +1344,6 @@ def test_streamlines_cache_rejection_preserves_smoke_without_runtime_fallback(
     assert runtime._kit_cae_executions == 0
     assert runtime._runtime_preview_rebuilds == 0
     assert runtime._vti_imports == 0
-
-
-def test_rapid_supersession_cleans_streamlines_candidate_without_orphan():
-    runtime = _Runtime()
-
-    async def _supersede():
-        runtime._prepare_started = asyncio.Event()
-        runtime._prepare_release = asyncio.Event()
-        streamlines = asyncio.create_task(
-            runtime.request_visualization_mode_in_kit("Streamlines")
-        )
-        await runtime._prepare_started.wait()
-        heatmap = asyncio.create_task(
-            runtime.request_visualization_mode_in_kit("Heatmap")
-        )
-        runtime._prepare_release.set()
-        return await streamlines, await heatmap
-
-    streamlines, heatmap = asyncio.run(_supersede())
-
-    assert streamlines.success is False
-    assert heatmap.success is True
-    assert runtime.visualization_snapshot().committed is VisualizationMode.HEATMAP
-    assert runtime._streamlines_scheduler_count == 0
-    assert runtime._streamlines_root_count == 0
-    assert runtime._streamlines_start_count == 0
 
 
 def test_normal_supersedes_pending_streamlines_without_a_late_commit():

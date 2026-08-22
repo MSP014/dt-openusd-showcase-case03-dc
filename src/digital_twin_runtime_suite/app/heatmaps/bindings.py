@@ -53,11 +53,10 @@ class SemanticKey:
 
 @dataclass(frozen=True)
 class TelemetryBinding:
-    """Static source-controlled telemetry contract for one semantic key."""
+    """Static source-controlled semantic-target-to-metric contract."""
 
     metric_id: str | None
     unavailable_reason: str | None = None
-    presentation_temperature_offset_celsius: float = 0.0
 
     @property
     def available(self) -> bool:
@@ -73,21 +72,12 @@ class TelemetryBinding:
 
 
 @dataclass(frozen=True)
-class PresentationPolicy:
-    """Keep presentation precedence independent from semantic capability."""
-
-    heatmap_capable: bool
-    xray_precedence: bool
-
-
-@dataclass(frozen=True)
 class HeatmapTargetBinding:
-    """Complete static semantic result for one valid Heatmap prim."""
+    """One valid prim's semantic identity and telemetry metric resolution."""
 
     prim_path: str
     semantic_key: SemanticKey
     telemetry_binding: TelemetryBinding
-    presentation_policy: PresentationPolicy
 
 
 @dataclass(frozen=True)
@@ -159,14 +149,6 @@ class HeatmapSemanticRegistry:
         return self.semantic_group_count - self.bound_group_count
 
     @property
-    def xray_precedence_count(self) -> int:
-        """Return dual-purpose prims while retaining their Heatmap capability."""
-
-        return sum(
-            target.presentation_policy.xray_precedence for target in self.targets
-        )
-
-    @property
     def fingerprint(self) -> tuple[HeatmapTargetBinding, ...]:
         """Expose deterministic static identity for workload comparisons."""
 
@@ -198,12 +180,9 @@ class HeatmapSemanticRegistry:
 
 def build_heatmap_semantic_registry(
     targets: tuple[ThermalPrimMetadata, ...],
-    *,
-    xray_overlap_paths: tuple[str, ...] = (),
 ) -> HeatmapSemanticRegistry:
     """Build static semantic evidence from validated discovery records only."""
 
-    xray_paths = frozenset(xray_overlap_paths)
     bindings: list[HeatmapTargetBinding] = []
     diagnostics: list[HeatmapBindingDiagnostic] = []
     unavailable_by_key: dict[SemanticKey, HeatmapBindingDiagnostic] = {}
@@ -231,10 +210,6 @@ def build_heatmap_semantic_registry(
                 prim_path=target.prim_path,
                 semantic_key=key,
                 telemetry_binding=telemetry_binding,
-                presentation_policy=PresentationPolicy(
-                    heatmap_capable=True,
-                    xray_precedence=target.prim_path in xray_paths,
-                ),
             )
         )
 
@@ -333,20 +308,10 @@ def resolve_telemetry_binding(key: SemanticKey) -> TelemetryBinding:
     elif hardware.family == "motherboard":
         metric_id = _motherboard_metric_id(key)
         if metric_id is not None:
-            return TelemetryBinding(
-                metric_id=metric_id,
-                presentation_temperature_offset_celsius=(
-                    _motherboard_presentation_temperature_offset(key)
-                ),
-            )
+            return TelemetryBinding(metric_id=metric_id)
     elif hardware.family == "ram" and isinstance(hardware.instance, int):
         if 1 <= hardware.instance <= 8:
-            return TelemetryBinding(
-                metric_id=f"ram_{hardware.instance}_temp_c",
-                presentation_temperature_offset_celsius=(
-                    _ram_presentation_temperature_offset(key)
-                ),
-            )
+            return TelemetryBinding(metric_id=f"ram_{hardware.instance}_temp_c")
     return TelemetryBinding(
         metric_id=None,
         unavailable_reason=(
@@ -369,27 +334,6 @@ def _motherboard_dimm_slot_instance(ancestry: tuple[str, ...]) -> int | None:
     if len(instances) != 1 or not 1 <= instances[0] <= 8:
         return None
     return instances[0]
-
-
-def _motherboard_presentation_temperature_offset(key: SemanticKey) -> float:
-    """Keep the unbacked passive heatsink cooler than its board anchor."""
-
-    if (key.thermal_zone, key.thermal_component) == (
-        "motherboard_passive",
-        "heatsink",
-    ):
-        return -4.0
-    return 0.0
-
-
-def _ram_presentation_temperature_offset(key: SemanticKey) -> float:
-    """Apply approved RAM assembly corrections before the scalar contract."""
-
-    return {
-        ("memory", "dimm_slot"): -8.0,
-        ("ram_small_components", "small_component"): 4.0,
-        ("ram_memory_chips", "memory_chip"): 2.0,
-    }.get((key.thermal_zone, key.thermal_component), 0.0)
 
 
 def _gpu_metric_suffix(key: SemanticKey) -> str | None:

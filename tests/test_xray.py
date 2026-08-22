@@ -204,50 +204,6 @@ def test_xray_reconciles_configured_target_groups_without_persisting_selection(
     assert stage.GetSessionLayer().GetPropertyAtPath(front_binding) is None
 
 
-def test_heatmap_target_override_restores_manual_xray_selection(tmp_path, monkeypatch):
-    from pxr import Usd, UsdGeom
-
-    carb = ModuleType("carb")
-    carb.log_error = lambda _message: None
-    carb.log_warn = lambda _message: None
-    monkeypatch.setitem(sys.modules, "carb", carb)
-    controller = RuntimeController(_write_xray_config(tmp_path))
-    chassis_path = f"{XRAY_CHASSIS_ROOT_PATH}/Panel"
-    fan_path = "/blackwell_rig/fans/p120_01/geo/render/body"
-    groups = (
-        XRayTargetGroupConfig("chassis", "Chassis", (XRAY_CHASSIS_ROOT_PATH,)),
-        XRayTargetGroupConfig("fans", "Fans", ("/blackwell_rig/fans",)),
-    )
-    controller.config = replace(
-        controller.config,
-        chassis_presentation=replace(
-            controller.config.chassis_presentation,
-            xray_target_groups=groups,
-        ),
-    )
-    stage = Usd.Stage.CreateInMemory()
-    UsdGeom.Mesh.Define(stage, chassis_path)
-    UsdGeom.Mesh.Define(stage, fan_path)
-    _install_omni_usd_stage(monkeypatch, stage)
-    material = controller.config.chassis_presentation.materials.xray
-
-    manual = controller.apply_manual_xray_material_in_kit(material, {"chassis"})
-    heatmap = controller.apply_heatmap_xray_override_in_kit()
-
-    assert manual.success and heatmap.success
-    assert controller.xray_target_snapshot().manual_target_ids == {"chassis"}
-    assert controller.xray_target_snapshot().effective_target_ids == {
-        "chassis",
-        "fans",
-    }
-    assert controller.config.chassis_presentation.materials.xray == material
-
-    restored = controller.release_heatmap_xray_override_in_kit()
-
-    assert restored.success
-    assert controller.xray_target_snapshot().effective_target_ids == {"chassis"}
-
-
 def test_streamlines_xray_override_uses_last_applied_ui_material(tmp_path, monkeypatch):
     from pxr import Usd, UsdGeom, UsdShade
 

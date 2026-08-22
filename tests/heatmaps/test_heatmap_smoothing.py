@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from digital_twin_runtime_suite.app.heatmaps.runtime import HeatmapRuntimeMixin
 from digital_twin_runtime_suite.app.heatmaps.smoothing import (
     HEATMAP_PRESENTATION_CADENCE_HZ,
@@ -66,20 +68,16 @@ def test_settled_or_unchanged_targets_emit_no_repeated_parameter_values() -> Non
     assert not smoother.tick(now=2.0)
 
 
-def test_switching_cadence_cancels_the_replaced_scheduler_before_starting_one() -> None:
+def test_runtime_keeps_the_fixed_two_hz_scheduler_contract() -> None:
     runtime = _SchedulerRuntime()
 
     runtime.set_heatmap_presentation_cadence_hz(2)
 
     assert runtime.cadence_hz == 2
-    assert runtime.tasks[0].cancelled
-    assert runtime.scheduler_starts == 1
-    assert len([task for task in runtime.tasks if not task.cancelled]) == 1
-
-    runtime.set_heatmap_presentation_cadence_hz(2)
-
-    assert runtime.scheduler_starts == 1
-    assert len([task for task in runtime.tasks if not task.cancelled]) == 1
+    assert not runtime.tasks[0].cancelled
+    assert runtime.scheduler_starts == 0
+    with pytest.raises(ValueError, match="fixed at 2 Hz"):
+        runtime.set_heatmap_presentation_cadence_hz(5)
 
 
 class _Task:

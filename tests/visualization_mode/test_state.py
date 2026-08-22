@@ -34,13 +34,13 @@ def test_failure_preserves_committed_mode() -> None:
 def test_newer_request_supersedes_and_stale_transition_cannot_commit() -> None:
     state = VisualizationModeState()
     smoke = state.begin(VisualizationMode.SMOKE)
-    heatmap = state.begin(VisualizationMode.HEATMAP)
+    streamlines = state.begin(VisualizationMode.STREAMLINES)
 
-    assert smoke is not None and heatmap is not None
-    assert heatmap.superseded_transition_id == smoke.transition_id
+    assert smoke is not None and streamlines is not None
+    assert streamlines.superseded_transition_id == smoke.transition_id
     assert state.commit(smoke.transition_id) is False
-    assert state.commit(heatmap.transition_id) is True
-    assert state.snapshot.committed is VisualizationMode.HEATMAP
+    assert state.commit(streamlines.transition_id) is True
+    assert state.snapshot.committed is VisualizationMode.STREAMLINES
 
 
 def test_same_request_is_no_op_and_committed_request_cancels_pending_state() -> None:
@@ -60,7 +60,7 @@ def test_cancel_and_reset_clear_pending_state() -> None:
     assert transition is not None
     assert state.cancel(transition.transition_id) is True
     assert state.snapshot.pending is None
-    state.begin(VisualizationMode.HEATMAP)
+    state.begin(VisualizationMode.STREAMLINES_XRAY)
     state.reset()
 
     assert state.snapshot.committed is VisualizationMode.NORMAL

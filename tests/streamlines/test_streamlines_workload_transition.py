@@ -413,7 +413,6 @@ def test_same_healthy_workload_is_a_true_no_op():
         (VisualizationMode.STREAMLINES_XRAY, "streamlines"),
         (VisualizationMode.SMOKE, "flow"),
         (VisualizationMode.NORMAL, "flow"),
-        (VisualizationMode.HEATMAP, "flow"),
     ),
 )
 def test_product_workload_request_routes_only_to_the_active_consumer(
