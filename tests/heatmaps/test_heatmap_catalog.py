@@ -41,6 +41,27 @@ def test_catalog_exposes_all_selectors_and_independent_gpu_scope_membership() ->
         *(target.prim_path for target in housing),
     }
     assert len(catalog.selected_targets(catalog.selector_ids)) == len(catalog.targets)
+    gpu_01_internals = next(
+        selector
+        for selector in catalog.selectors
+        if selector.selector_id == "gpu_01_internals"
+    )
+    gpu_01_housing = next(
+        selector
+        for selector in catalog.selectors
+        if selector.selector_id == "gpu_01_housing"
+    )
+
+    assert (
+        gpu_01_internals.label,
+        gpu_01_internals.parent_id,
+        gpu_01_internals.parent_label,
+    ) == ("Internals", "gpu_01", "GPU 01")
+    assert (
+        gpu_01_housing.label,
+        gpu_01_housing.parent_id,
+        gpu_01_housing.parent_label,
+    ) == ("Housing", "gpu_01", "GPU 01")
 
 
 def test_catalog_keeps_motherboard_dimms_individual_and_physical_ram_shared() -> None:

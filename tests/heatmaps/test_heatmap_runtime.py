@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from digital_twin_runtime_suite.app.heatmaps import runtime
 from digital_twin_runtime_suite.app.heatmaps.runtime import (
     HeatmapRuntimeMixin,
     HeatmapRuntimeResult,
@@ -134,6 +135,76 @@ def test_failed_active_apply_restores_old_presentation_and_keeps_old_config(
     assert controller.heatmap_applied_settings_snapshot() == previous
     assert controller._heatmap_settings_store.load() == previous
     assert activated == [candidate, previous]
+
+
+def test_failed_active_apply_reports_when_previous_rollback_also_fails(
+    tmp_path,
+) -> None:
+    controller = _Controller()
+    initialise_heatmap_runtime(controller, tmp_path / "runtime.toml")
+    controller._heatmap_catalog = _Catalog()
+    previous = HeatmapSettings(isolation_selectors=("motherboard",))
+    candidate = HeatmapSettings(isolation_selectors=("ram",))
+    controller._heatmap_settings_store.save(previous)
+    controller._heatmap_applied_settings = previous
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_presentation = _ActivePresentation()
+    controller._heatmap_isolation = _Isolation()
+
+    controller._prepare_plan = lambda settings: SimpleNamespace(settings=settings)
+    controller._activate_plan = lambda _stage, plan: HeatmapRuntimeResult(
+        False,
+        False,
+        f"{plan.settings.isolation_selectors[0]} activation failed",
+    )
+
+    result = controller.apply_heatmap_settings_in_kit(candidate)
+
+    assert not result.success
+    assert "Candidate apply failed" in result.message
+    assert "ram activation failed" in result.message
+    assert "previous presentation rollback failed" in result.message
+    assert "motherboard activation failed" in result.message
+    assert controller.heatmap_applied_settings_snapshot() == previous
+    assert controller._heatmap_settings_store.load() == previous
+
+
+def test_stage_preparation_reloads_persisted_heatmap_settings(
+    tmp_path, monkeypatch
+) -> None:
+    controller = _Controller()
+    initialise_heatmap_runtime(controller, tmp_path / "runtime.toml")
+    persisted = HeatmapSettings(isolation_selectors=("ram",))
+    controller._heatmap_settings_store.save(persisted)
+    controller._heatmap_applied_settings = HeatmapSettings(
+        isolation_selectors=("motherboard",)
+    )
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_isolation = _StageOwner()
+    controller._heatmap_presentation = _StageOwner()
+    catalog = SimpleNamespace(registry=_Registry())
+    monkeypatch.setattr(
+        runtime, "build_heatmap_catalog", lambda *_args, **_kwargs: catalog
+    )
+
+    prepared = controller.prepare_heatmaps_for_open_stage()
+
+    assert prepared is catalog
+    assert controller.heatmap_applied_settings_snapshot() == persisted
+
+
+class _StageOwner:
+    active = False
+
+    @staticmethod
+    def discard_stale_stage(_stage) -> None:
+        return None
+
+
+class _Registry:
+    @staticmethod
+    def resolve_telemetry(_snapshot):
+        return None
 
 
 class _ActivePresentation:

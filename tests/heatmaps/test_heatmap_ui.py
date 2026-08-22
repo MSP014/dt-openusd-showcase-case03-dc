@@ -42,10 +42,40 @@ def test_heatmap_sections_start_collapsed_and_apply_preserves_the_draft() -> Non
     assert 'with ui.CollapsableFrame("Isolation", collapsed=True, height=0)' in source
     assert 'with ui.CollapsableFrame("Calibration", collapsed=True, height=0)' in source
     assert 'with ui.CollapsableFrame("Color Scale", collapsed=True, height=0)' in source
+    assert 'with ui.CollapsableFrame("Clamps", collapsed=True, height=0)' in source
     assert "with ui.VStack(spacing=4, height=0):" in source
     assert "height=0," in source
     assert "self._refresh_heatmap_settings_controls()" not in apply_body
     assert "_queue_heatmap_settings_refresh" not in source
+
+
+def test_heatmap_controls_follow_catalog_readiness_and_gpu_hierarchy() -> None:
+    source = _ui_path().read_text(encoding="utf-8")
+
+    assert "catalog is not None and catalog.ready" in source
+    assert "self._heatmap_test_button.enabled = False" in source
+    assert "button.enabled = ready" in source
+    assert '"Heatmap Settings will load after the production stage is ready."' in source
+    assert "selector.parent_label" in source
+    assert "ui.Spacer(width=indent)" in source
+
+
+def test_color_scale_ui_uses_hex_draft_feedback_without_runtime_callbacks() -> None:
+    source = _ui_path().read_text(encoding="utf-8")
+    feedback_body = source.split(
+        "    def _refresh_heatmap_color_scale_draft",
+        1,
+    )[
+        1
+    ].split("    def _heatmap_color_scale_draft_feedback", 1)[0]
+
+    assert '"hex": ui.SimpleStringModel' in source
+    assert 'ui.StringField(model=models["hex"]' in source
+    assert "ui.Rectangle(" in source
+    assert "with ui.HStack(height=20, spacing=8):" in source
+    assert "color_scale_settings_from_draft" in source
+    assert "RGB " not in source
+    assert "_controller" not in feedback_body
 
 
 def _ui_path() -> Path:

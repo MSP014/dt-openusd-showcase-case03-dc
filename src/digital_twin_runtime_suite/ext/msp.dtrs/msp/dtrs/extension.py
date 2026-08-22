@@ -415,6 +415,7 @@ class DigitalTwinRuntimeSuiteExtension(
         self._telemetry_config_path = telemetry_config_path
         telemetry_config = TelemetryConfig.load(telemetry_config_path)
         self._telemetry_provider = SyntheticTelemetryProvider(telemetry_config)
+        self._controller.configure_heatmap_telemetry_config(telemetry_config)
         self._controller.set_workload_source(lambda: self._telemetry_provider.mode)
         self._telemetry_latch = SnapshotLatch()
         self._motion_controller = MultiRotationMotionController(

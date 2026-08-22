@@ -6,7 +6,7 @@ import math
 import os
 import tempfile
 import tomllib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
@@ -137,16 +137,6 @@ class HeatmapSettings:
                 raise ValueError("Heatmap calibration id must not be empty.")
             rule.validate()
         self.color_scale.validate()
-
-    def with_calibration_defaults(
-        self,
-        defaults: Mapping[str, CalibrationSettings],
-    ) -> "HeatmapSettings":
-        """Fill stage-discovered rules while preserving every persisted override."""
-
-        merged = dict(defaults)
-        merged.update(self.calibration)
-        return replace(self, calibration=merged)
 
 
 def default_heatmap_settings() -> HeatmapSettings:

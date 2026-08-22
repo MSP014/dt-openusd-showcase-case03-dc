@@ -237,6 +237,10 @@ def _visibility_plan(
     plan: dict[str, str] = {}
     for chain in chains:
         for prim in chain[1:]:
+            # Rack-only geometry may carry thermal metadata while its authored
+            # server-view visibility is invisible. Isolation must not reveal it.
+            if UsdGeom.Imageable(prim).ComputeVisibility() == UsdGeom.Tokens.invisible:
+                continue
             plan[str(prim.GetPath())] = UsdGeom.Tokens.inherited
         for parent in chain[:-1]:
             for sibling in parent.GetChildren():

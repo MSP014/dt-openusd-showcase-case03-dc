@@ -23,6 +23,7 @@ class IsolationSelector:
     selector_id: str
     label: str
     parent_id: str | None = None
+    parent_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -138,12 +139,42 @@ def _selectors() -> tuple[IsolationSelector, ...]:
     return (
         IsolationSelector("motherboard", "Motherboard"),
         IsolationSelector("connectx_7", "ConnectX-7"),
-        IsolationSelector("gpu_01_internals", "GPU 01 / Internals"),
-        IsolationSelector("gpu_01_housing", "GPU 01 / Housing"),
-        IsolationSelector("gpu_02_internals", "GPU 02 / Internals"),
-        IsolationSelector("gpu_02_housing", "GPU 02 / Housing"),
-        IsolationSelector("gpu_03_internals", "GPU 03 / Internals"),
-        IsolationSelector("gpu_03_housing", "GPU 03 / Housing"),
+        IsolationSelector(
+            "gpu_01_internals",
+            "Internals",
+            parent_id="gpu_01",
+            parent_label="GPU 01",
+        ),
+        IsolationSelector(
+            "gpu_01_housing",
+            "Housing",
+            parent_id="gpu_01",
+            parent_label="GPU 01",
+        ),
+        IsolationSelector(
+            "gpu_02_internals",
+            "Internals",
+            parent_id="gpu_02",
+            parent_label="GPU 02",
+        ),
+        IsolationSelector(
+            "gpu_02_housing",
+            "Housing",
+            parent_id="gpu_02",
+            parent_label="GPU 02",
+        ),
+        IsolationSelector(
+            "gpu_03_internals",
+            "Internals",
+            parent_id="gpu_03",
+            parent_label="GPU 03",
+        ),
+        IsolationSelector(
+            "gpu_03_housing",
+            "Housing",
+            parent_id="gpu_03",
+            parent_label="GPU 03",
+        ),
         IsolationSelector("cpu_cooler", "CPU Cooler"),
         IsolationSelector("ram", "RAM"),
         IsolationSelector("psu", "PSU"),
