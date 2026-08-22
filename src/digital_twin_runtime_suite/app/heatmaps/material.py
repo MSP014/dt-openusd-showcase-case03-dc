@@ -5,10 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .scalar import (
-    THERMAL_WEIGHT_REMAP_COLD_BIASED,
-    THERMAL_WEIGHT_REMAP_LINEAR,
-)
+from .palette import compact_active_stops
 
 
 @dataclass(frozen=True)
@@ -20,9 +17,7 @@ class HeatmapMaterialTarget:
     thermal_weights: tuple[float, ...]
     telemetry_celsius: float
     delta_profile: object
-    thermal_weight_remap: str = THERMAL_WEIGHT_REMAP_LINEAR
-    thermal_weight_minimum: float = 0.0
-    thermal_weight_maximum: float = 1.0
+    temperature_offset_celsius: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -66,7 +61,7 @@ class _TargetPresentation:
 class HeatmapMaterialPresenter:
     """Own grouped Session bindings and restore only its own opinions."""
 
-    MATERIAL_ROOT = "/DTRS_Runtime/Heatmaps/Gpu03"
+    MATERIAL_ROOT = "/DTRS_Runtime/Heatmaps"
 
     def __init__(self, *, material_root: str | None = None) -> None:
         self._material_root = material_root or self.MATERIAL_ROOT
@@ -240,6 +235,11 @@ class HeatmapMaterialPresenter:
             stage.SetEditTarget(previous_target)
         return self._result(True, "Heatmap appearance restored.")
 
+    def discard_stale_stage(self, stage) -> None:
+        """Forget old Session ownership after a replacement stage becomes current."""
+
+        self._discard_stale_state(stage)
+
     def _create_target(
         self,
         stage,
@@ -313,10 +313,10 @@ class HeatmapMaterialPresenter:
             / "msp.dtrs"
             / "data"
             / "materials"
-            / "DTRS_Heatmap_VerticalSlice.mdl"
+            / "DTRS_Heatmap.mdl"
         )
         shader.SetSourceAsset(Sdf.AssetPath(str(mdl_path)), "mdl")
-        shader.SetSourceAssetSubIdentifier("DTRS_Heatmap_VerticalSlice", "mdl")
+        shader.SetSourceAssetSubIdentifier("DTRS_Heatmap", "mdl")
         shader.CreateOutput("out", Sdf.ValueTypeNames.Token).SetRenderType("material")
         material.CreateSurfaceOutput("mdl").ConnectToSource(
             shader.ConnectableAPI(),
@@ -351,6 +351,7 @@ class HeatmapMaterialPresenter:
             ("telemetry_celsius", target.telemetry_celsius),
             ("delta_minimum_celsius", target.delta_profile.minimum_celsius),
             ("delta_maximum_celsius", target.delta_profile.maximum_celsius),
+            ("temperature_offset_celsius", target.temperature_offset_celsius),
         ):
             self._set_shader_input(
                 shader,
@@ -375,28 +376,30 @@ class HeatmapMaterialPresenter:
             float(scale.maximum),
             structural=True,
         )
+        active_stops = compact_active_stops(palette)
         self._set_shader_input(
             shader,
-            "thermal_weight_minimum",
+            "minimum_clamp_scalar",
             Sdf.ValueTypeNames.Float,
-            float(target.thermal_weight_minimum),
+            float(palette.minimum_clamp_percent / 100.0),
             structural=True,
         )
         self._set_shader_input(
             shader,
-            "thermal_weight_maximum",
+            "maximum_clamp_scalar",
             Sdf.ValueTypeNames.Float,
-            float(target.thermal_weight_maximum),
+            float(palette.maximum_clamp_percent / 100.0),
             structural=True,
         )
         self._set_shader_input(
             shader,
-            "thermal_weight_remap_mode",
-            Sdf.ValueTypeNames.Float,
-            _thermal_weight_remap_mode(target.thermal_weight_remap),
+            "active_stop_count",
+            Sdf.ValueTypeNames.Int,
+            len(active_stops),
             structural=True,
         )
-        for index, stop in enumerate(palette.stops):
+        padded_stops = (*active_stops, *((active_stops[-1],) * (6 - len(active_stops))))
+        for index, stop in enumerate(padded_stops):
             self._set_shader_input(
                 shader,
                 f"stop_{index}",
@@ -581,13 +584,3 @@ def _targets_by_material_key(
     return {
         material_key: tuple(group) for material_key, group in sorted(grouped.items())
     }
-
-
-def _thermal_weight_remap_mode(remap: str) -> float:
-    """Translate the explicit scalar policy into the MDL's stable input."""
-
-    if remap == THERMAL_WEIGHT_REMAP_LINEAR:
-        return 0.0
-    if remap == THERMAL_WEIGHT_REMAP_COLD_BIASED:
-        return 1.0
-    raise ValueError(f"Unknown Heatmap thermal-weight remap: {remap}.")

@@ -60,27 +60,6 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             self._active_xray_material_config = xray
         return result
 
-    def apply_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
-        """Temporarily expose every configured X-Ray group for Heatmap preview."""
-
-        return self._apply_xray_override_in_kit("heatmap_preview")
-
-    def release_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
-        """Release Heatmap targets and restore the preserved manual selection."""
-
-        return self._release_xray_override_in_kit(
-            "heatmap_preview",
-            "Heatmap",
-        )
-
-    def restore_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
-        """Reapply the existing Heatmap preview after a later mode step fails."""
-
-        return self._restore_xray_override_in_kit(
-            "heatmap_preview",
-            "Heatmap",
-        )
-
     def apply_streamlines_xray_override_in_kit(self) -> XRayApplyResult:
         """Overlay configured X-Ray targets while cached Streamlines play."""
 

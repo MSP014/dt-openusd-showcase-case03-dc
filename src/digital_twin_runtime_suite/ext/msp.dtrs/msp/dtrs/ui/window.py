@@ -167,6 +167,7 @@ class DtrsWindowUiMixin:
                 self._build_config_section(
                     "Heatmaps",
                     self._build_heatmaps_controls,
+                    collapsed=True,
                 )
                 self._build_config_section(
                     "Streamlines",

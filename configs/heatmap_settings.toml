@@ -1,0 +1,344 @@
+version = 1
+
+[isolation]
+selectors = ["motherboard", "ram"]
+
+[color_scale]
+minimum_clamp_percent = 0
+maximum_clamp_percent = 100
+
+[[color_scale.stops]]
+id = "blue"
+enabled = true
+position_percent = 0
+color = [0, 0, 1]
+
+[[color_scale.stops]]
+id = "cyan"
+enabled = false
+position_percent = 20
+color = [0, 1, 1]
+
+[[color_scale.stops]]
+id = "green"
+enabled = true
+position_percent = 40
+color = [0, 1, 0]
+
+[[color_scale.stops]]
+id = "yellow"
+enabled = true
+position_percent = 60
+color = [1, 1, 0]
+
+[[color_scale.stops]]
+id = "orange"
+enabled = true
+position_percent = 80
+color = [1, 0.5, 0]
+
+[[color_scale.stops]]
+id = "red"
+enabled = true
+position_percent = 100
+color = [1, 0, 0]
+
+[calibration."cpu/cpu_cooler_coldplate/coldplate"]
+delta_celsius = 10
+temperature_offset_celsius = 2
+
+[calibration."cpu/cpu_cooler_heatpipes/base_plate"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."cpu/cpu_cooler_heatpipes/heatpipe"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."cpu/cpu_cooler_mount/mount_fastener"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."cpu/cpu_cooler_mount/mounting_bracket"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."cpu/cpu_cooler_radiator_fins/radiator_fin"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/board/pcb"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/gpu_body/plug"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/gpu_body/shroud"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/gpu_cooling/blower"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/gpu_core/gb203_die"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/vram/memory_chip"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/vrm/capacitor"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_01/vrm/choke"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/board/pcb"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/gpu_body/plug"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/gpu_body/shroud"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/gpu_cooling/blower"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/gpu_core/gb203_die"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/vram/memory_chip"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/vrm/capacitor"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_02/vrm/choke"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/board/pcb"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/gpu_body/plug"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/gpu_body/shroud"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/gpu_cooling/blower"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/gpu_core/gb203_die"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/vram/memory_chip"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/vrm/capacitor"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."gpu_03/vrm/choke"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/cpu/cpu_package"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/cpu/socket"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/dimm_01/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_02/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_03/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_04/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_05/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_06/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_07/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/dimm_08/memory/dimm_slot"]
+delta_celsius = 10
+temperature_offset_celsius = -8
+
+[calibration."motherboard/mb_base/passive_geometry"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_capacitors/capacitor"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_chips/small_ic"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_chokes/choke"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_nvme/nvme_heatsink_a"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_nvme/nvme_heatsink_b"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_pcie_gpu/pcie_gpu_slot"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/mb_resistors/small_ic"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/motherboard_passive/heatsink"]
+delta_celsius = 10
+temperature_offset_celsius = -4
+
+[calibration."motherboard/motherboard_power/power_connector"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/vrm_east/vrm_heatsink"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."motherboard/vrm_west/vrm_heatsink"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_board/pcb"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_bracket/pcie_bracket"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_compute/asic_heatsink"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_cooling/osfp_heatsink"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_cpu/mt2910"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_io/osfp_module"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_misc/small_electronics"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."nic/nic_power/vrm_heatsink"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_chokes/choke"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_coils/coil"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_main_capacitors/capacitor"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_main_pcb/pcb"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_main_radiator/radiator"]
+delta_celsius = 10
+temperature_offset_celsius = 16
+
+[calibration."psu/psu_main_transformer/transformer_core"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_main_transformer/transformer_winding"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_secondary_transformer/transformer_coil"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_secondary_transformer/transformer_core"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_small_capacitors/small_capacitor"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."psu/psu_small_radiator/radiator"]
+delta_celsius = 10
+temperature_offset_celsius = 4
+
+[calibration."ram/ram_clock_driver/clock_driver"]
+delta_celsius = 4
+temperature_offset_celsius = 4
+
+[calibration."ram/ram_memory_chips/memory_chip"]
+delta_celsius = 5
+temperature_offset_celsius = 2
+
+[calibration."ram/ram_pcb/pcb"]
+delta_celsius = 10
+temperature_offset_celsius = 0
+
+[calibration."ram/ram_small_components/small_component"]
+delta_celsius = 10
+temperature_offset_celsius = 4

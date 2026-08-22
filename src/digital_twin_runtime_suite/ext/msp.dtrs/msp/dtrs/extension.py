@@ -16,7 +16,7 @@ import omni.ui as ui
 from msp.dtrs.ui.appearance import AppearanceUiMixin
 from msp.dtrs.ui.configuration import ConfigurationUiMixin
 from msp.dtrs.ui.controls import ControlsUiMixin
-from msp.dtrs.ui.heatmaps import HeatmapsUiMixin, heatmap_test_action_label
+from msp.dtrs.ui.heatmaps import HeatmapsUiMixin
 from msp.dtrs.ui.streamlines import StreamlinesUiMixin
 from msp.dtrs.ui.telemetry import TelemetryUiMixin
 from msp.dtrs.ui.view_state import ViewStateUiMixin
@@ -102,16 +102,17 @@ class DigitalTwinRuntimeSuiteExtension(
         self._airflow_detach_requested = False
         self._airflow_cache_selector_label = None
         self._streamlines_status_label = None
-        self._heatmap_test_isolation_button = None
-        self._heatmap_confirm_button = None
-        self._heatmap_failure_button = None
+        self._heatmap_test_button = None
+        self._heatmap_settings_frame = None
+        self._heatmap_isolation_models = {}
+        self._heatmap_calibration_models = {}
+        self._heatmap_color_stop_models = {}
+        self._heatmap_color_stops = ()
+        self._heatmap_minimum_clamp_model = None
+        self._heatmap_maximum_clamp_model = None
         self._streamlines_cache_build_button = None
         self._streamlines_cache_load_button = None
         self._validation_workflow = None
-        self._heatmap_binding_workflow = None
-        self._heatmap_vertical_slice_workflow = None
-        self._heatmap_full_server_workflow = None
-        self._heatmap_motherboard_workflow = None
         self._reuse_vti_receipts_model = None
         self._reuse_streamlines_receipts_model = None
         self._validation_receipt_status_label = None
@@ -252,49 +253,6 @@ class DigitalTwinRuntimeSuiteExtension(
             progress_reporter=self._observability_reporter,
         )
         self._validation_workflow.load_checkpoint()
-        from msp.dtrs.workflows.heatmap_binding_acceptance import (
-            HeatmapBindingAcceptanceWorkflow,
-        )
-
-        self._heatmap_binding_workflow = HeatmapBindingAcceptanceWorkflow(
-            self._controller,
-            log_warning=carb.log_warn,
-            append_local_timestamp=_with_dtrs_local_timestamp,
-        )
-        from msp.dtrs.workflows.heatmap_vertical_slice_acceptance import (
-            HeatmapVerticalSliceAcceptanceWorkflow,
-        )
-
-        self._heatmap_vertical_slice_workflow = HeatmapVerticalSliceAcceptanceWorkflow(
-            self._controller,
-            log_warning=carb.log_warn,
-            append_local_timestamp=_with_dtrs_local_timestamp,
-            set_manual_verdict_enabled=self._set_heatmap_manual_verdict_enabled,
-            restoration_action_label=lambda: heatmap_test_action_label(True),
-        )
-        from msp.dtrs.workflows.heatmap_full_server_acceptance import (
-            HeatmapFullServerAcceptanceWorkflow,
-        )
-
-        self._heatmap_full_server_workflow = HeatmapFullServerAcceptanceWorkflow(
-            self._controller,
-            log_warning=carb.log_warn,
-            append_local_timestamp=_with_dtrs_local_timestamp,
-            set_manual_verdict_enabled=self._set_heatmap_manual_verdict_enabled,
-            restoration_action_label=lambda: heatmap_test_action_label(True),
-        )
-        from msp.dtrs.workflows.heatmap_board_ram_acceptance import (
-            HeatmapMotherboardAcceptanceWorkflow,
-        )
-
-        self._heatmap_motherboard_workflow = HeatmapMotherboardAcceptanceWorkflow(
-            self._controller,
-            log_warning=carb.log_warn,
-            append_local_timestamp=_with_dtrs_local_timestamp,
-            set_manual_verdict_enabled=self._set_heatmap_manual_verdict_enabled,
-            set_test_enabled=self._set_heatmap_test_isolation_button_state,
-            restoration_action_label=lambda: heatmap_test_action_label(True),
-        )
         from msp.dtrs.workflows.visualization import VisualizationWorkflow
 
         self._visualization_workflow = VisualizationWorkflow(
@@ -343,34 +301,6 @@ class DigitalTwinRuntimeSuiteExtension(
         if self._controller:
             if self._validation_workflow:
                 self._validation_workflow.cancel()
-            heatmap_binding_workflow = getattr(
-                self,
-                "_heatmap_binding_workflow",
-                None,
-            )
-            if heatmap_binding_workflow:
-                heatmap_binding_workflow.cancel()
-            heatmap_vertical_slice_workflow = getattr(
-                self,
-                "_heatmap_vertical_slice_workflow",
-                None,
-            )
-            if heatmap_vertical_slice_workflow:
-                heatmap_vertical_slice_workflow.cancel()
-            heatmap_full_server_workflow = getattr(
-                self,
-                "_heatmap_full_server_workflow",
-                None,
-            )
-            if heatmap_full_server_workflow:
-                heatmap_full_server_workflow.cancel()
-            heatmap_motherboard_workflow = getattr(
-                self,
-                "_heatmap_motherboard_workflow",
-                None,
-            )
-            if heatmap_motherboard_workflow:
-                heatmap_motherboard_workflow.cancel()
             if self._visualization_workflow:
                 self._visualization_workflow.cancel()
             if self._streamlines_workflow:
@@ -403,17 +333,6 @@ class DigitalTwinRuntimeSuiteExtension(
                     )
             except Exception as error:  # noqa: BLE001 - shutdown must continue.
                 carb.log_error(f"DTRS Streamlines shutdown cleanup failed: {error}")
-            try:
-                heatmaps_cleanup = (
-                    self._controller.clear_heatmap_full_server_test_in_kit()
-                )
-                if not heatmaps_cleanup.success:
-                    carb.log_error(
-                        "DTRS HEATMAPS | SHUTDOWN_CLEANUP | FAIL\n"
-                        f"result={heatmaps_cleanup.message}"
-                    )
-            except Exception as error:  # noqa: BLE001 - shutdown must continue.
-                carb.log_error(f"DTRS Heatmaps shutdown cleanup failed: {error}")
             try:
                 self._controller.clear_xray_material_in_kit()
             except RuntimeError as error:

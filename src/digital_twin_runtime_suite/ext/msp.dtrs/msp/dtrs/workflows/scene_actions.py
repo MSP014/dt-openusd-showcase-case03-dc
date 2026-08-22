@@ -28,15 +28,6 @@ class SceneActionsWorkflowMixin:
 
     async def _reload_config_and_stage(self) -> None:
         try:
-            heatmaps_cleanup = self._controller.clear_heatmap_full_server_test_in_kit()
-        except RuntimeError as error:
-            self._set_status(f"Heatmaps cleanup before Reload Config failed: {error}")
-            return
-        if not heatmaps_cleanup.success:
-            self._set_status(heatmaps_cleanup.message)
-            return
-        self._reset_heatmap_test_isolation_control()
-        try:
             cleanup = self._controller.clear_xray_material_in_kit()
         except RuntimeError as error:
             self._set_status(f"X-Ray cleanup before Reload Config failed: {error}")
@@ -266,6 +257,20 @@ class SceneActionsWorkflowMixin:
         )
         if result.success:
             self._set_lighting_status(self._lighting_status_from_load(result.message))
+            prepare_heatmaps = getattr(
+                self._controller,
+                "prepare_heatmaps_for_open_stage",
+                None,
+            )
+            if prepare_heatmaps is not None:
+                prepare_heatmaps()
+            refresh_heatmap_controls = getattr(
+                self,
+                "_refresh_heatmap_settings_controls",
+                None,
+            )
+            if refresh_heatmap_controls is not None:
+                refresh_heatmap_controls()
         return result
 
     async def _attach_airflow(self) -> None:

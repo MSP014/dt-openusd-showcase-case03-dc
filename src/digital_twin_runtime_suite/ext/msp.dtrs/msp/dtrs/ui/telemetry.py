@@ -409,17 +409,6 @@ class TelemetryUiMixin:
                 )
                 if refresh_heatmap_telemetry is not None:
                     refresh_heatmap_telemetry(self._telemetry_provider.latest_snapshot)
-            workflow = getattr(self, "_heatmap_motherboard_workflow", None)
-            if workflow is None or not workflow.active:
-                workflow = getattr(self, "_heatmap_full_server_workflow", None)
-            if workflow is None or not workflow.active:
-                workflow = getattr(self, "_heatmap_vertical_slice_workflow", None)
-            if workflow is None or not workflow.active:
-                workflow = getattr(self, "_heatmap_binding_workflow", None)
-            if workflow is not None:
-                workflow.observe_telemetry_snapshot(
-                    self._telemetry_provider.latest_snapshot
-                )
             self._log_workload_cache_mapping(workload_mode)
             self._validation_workflow.schedule_current_streamlines_cache_validation()
             self._refresh_airflow_cache_selector_label()
@@ -537,16 +526,6 @@ class TelemetryUiMixin:
                         displayed,
                         now,
                     )
-                workflow = getattr(self, "_heatmap_motherboard_workflow", None)
-                if workflow is None or not workflow.active:
-                    workflow = getattr(self, "_heatmap_full_server_workflow", None)
-                if workflow is None or not workflow.active:
-                    workflow = getattr(self, "_heatmap_vertical_slice_workflow", None)
-                if workflow is None or not workflow.active:
-                    workflow = getattr(self, "_heatmap_binding_workflow", None)
-                if workflow is not None:
-                    workflow.observe_telemetry_snapshot(latest)
-
                 if now >= self._next_telemetry_ui_update:
                     self._update_telemetry_labels(displayed)
                     self._update_airflow_temporal_validation_status()

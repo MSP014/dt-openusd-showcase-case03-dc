@@ -1,4 +1,4 @@
-"""Pure Heatmap thermal math, provider-derived scale, and fixed palette."""
+"""Pure Heatmap scalar calculation and semantic-group spatial normalization."""
 
 from __future__ import annotations
 
@@ -7,90 +7,42 @@ from math import isfinite
 from types import MappingProxyType
 from typing import Mapping
 
-THERMAL_WEIGHT_REMAP_LINEAR = "linear"
-THERMAL_WEIGHT_REMAP_COLD_BIASED = "cold_biased"
-_COLD_BIASED_WEIGHT_PIVOT = 0.75
-
 
 @dataclass(frozen=True)
 class CelsiusScale:
-    """One absolute Celsius range shared by the resolved DTRS server."""
+    """One absolute Celsius range shared by every active Heatmap target."""
 
     minimum: float
     maximum: float
 
     def normalize(self, temperature_celsius: float) -> float:
-        """Clamp one derived temperature into the fixed server-wide scale."""
+        """Clamp one displayed Celsius value into the global server scale."""
 
         if self.maximum <= self.minimum:
             raise ValueError("Heatmap Celsius scale must have a positive span.")
-        normalized = (temperature_celsius - self.minimum) / (
-            self.maximum - self.minimum
-        )
-        return min(1.0, max(0.0, normalized))
-
-
-@dataclass(frozen=True)
-class PaletteStop:
-    """One source-controlled colour point in the fixed full-spectrum ramp."""
-
-    position: float
-    color: tuple[float, float, float]
-
-
-@dataclass(frozen=True)
-class HeatmapPalette:
-    """Absolute scalar-to-colour mapping independent of thermal semantics."""
-
-    stops: tuple[PaletteStop, ...]
-
-    def color_at(self, normalized_scalar: float) -> tuple[float, float, float]:
-        """Interpolate the fixed ramp after scalar clamping."""
-
-        scalar = min(1.0, max(0.0, normalized_scalar))
-        for lower, upper in zip(self.stops, self.stops[1:]):
-            if scalar <= upper.position:
-                span = upper.position - lower.position
-                factor = 0.0 if span <= 0.0 else (scalar - lower.position) / span
-                return tuple(
-                    lower.color[index]
-                    + (upper.color[index] - lower.color[index]) * factor
-                    for index in range(3)
-                )
-        return self.stops[-1].color
-
-
-FULL_SPECTRUM_HEATMAP_PALETTE = HeatmapPalette(
-    (
-        PaletteStop(0.0, (0.29, 0.0, 0.51)),
-        PaletteStop(1.0 / 6.0, (0.0, 0.0, 1.0)),
-        PaletteStop(2.0 / 6.0, (0.0, 1.0, 1.0)),
-        PaletteStop(3.0 / 6.0, (0.0, 1.0, 0.0)),
-        PaletteStop(4.0 / 6.0, (1.0, 1.0, 0.0)),
-        PaletteStop(5.0 / 6.0, (1.0, 0.5, 0.0)),
-        PaletteStop(1.0, (1.0, 0.0, 0.0)),
-    )
-)
+        scalar = (temperature_celsius - self.minimum) / (self.maximum - self.minimum)
+        return min(1.0, max(0.0, scalar))
 
 
 @dataclass(frozen=True)
 class DeltaProfile:
-    """One semantic spatial offset profile measured in degrees Celsius."""
+    """One authored-spatial Celsius interval applied directly to thermal weight."""
 
     minimum_celsius: float
     maximum_celsius: float
 
     def __post_init__(self) -> None:
-        """Reject reversed spatial temperature intervals."""
+        """Reject reversed or non-finite runtime spatial temperature intervals."""
 
-        if self.minimum_celsius > self.maximum_celsius:
-            raise ValueError("minimum_celsius must not exceed maximum_celsius.")
+        if not (
+            isfinite(self.minimum_celsius)
+            and isfinite(self.maximum_celsius)
+            and self.minimum_celsius <= self.maximum_celsius
+        ):
+            raise ValueError("Heatmap Delta endpoints must be finite and ordered.")
 
 
-DEFAULT_HEATMAP_DELTA_PROFILE = DeltaProfile(
-    minimum_celsius=-10.0,
-    maximum_celsius=10.0,
-)
+DEFAULT_HEATMAP_DELTA_PROFILE = DeltaProfile(-10.0, 10.0)
 
 
 @dataclass(frozen=True)
@@ -105,7 +57,7 @@ class ProviderMetricEnvelope:
 
 @dataclass(frozen=True)
 class ThermalScaleResolution:
-    """Fixed scale plus the resolved provider evidence that produced it."""
+    """Fixed scale plus the provider evidence that produced it."""
 
     scale: CelsiusScale
     metric_envelopes: tuple[ProviderMetricEnvelope, ...]
@@ -113,111 +65,88 @@ class ThermalScaleResolution:
 
 @dataclass(frozen=True)
 class ScalarResult:
-    """Derived spatial temperature and presentation scalar for one vertex weight."""
+    """Displayed Celsius and global scalar, deliberately without palette policy."""
 
     available: bool
     display_temperature_celsius: float | None
     normalized_scalar: float | None
-    color: tuple[float, float, float] | None
     quality: str
     reason: str | None = None
 
 
-def _validate_weight_range(weight_minimum: float, weight_maximum: float) -> None:
-    """Reject invalid authored ranges before applying a spatial profile."""
-
-    if not 0.0 <= weight_minimum <= weight_maximum <= 1.0:
-        raise ValueError("Heatmap weight range must stay within [0, 1].")
-
-
-def remap_thermal_weight(
+def evaluate_heatmap_scalar(
+    *,
+    component_telemetry_celsius: float | None,
+    telemetry_quality: str,
     thermal_weight: float,
-    *,
-    weight_minimum: float,
-    weight_maximum: float,
-    mode: str = THERMAL_WEIGHT_REMAP_LINEAR,
-) -> float:
-    """Map authored weight for presentation without modifying its USD value."""
+    delta_profile: DeltaProfile | None,
+    temperature_offset_celsius: float = 0.0,
+    scale: CelsiusScale,
+) -> ScalarResult:
+    """Apply telemetry, offset, and normalized spatial Delta to one vertex."""
 
-    if not 0.0 <= thermal_weight <= 1.0:
-        raise ValueError("thermal_weight must be within [0, 1].")
-    _validate_weight_range(weight_minimum, weight_maximum)
-    if mode == THERMAL_WEIGHT_REMAP_LINEAR or weight_minimum == weight_maximum:
-        return float(thermal_weight)
-    if mode != THERMAL_WEIGHT_REMAP_COLD_BIASED:
-        raise ValueError(f"Unknown Heatmap thermal-weight remap: {mode}.")
-    span = weight_maximum - weight_minimum
-    normalized = min(1.0, max(0.0, (thermal_weight - weight_minimum) / span))
-    if normalized <= _COLD_BIASED_WEIGHT_PIVOT:
-        remapped = 0.5 * (normalized / _COLD_BIASED_WEIGHT_PIVOT)
-    else:
-        remapped = 0.5 + 0.5 * (
-            (normalized - _COLD_BIASED_WEIGHT_PIVOT) / (1.0 - _COLD_BIASED_WEIGHT_PIVOT)
+    if component_telemetry_celsius is None:
+        return ScalarResult(False, None, None, telemetry_quality, "missing telemetry")
+    if delta_profile is None:
+        return ScalarResult(
+            False,
+            None,
+            None,
+            telemetry_quality,
+            "missing delta profile",
         )
-    return weight_minimum + (span * min(1.0, max(0.0, remapped)))
-
-
-def effective_delta_range(
-    profile: DeltaProfile,
-    *,
-    weight_minimum: float,
-    weight_maximum: float,
-) -> tuple[float, float]:
-    """Return the delta interval reachable by the authored weight range."""
-
-    _validate_weight_range(weight_minimum, weight_maximum)
-    span = profile.maximum_celsius - profile.minimum_celsius
-    return (
-        profile.minimum_celsius + span * weight_minimum,
-        profile.minimum_celsius + span * weight_maximum,
+    if not isfinite(component_telemetry_celsius):
+        return ScalarResult(
+            False,
+            None,
+            None,
+            telemetry_quality,
+            "non-finite telemetry",
+        )
+    if not isfinite(temperature_offset_celsius):
+        return ScalarResult(False, None, None, telemetry_quality, "non-finite offset")
+    if not isfinite(thermal_weight) or not 0.0 <= thermal_weight <= 1.0:
+        raise ValueError("thermal_weight must be finite and within [0, 1].")
+    delta = delta_profile.minimum_celsius + (
+        (delta_profile.maximum_celsius - delta_profile.minimum_celsius) * thermal_weight
+    )
+    display_temperature = (
+        component_telemetry_celsius + temperature_offset_celsius + delta
+    )
+    return ScalarResult(
+        True,
+        display_temperature,
+        scale.normalize(display_temperature),
+        telemetry_quality,
     )
 
 
-def recalibrate_effective_delta_span(
-    profile: DeltaProfile,
-    *,
-    weight_minimum: float,
-    weight_maximum: float,
-    effective_span_celsius: float,
-) -> DeltaProfile:
-    """Fit a requested effective span while preserving the current centre."""
+def normalize_thermal_weight_group(
+    weights_by_prim: Mapping[str, tuple[float, ...]],
+) -> Mapping[str, tuple[float, ...]]:
+    """Normalize one semantic component's mesh weights into the full 0..1 range."""
 
-    _validate_weight_range(weight_minimum, weight_maximum)
-    if effective_span_celsius < 0.0:
-        raise ValueError("Heatmap effective delta span must be non-negative.")
-    weight_span = weight_maximum - weight_minimum
-    if weight_span == 0.0:
-        return profile
-    current_low, current_high = effective_delta_range(
-        profile,
-        weight_minimum=weight_minimum,
-        weight_maximum=weight_maximum,
+    values = tuple(weight for weights in weights_by_prim.values() for weight in weights)
+    if not values:
+        raise ValueError("Heatmap thermal-weight group has no values.")
+    if any(not isfinite(weight) or not 0.0 <= weight <= 1.0 for weight in values):
+        raise ValueError("thermal_weight must be finite and within [0, 1].")
+    minimum = min(values)
+    maximum = max(values)
+    if minimum == maximum:
+        return MappingProxyType(
+            {
+                prim_path: tuple(0.5 for _ in weights)
+                for prim_path, weights in weights_by_prim.items()
+            }
+        )
+    span = maximum - minimum
+    return MappingProxyType(
+        {
+            prim_path: tuple((weight - minimum) / span for weight in weights)
+            for prim_path, weights in weights_by_prim.items()
+        }
     )
-    centre = (current_low + current_high) / 2.0
-    slope = effective_span_celsius / weight_span
-    midpoint = (weight_minimum + weight_maximum) / 2.0
-    minimum = centre - slope * midpoint
-    return DeltaProfile(minimum, minimum + slope)
-
-
-def recalibrate_effective_delta_range(
-    *,
-    weight_minimum: float,
-    weight_maximum: float,
-    desired_minimum_celsius: float,
-    desired_maximum_celsius: float,
-) -> DeltaProfile:
-    """Fit raw endpoints so authored weights reach an explicit delta range."""
-
-    _validate_weight_range(weight_minimum, weight_maximum)
-    if desired_minimum_celsius > desired_maximum_celsius:
-        raise ValueError("Heatmap effective delta range is reversed.")
-    weight_span = weight_maximum - weight_minimum
-    if weight_span == 0.0:
-        raise ValueError("Cannot fit a non-flat range to uniform Heatmap weights.")
-    slope = (desired_maximum_celsius - desired_minimum_celsius) / weight_span
-    minimum = desired_minimum_celsius - slope * weight_minimum
-    return DeltaProfile(minimum, minimum + slope)
 
 
 def build_delta_profile_matrix(
@@ -227,7 +156,7 @@ def build_delta_profile_matrix(
     thermal_component: str,
     calibration: DeltaProfile,
 ) -> Mapping[tuple[str, str, str], DeltaProfile]:
-    """Assign one immutable profile to each workload for one semantic role."""
+    """Retain workload-independent calibration evidence for diagnostics."""
 
     return MappingProxyType(
         {
@@ -237,57 +166,10 @@ def build_delta_profile_matrix(
     )
 
 
-def evaluate_heatmap_scalar(
-    *,
-    component_telemetry_celsius: float | None,
-    telemetry_quality: str,
-    thermal_weight: float,
-    delta_profile: DeltaProfile | None,
-    scale: CelsiusScale,
-    thermal_weight_minimum: float = 0.0,
-    thermal_weight_maximum: float = 1.0,
-    thermal_weight_remap: str = THERMAL_WEIGHT_REMAP_LINEAR,
-) -> ScalarResult:
-    """Derive a truthful spatial temperature without telemetry fabrication."""
-
-    if component_telemetry_celsius is None:
-        return ScalarResult(
-            False, None, None, None, telemetry_quality, "missing telemetry"
-        )
-    if delta_profile is None:
-        return ScalarResult(
-            False, None, None, None, telemetry_quality, "missing delta profile"
-        )
-    if not isfinite(component_telemetry_celsius):
-        return ScalarResult(
-            False, None, None, None, telemetry_quality, "non-finite telemetry"
-        )
-    weight = remap_thermal_weight(
-        thermal_weight,
-        weight_minimum=thermal_weight_minimum,
-        weight_maximum=thermal_weight_maximum,
-        mode=thermal_weight_remap,
-    )
-    display_temperature = component_telemetry_celsius + (
-        delta_profile.minimum_celsius
-        + (delta_profile.maximum_celsius - delta_profile.minimum_celsius) * weight
-    )
-    normalized = scale.normalize(display_temperature)
-    return ScalarResult(
-        True,
-        display_temperature,
-        normalized,
-        FULL_SPECTRUM_HEATMAP_PALETTE.color_at(normalized),
-        telemetry_quality,
-    )
-
-
 def _configured_metric_envelope(
     telemetry_config,
     metric_id: str,
 ) -> tuple[float, float]:
-    """Read the resolved configured envelope across provider workloads."""
-
     metrics = [
         mode.numeric[metric_id]
         for mode in telemetry_config.modes.values()
@@ -302,8 +184,6 @@ def _configured_metric_envelope(
 
 
 def _psu_temperature_for_values(telemetry_config, profile, *, source: str) -> float:
-    """Mirror the provider's documented PSU estimate from configured PDU power."""
-
     pdu_value = float(getattr(profile.numeric["pdu_outlet_power_w"], source))
     conversion_loss = pdu_value * (1.0 - telemetry_config.psu_efficiency)
     return min(
@@ -314,8 +194,6 @@ def _psu_temperature_for_values(telemetry_config, profile, *, source: str) -> fl
 
 
 def _psu_temperature_envelope(telemetry_config) -> ProviderMetricEnvelope:
-    """Retain the derived PSU envelope as explicit scale evidence."""
-
     values = [
         _psu_temperature_for_values(telemetry_config, mode, source=source)
         for mode in telemetry_config.modes.values()
@@ -333,7 +211,7 @@ def resolve_server_wide_celsius_scale(
     telemetry_config,
     metric_ids: tuple[str, ...],
 ) -> ThermalScaleResolution:
-    """Derive one scale from the resolved provider envelope, not constants."""
+    """Derive one global Celsius scale from documented provider envelopes."""
 
     envelopes = []
     for metric_id in sorted(set(metric_ids)):
@@ -345,11 +223,11 @@ def resolve_server_wide_celsius_scale(
     if not envelopes:
         raise ValueError("No Heatmap-bound temperature metrics were provided.")
     return ThermalScaleResolution(
-        scale=CelsiusScale(
+        CelsiusScale(
             minimum=min(item.minimum for item in envelopes),
             maximum=max(item.maximum for item in envelopes),
         ),
-        metric_envelopes=tuple(envelopes),
+        tuple(envelopes),
     )
 
 
@@ -358,7 +236,7 @@ def resolve_provider_temperature_profile(
     metric_id: str,
     workload: str,
 ) -> tuple[float, float, float, float]:
-    """Resolve configured or derived provider evidence for one workload."""
+    """Resolve configured or PSU-derived provider evidence for one workload."""
 
     profile = telemetry_config.modes.get(workload)
     if profile is None:

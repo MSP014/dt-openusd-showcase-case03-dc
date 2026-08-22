@@ -186,55 +186,11 @@ class RuntimeController(
         # overlay rather than an owner of somebody else's Session opinion.
         self._xray_session_binding_layer_id: str | None = None
         self._xray_session_binding_snapshots: dict[str, object] = {}
-        # The Heatmap bootstrap writes only temporary Session visibility
-        # opinions. The dedicated mixin restores these snapshots during reload
-        # and shutdown without taking ownership of authored production layers.
-        self._heatmap_test_isolation_session_layer_id: str | None = None
-        self._heatmap_test_isolation_visibility_snapshots: dict[str, object] = {}
-        self._heatmap_test_isolation_created_scope_paths: set[str] = set()
-        self._heatmap_test_isolation_active = False
-        self._heatmap_test_isolation_target_path: str | None = None
-        self._heatmap_semantic_registry = None
-        self._heatmap_current_telemetry_snapshot = None
-        self._heatmap_telemetry_snapshot = None
-        self._heatmap_telemetry_config = None
-        self._heatmap_acceptance_filter_metric_ids: tuple[str, ...] = ()
-        self._heatmap_binding_calibration_active = False
-        self._heatmap_binding_calibration_focus = None
-        self._heatmap_binding_calibration_scope_path: str | None = None
-        self._heatmap_test_presentation_scope_paths: tuple[str, ...] = ()
-        self._heatmap_vertical_slice_contract = None
-        self._heatmap_vertical_slice_state = None
-        self._heatmap_full_server_contract = None
-        self._heatmap_full_server_state = None
-        from digital_twin_runtime_suite.app.heatmaps.smoothing import (
-            HEATMAP_PRESENTATION_CADENCE_HZ,
-            HEATMAP_PRESENTATION_TRANSITION_DURATION_SECONDS,
-            HeatmapPresentationSmoother,
+        from digital_twin_runtime_suite.app.heatmaps.runtime import (
+            initialise_heatmap_runtime,
         )
 
-        self._heatmap_presentation_smoother = HeatmapPresentationSmoother(
-            transition_duration_seconds=(
-                HEATMAP_PRESENTATION_TRANSITION_DURATION_SECONDS
-            )
-        )
-        self._heatmap_presentation_task = None
-        self._heatmap_presentation_scheduler_id = 0
-        self._heatmap_presentation_owner: str | None = None
-        # One package-wide default applies to every Heatmap hardware family.
-        self._heatmap_presentation_cadence_hz = HEATMAP_PRESENTATION_CADENCE_HZ
-        self._heatmap_presentation_scheduler_ticks = 0
-        self._heatmap_presentation_target_changes = 0
-        self._heatmap_presentation_groups_considered = 0
-        self._heatmap_presentation_measurement_start = None
-        from digital_twin_runtime_suite.app.heatmaps.material import (
-            HeatmapMaterialPresenter,
-        )
-
-        self._heatmap_material_presenter = HeatmapMaterialPresenter()
-        self._heatmap_full_server_material_presenter = HeatmapMaterialPresenter(
-            material_root="/DTRS_Runtime/Heatmaps/FullServer"
-        )
+        initialise_heatmap_runtime(self, self._config_path)
         self._xray_baseline_composed_bindings: dict[str, str] = {}
         self._xray_last_lifecycle_diagnostics: list[dict[str, object]] = []
         self._xray_target_state = XRayTargetState()
