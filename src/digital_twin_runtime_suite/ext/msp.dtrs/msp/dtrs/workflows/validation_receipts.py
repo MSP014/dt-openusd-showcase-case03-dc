@@ -164,6 +164,25 @@ class ValidationReceiptWorkflow:
         self.start_background_work()
         self._acceptance_task = asyncio.ensure_future(self.run_acceptance_session1())
 
+    def invalidate_streamlines_receipts_after_cache_rebuild(self) -> None:
+        """Discard cache receipts whose resources were replaced by a build.
+
+        This is invoked only after the cache-set action successfully rebuilt at
+        least one target.  VTI receipts remain valid: their source datasets did
+        not change.
+        """
+
+        self._reset_streamlines_receipt_sweep()
+        self._reset_acceptance_for_fresh_validation()
+        preferences = self._controller.config.validation_receipts
+        if (
+            preferences.reuse_verified_vti_receipts
+            and preferences.reuse_verified_streamlines_cache_receipts
+        ):
+            self.begin_acceptance_session1()
+            return
+        self.start_background_work()
+
     def schedule_current_streamlines_cache_validation(self) -> None:
         """Schedule one cache receipt when the telemetry workload changes."""
 
@@ -194,6 +213,20 @@ class ValidationReceiptWorkflow:
             self._streamlines_receipt_sweep_task = asyncio.ensure_future(
                 self._run_streamlines_receipt_sweep()
             )
+
+    def _reset_streamlines_receipt_sweep(self) -> None:
+        """Cancel stale workflow work before resetting controller receipts."""
+
+        for name in (
+            "_streamlines_cache_validation_task",
+            "_streamlines_receipt_sweep_task",
+        ):
+            task = getattr(self, name)
+            if task is not None and not task.done():
+                task.cancel()
+            setattr(self, name, None)
+        self._streamlines_cache_validation_workload = None
+        self._controller.reset_streamlines_cache_validation_receipts()
 
     def begin_consumer_action(self, mode: VisualizationMode) -> None:
         """Start guidance only for the explicitly selected production mode."""
@@ -290,7 +323,13 @@ class ValidationReceiptWorkflow:
             self._fail("Not all configured VTI preflight receipts were persisted.")
             return
         if coverage["streamlines_total"] != 8 or coverage["streamlines_valid"] != 8:
-            self._fail("Not all configured Streamlines VALID receipts were persisted.")
+            missing = coverage.get("streamlines_missing_or_mismatched", ())
+            detail = ", ".join(missing) if missing else "unknown owner"
+            self._fail(
+                "Streamlines persisted receipts incomplete: "
+                f"valid={coverage['streamlines_valid']}/"
+                f"{coverage['streamlines_total']}; missing_or_mismatched={detail}."
+            )
             return
         self._controller.write_validation_receipt_acceptance_checkpoint(
             {"phase": "AWAITING_RESTART", "baseline_identities": identities}

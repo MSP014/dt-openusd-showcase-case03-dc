@@ -7,12 +7,22 @@ import pytest
 from digital_twin_runtime_suite.app.telemetry.config import TelemetryConfig
 from digital_twin_runtime_suite.app.telemetry.model import METRIC_UNITS
 from digital_twin_runtime_suite.app.telemetry.model import TELEMETRY_GROUPS
+from digital_twin_runtime_suite.app.telemetry.provider import RAM_TEMPERATURE_BIASES
 from digital_twin_runtime_suite.app.telemetry.provider import SnapshotLatch
 from digital_twin_runtime_suite.app.telemetry.provider import SyntheticTelemetryProvider
 
 # isort: on
 
 CONFIG_PATH = Path("configs/telemetry_provider.toml")
+NEW_THERMAL_METRICS = (
+    "motherboard_temp_c",
+    "chipset_temp_c",
+    "vrm_e_temp_c",
+    "vrm_w_temp_c",
+    "nvme_1_temp_c",
+    "nvme_2_temp_c",
+    *(f"ram_{index}_temp_c" for index in range(1, 9)),
+)
 
 
 class AdvancingClock:
@@ -48,6 +58,14 @@ def test_provider_snapshot_has_expected_metrics_units_and_quality():
         unit == "\N{DEGREE SIGN}C"
         for metric_id, unit in METRIC_UNITS.items()
         if "temp" in metric_id
+    )
+    assert all(
+        snapshot.metrics[metric_id].quality == "synthetic"
+        for metric_id in NEW_THERMAL_METRICS
+    )
+    assert all(
+        snapshot.metrics[metric_id].unit == "\N{DEGREE SIGN}C"
+        for metric_id in NEW_THERMAL_METRICS
     )
 
 
@@ -85,6 +103,58 @@ def test_mode_change_can_cross_disjoint_mode_ranges_smoothly():
     idle_maximum = provider.config.modes["Idle"].numeric["cpu_temp_c"].maximum
 
     assert idle_maximum < changed < critical
+
+
+def test_platform_thermal_metrics_rise_with_workload():
+    idle = _provider(seed=23)
+    critical = _provider(seed=23)
+    idle.set_mode("Idle")
+    critical.set_mode("Critical")
+    for _ in range(40):
+        idle_metrics = idle.tick().metrics
+        critical_metrics = critical.tick().metrics
+
+    for metric_id in (
+        "motherboard_temp_c",
+        "chipset_temp_c",
+        "vrm_e_temp_c",
+        "vrm_w_temp_c",
+    ):
+        assert idle_metrics[metric_id].value < critical_metrics[metric_id].value
+
+
+def test_nvme_temperatures_are_similar_independent_and_below_operating_ceiling():
+    provider = _provider(seed=24)
+    provider.set_mode("Critical")
+    for _ in range(40):
+        metrics = provider.tick().metrics
+
+    nvme_values = tuple(metrics[f"nvme_{index}_temp_c"].value for index in range(1, 3))
+    assert all(value < 70.0 for value in nvme_values)
+    assert nvme_values[0] != nvme_values[1]
+    assert abs(nvme_values[0] - nvme_values[1]) < 2.0
+
+
+def test_ram_temperatures_use_the_configured_positional_bias():
+    provider = _provider(seed=25)
+    metrics = provider.latest_snapshot.metrics
+
+    assert RAM_TEMPERATURE_BIASES == {
+        1: -3.0,
+        2: -2.0,
+        3: -1.0,
+        4: 0.8,
+        5: 0.8,
+        6: 0.1,
+        7: -0.4,
+        8: 0.6,
+    }
+    ram_values = tuple(metrics[f"ram_{index}_temp_c"].value for index in range(1, 9))
+    assert all(28.0 <= value <= 70.0 for value in ram_values)
+    assert ram_values[0] < ram_values[1] < ram_values[2]
+    assert ram_values[3] > ram_values[5]
+    assert ram_values[4] > ram_values[5]
+    assert ram_values[6] < ram_values[5]
 
 
 def test_gpu_summary_metrics_are_derived_from_three_gpu_values():

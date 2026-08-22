@@ -43,6 +43,12 @@ class StreamlinesCacheWorkflowMixin:
             )
             if not result.success:
                 raise RuntimeError(result.message)
+            if any(not entry.reused for entry in getattr(result, "results", ())):
+                invalidate_receipts = getattr(
+                    self._validation_workflow,
+                    "invalidate_streamlines_receipts_after_cache_rebuild",
+                )
+                invalidate_receipts()
             ready_entries = (
                 self._controller.streamlines_production_speed_readiness_snapshot()
             )

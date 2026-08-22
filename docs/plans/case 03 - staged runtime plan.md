@@ -684,7 +684,7 @@ govern future work remain in this plan.
 
 
 
-### Stage 10 - Server Heatmap Foundation Slice
+### Stage 10 - Server Heatmap Slice
 
 Checkpoint preflight: before implementation, verify that Stage 9 ends at a
 clean Git checkpoint commit. If it does not, create that checkpoint first.
@@ -790,7 +790,7 @@ Rack and data-hall Heatmap behavior is outside Stage 10.
 
 ### Implementation sequence
 
-#### Phase 10.0 - Asset preflight
+#### Phase 10.0 - Asset preflight ✅
 
 - inspect the production server USD used by DTRS;
 - verify `thermal_zone`, `thermal_component`, `thermal_weight`, and optional
@@ -800,8 +800,16 @@ Rack and data-hall Heatmap behavior is outside Stage 10.
 
 Gate: production USD proves the expected thermal metadata contract.
 
+result=PASS
+thermal_targets=1148
+valid_targets=1148
+malformed_targets=0
+review_targets=0
+thermal_weight_range=[0, 1]
+xray_overlaps=42
 
-#### Phase 10.1 - Discovery and telemetry binding
+
+#### Phase 10.1 - Discovery and telemetry binding ✅
 
 - create a reusable semantic registry of Heatmap-capable primitives;
 - discover targets from thermal metadata rather than hard-coded mesh paths
@@ -819,7 +827,7 @@ presentation policy`
 without rendering yet.
 
 
-#### Phase 10.2 - Scalar mapping and vertical slice
+#### Phase 10.2 - Scalar mapping and vertical slice ✅
 
 - implement the one fixed documented server-wide Celsius scale, clamping,
   colour mapping, quality handling, and missing-data behavior;
@@ -866,12 +874,6 @@ bindings only.
   the GPU enclosure/shroud;
 - ensure suppression affects presentation only and does not remove thermal
   capability or metadata;
-- verify Heatmap and cached Stage 9 Streamlines are mutually exclusive primary
-  modes: entering Heatmap releases the Streamlines scheduler, snapshot root,
-  and material binding; entering Streamlines releases Heatmap-owned state and
-  the Heatmap X-Ray presentation;
-- verify failed Heatmap/Streamlines transitions roll back to the preceding
-  healthy primary presentation without duplicate X-Ray bindings or tasks;
 - add only the necessary runtime controls, legend, quality/missing-data state,
   and diagnostics;
 - verify clean behavior across metric changes, workload changes,

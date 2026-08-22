@@ -43,6 +43,8 @@ COMPONENT_TUNING_GROUPS = {
     "gpu_power_w": tuple(f"gpu_{index}_power_w" for index in range(1, 4)),
     "gpu_fan_rpm": tuple(f"gpu_{index}_fan_rpm" for index in range(1, 4)),
     "gpu_memory_used_gb": tuple(f"gpu_{index}_memory_used_gb" for index in range(1, 4)),
+    "nvme_temp_c": tuple(f"nvme_{index}_temp_c" for index in range(1, 3)),
+    "ram_temp_c": tuple(f"ram_{index}_temp_c" for index in range(1, 9)),
     "front_intake_fan_rpm": tuple(f"front_fan_{index}_rpm" for index in range(1, 4)),
     "rear_exhaust_fan_rpm": tuple(f"rear_fan_{index}_rpm" for index in range(1, 3)),
 }
@@ -62,6 +64,8 @@ TUNING_METRIC_LABELS = {
     "gpu_power_w": "GPU power",
     "gpu_fan_rpm": "GPU blower",
     "gpu_memory_used_gb": "GPU memory used",
+    "nvme_temp_c": "NVMe temperature",
+    "ram_temp_c": "DIMM temperature",
     "front_intake_fan_rpm": "Front intake fans",
     "rear_exhaust_fan_rpm": "Rear exhaust fans",
 }

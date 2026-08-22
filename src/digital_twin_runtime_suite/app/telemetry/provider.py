@@ -10,6 +10,16 @@ from .config import TelemetryConfig
 from .model import METRIC_UNITS, WORKLOAD_MODES, MetricValue, TelemetrySnapshot
 
 WallClock = Callable[[], datetime]
+RAM_TEMPERATURE_BIASES = {
+    1: -3.0,
+    2: -2.0,
+    3: -1.0,
+    4: 0.8,
+    5: 0.8,
+    6: 0.1,
+    7: -0.4,
+    8: 0.6,
+}
 
 
 class SyntheticTelemetryProvider:
@@ -32,7 +42,7 @@ class SyntheticTelemetryProvider:
         self._throttling_remaining_s = 0.0
         self._throttling_recovery_remaining_s = 0.0
         self._current_numeric = {
-            metric_id: metric.target + self._gpu_component_bias(metric_id)
+            metric_id: metric.target + self._component_bias(metric_id)
             for metric_id, metric in config.modes[self._mode].numeric.items()
         }
         self._latest_snapshot: TelemetrySnapshot | None = None
@@ -68,7 +78,7 @@ class SyntheticTelemetryProvider:
         mode = self.config.modes[self._mode]
         metrics: dict[str, MetricValue] = {}
         for metric_id, metric_config in mode.numeric.items():
-            bias = self._gpu_component_bias(metric_id)
+            bias = self._component_bias(metric_id)
             target = metric_config.target + bias
             current = self._current_numeric.get(metric_id, target)
             interpolated = current + (
@@ -113,7 +123,10 @@ class SyntheticTelemetryProvider:
         return self._latest_snapshot
 
     @staticmethod
-    def _gpu_component_bias(metric_id: str) -> float:
+    def _component_bias(metric_id: str) -> float:
+        if metric_id.startswith("ram_") and metric_id.endswith("_temp_c"):
+            index_text = metric_id.removeprefix("ram_").removesuffix("_temp_c")
+            return RAM_TEMPERATURE_BIASES.get(int(index_text), 0.0)
         if not metric_id.startswith("gpu_") or metric_id[4:5] not in {"1", "2", "3"}:
             return 0.0
         gpu_index = int(metric_id[4])

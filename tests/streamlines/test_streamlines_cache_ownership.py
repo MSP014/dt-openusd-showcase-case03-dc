@@ -483,6 +483,18 @@ class _ReceiptRuntime(StreamlinesCacheRuntimeMixin):
             object(),
         )
 
+    def resolve_configured_airflow_targets(self):
+        return tuple(
+            SimpleNamespace(
+                binding=SimpleNamespace(
+                    workload_mode=source.workload,
+                    dataset_identity=source.dataset_identity,
+                ),
+                dataset=object(),
+            )
+            for source in self._sources.values()
+        )
+
     def _streamlines_cache_expected_contract(
         self,
         *,
@@ -574,6 +586,49 @@ def test_background_receipt_reuses_unchanged_strong_validation(
     assert second.cache_location == "SESSION"
     assert second.validation_executed is False
     assert hash_calls == 1
+
+
+def test_session_receipt_persistence_rejects_a_rebuilt_cache_fingerprint(
+    tmp_path: Path,
+) -> None:
+    source = _source(
+        tmp_path,
+        workload="Nominal",
+        state="load_normal",
+        sample_count=2,
+        interval_seconds=0.2,
+    )
+    _persist_cache(tmp_path, source)
+    store = ValidationReceiptStore(tmp_path / "receipts.local.json")
+    runtime = _ReceiptRuntime(
+        tmp_path,
+        (source,),
+        persisted_store=store,
+        reuse_persisted=False,
+    )
+    asyncio.run(runtime.ensure_current_streamlines_cache_validation_in_background())
+
+    runtime.config.validation_receipts.reuse_verified_streamlines_cache_receipts = True
+    paths = streamlines_cache_paths(tmp_path, _ownership(source))
+    paths.geometry_path.write_bytes(paths.geometry_path.read_bytes() + b"rebuilt")
+    runtime.persist_session_streamlines_cache_validation_receipts()
+
+    binding, dataset = runtime.resolve_current_airflow_dataset()
+    profile_id = runtime._resolved_streamlines_profile_id()
+    assert (
+        store.has_streamlines(
+            key=runtime._persisted_streamlines_receipt_key(binding, profile_id),
+            resource_fingerprint=cache_runtime.streamlines_cache_resource_fingerprint(
+                paths
+            ),
+            dependency_identity=runtime._streamlines_cache_dependency_identity(
+                binding,
+                dataset,
+                profile_id,
+            ),
+        )
+        is False
+    )
 
 
 def test_concurrent_background_validation_deduplicates_one_geometry_hash(

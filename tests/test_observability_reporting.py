@@ -115,6 +115,7 @@ def test_kit_status_bar_sink_replaces_progress_without_creating_log_events():
     sink.finish()
 
     assert events == [
+        ("omni.kit.window.status_bar@activity", {"text": ""}),
         ("omni.kit.window.status_bar@progress", {"progress": 0.25}),
         (
             "omni.kit.window.status_bar@activity",
@@ -125,6 +126,7 @@ def test_kit_status_bar_sink_replaces_progress_without_creating_log_events():
                 )
             },
         ),
+        ("omni.kit.window.status_bar@activity", {"text": ""}),
         ("omni.kit.window.status_bar@progress", {"progress": 0.75}),
         (
             "omni.kit.window.status_bar@activity",

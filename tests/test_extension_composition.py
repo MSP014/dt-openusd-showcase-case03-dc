@@ -35,6 +35,7 @@ def test_extension_keeps_private_controller_state_out_of_its_source() -> None:
     assert "self._build_window()" in startup
     assert "self._cancel_scene_action_tasks()" in shutdown
     assert "clear_streamlines_static_runtime_from_open_stage()" in shutdown
+    assert "clear_heatmap_full_server_test_in_kit()" in shutdown
 
 
 def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> None:
@@ -73,6 +74,7 @@ def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> No
     assert telemetry_task.cancelled
     assert controller.calls == [
         "streamlines_cleanup",
+        "heatmaps_cleanup",
         "xray_cleanup",
         "stop_flow_callbacks",
         "clear_flow_validation",
@@ -115,6 +117,10 @@ class _Controller:
     def clear_streamlines_static_runtime_from_open_stage(self):
         self.calls.append("streamlines_cleanup")
         return SimpleNamespace(clean=True)
+
+    def clear_heatmap_full_server_test_in_kit(self):
+        self.calls.append("heatmaps_cleanup")
+        return SimpleNamespace(success=True)
 
     def clear_xray_material_in_kit(self) -> None:
         self.calls.append("xray_cleanup")

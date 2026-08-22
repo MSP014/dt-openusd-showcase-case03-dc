@@ -38,6 +38,28 @@ Every provider snapshot should preserve the following semantics:
 Providers may omit fields they cannot truthfully supply. Missing data is better
 than pretending an estimate is a measured sensor value.
 
+## Heatmap Presentation Scheduling
+
+All Heatmap-capable hardware shares one presentation contract: a telemetry
+snapshot retargets the current displayed temperature, which interpolates to the
+latest value over 2.0 seconds and writes dynamic material values at 2 Hz
+(0.5-second period). The telemetry provider cadence and Kit render cadence are
+independent. Ordinary Kit frames author no Heatmap USD or material opinions.
+
+Enable, disable, scope changes, and material reconstruction are structural
+events and may apply immediately. Afterward, every hardware family returns to
+the shared scheduler; no motherboard, GPU, CPU, NIC, PSU, RAM, NVMe, or future
+semantic group owns a different default cadence. A newer snapshot starts from
+the last displayed value, replaces the old target, and discards obsolete
+targets, so an unfinished transition remains continuous.
+
+The 2 Hz / 2.0-second contract was selected from the isolated-motherboard
+validation: baseline average FPS was approximately 82.9; combined Heatmap
+averaged approximately 43.0 FPS at 5 Hz and 69.4 FPS at 2 Hz. The 2 Hz manual
+continuity check passed without a visible objection, and motherboard acceptance
+completed with `manual_checks=9/9`. These figures are validation evidence, not
+runtime thresholds or assumptions.
+
 ## External Provider Integration Boundary
 
 The DTRS telemetry contract is defined now; a source adapter and any production
@@ -83,7 +105,7 @@ Stage 3 implements only the first-layer node telemetry set.
 | Group | Metrics | Purpose |
 | :--- | :--- | :--- |
 | State | `timestamp`, `operational_state`, `workload_percent`, `health_state` | Shows whether the node is idle, nominal, surging, or critical, and anchors every value in runtime time. |
-| Thermals | `cpu_temp_c`, per-GPU `gpu_temp_c`, `gpu_memory_temp_c`, `gpu_hotspot_temp_c`, node-level maxima, `thermal_headroom_percent` | Provides the heat story for the CPU cooler, each of the three GPUs, memory junctions, hotspots, and remaining safety margin. |
+| Thermals | `cpu_temp_c`, per-GPU `gpu_temp_c`, `gpu_memory_temp_c`, `gpu_hotspot_temp_c`, board, chipset, VRM, NVMe, and per-DIMM temperatures, node-level maxima, `thermal_headroom_percent` | Provides the heat story for the CPU cooler, GPUs, platform, storage, memory, and remaining safety margin. |
 | GPU memory | Per-GPU `gpu_memory_used_gb`, derived utilisation, and node-level total | Shows workload-driven allocation against 32 GB per card and 96 GB across the node. |
 | Power | `pdu_outlet_power_w`, derived PSU output, `cpu_power_w`, per-GPU `gpu_power_w`, derived GPU total, platform residual, PSU conversion loss, estimated PSU temperature, PSU load percent | Connects measured or synthetic PDU input to a complete node power and thermal balance without claiming unavailable consumer PSU sensors. |
 | Cooling | `cpu_fan_rpm`, `cpu_fan_duty_percent`, per-GPU `gpu_fan_rpm`, three front `front_fan_rpm`, two rear `rear_fan_rpm`, `node_airflow_cfm` | Connects the Noctua cooler, GPU blowers, three ARCTIC BioniX P120 intake fans, and two ARCTIC P8 Max exhaust fans to thermal state and the airflow budget. |
@@ -102,6 +124,13 @@ also preserves the thermal ordering of GPU 1, GPU 2, and GPU 3 and keeps each
 card's hotspot at or above its memory and core temperatures.
 Per-GPU power profiles are capped at the workstation card's documented 200 W
 total board power, so derived node-level GPU power cannot exceed 600 W.
+Motherboard, chipset, and VRM temperatures are synthetic stand-ins for board,
+BMC, or hwmon-class thermal sensors. NVMe temperatures are synthetic stand-ins
+for SMART/composite readings. RAM temperatures are per-DIMM synthetic
+representative values, conceptually backed by server-class DDR5 RDIMM onboard
+thermal sensing. Future live adapters must map source-specific names into these
+canonical DTRS metric IDs; these values are not measured from the modeled
+machine.
 Per-GPU memory use is capped at the documented 32 GB capacity, so independent
 jitter cannot push a card or the derived node total beyond 32 GB or 96 GB.
 Critical-mode throttling is stateful rather than independently random on every
