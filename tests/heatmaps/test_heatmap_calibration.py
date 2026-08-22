@@ -26,7 +26,7 @@ def test_calibration_resolves_symmetric_delta_and_additive_offset() -> None:
     assert resolved.temperature_offset_celsius == 1.5
 
 
-def test_legacy_semantic_offsets_are_seeded_only_in_heatmap_settings() -> None:
+def test_semantic_offsets_remain_owned_by_heatmap_settings() -> None:
     repository = Path(__file__).parents[2]
     settings = HeatmapSettingsStore(
         repository / "configs" / "heatmap_settings.toml"
@@ -48,5 +48,5 @@ def test_legacy_semantic_offsets_are_seeded_only_in_heatmap_settings() -> None:
         settings.calibration[
             "psu/psu_main_radiator/radiator"
         ].temperature_offset_celsius
-        == 16.0
+        == 28.0
     )

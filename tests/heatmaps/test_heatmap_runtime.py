@@ -18,14 +18,27 @@ class _Controller(HeatmapRuntimeMixin):
 
 
 class _Catalog:
-    def __init__(self) -> None:
+    def __init__(self, targets=()) -> None:
         self.selections: list[tuple[str, ...]] = []
+        self._targets = tuple(targets)
 
     def validate_selection(self, selectors: tuple[str, ...]) -> None:
         self.selections.append(selectors)
-        unknown = set(selectors) - {"motherboard", "ram"}
+        unknown = set(selectors) - {
+            "motherboard",
+            "ram",
+            "gpu_01_housing",
+        }
         if unknown:
             raise ValueError("Unknown Heatmap Isolation selectors")
+
+    def selected_targets(self, selectors):
+        selected = frozenset(selectors)
+        return tuple(
+            target
+            for target in self._targets
+            if selected.intersection(target.selector_ids)
+        )
 
 
 def test_apply_while_off_persists_settings_without_stage_mutation(tmp_path) -> None:
@@ -97,6 +110,22 @@ def test_zero_selection_apply_persists_off_state_without_viewport_work(
 
     assert result.success
     assert controller.heatmap_applied_settings_snapshot().isolation_selectors == ()
+
+
+def test_zero_selection_apply_restores_the_debug_harness_owner(tmp_path) -> None:
+    controller = _Controller()
+    initialise_heatmap_runtime(controller, tmp_path / "runtime.toml")
+    controller._heatmap_catalog = _Catalog()
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_presentation = _ActivePresentation()
+    controller._heatmap_isolation = _Isolation()
+    controller._heatmap_presentation_owner = controller._HEATMAP_DEBUG_OWNER
+
+    result = controller.apply_heatmap_settings_in_kit(HeatmapSettings())
+
+    assert result.success
+    assert not controller.heatmap_test_active()
+    assert not controller._heatmap_presentation.active
 
 
 def test_failed_active_apply_restores_old_presentation_and_keeps_old_config(
@@ -191,6 +220,205 @@ def test_stage_preparation_reloads_persisted_heatmap_settings(
 
     assert prepared is catalog
     assert controller.heatmap_applied_settings_snapshot() == persisted
+
+
+def test_stage_preparation_seeds_legacy_overlay_with_all_xray_groups(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    controller = _Controller()
+    initialise_heatmap_runtime(controller, tmp_path / "runtime.toml")
+    persisted = HeatmapSettings(isolation_selectors=("motherboard",))
+    controller._heatmap_settings_store.save(persisted)
+    legacy_text = controller._heatmap_settings_store.path.read_text(encoding="utf-8")
+    controller._heatmap_settings_store.path.write_text(
+        legacy_text.replace("[xray_overlay]\nselected_group_ids = []\n\n", ""),
+        encoding="utf-8",
+    )
+    controller.config = SimpleNamespace(
+        chassis_presentation=SimpleNamespace(
+            xray_target_groups=(
+                SimpleNamespace(group_id="chassis"),
+                SimpleNamespace(group_id="gpu_shrouds"),
+            ),
+        ),
+    )
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_isolation = _StageOwner()
+    controller._heatmap_presentation = _StageOwner()
+    catalog = SimpleNamespace(registry=_Registry())
+    monkeypatch.setattr(
+        runtime, "build_heatmap_catalog", lambda *_args, **_kwargs: catalog
+    )
+
+    controller.prepare_heatmaps_for_open_stage()
+
+    assert controller.heatmap_applied_settings_snapshot().xray_overlay_group_ids == (
+        "chassis",
+        "gpu_shrouds",
+    )
+    assert controller._heatmap_settings_store.load().xray_overlay_group_ids == (
+        "chassis",
+        "gpu_shrouds",
+    )
+
+
+def test_stage_preparation_keeps_an_explicit_empty_overlay_selection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    controller = _Controller()
+    initialise_heatmap_runtime(controller, tmp_path / "runtime.toml")
+    persisted = HeatmapSettings(isolation_selectors=("motherboard",))
+    controller._heatmap_settings_store.save(persisted)
+    controller.config = SimpleNamespace(
+        chassis_presentation=SimpleNamespace(
+            xray_target_groups=(SimpleNamespace(group_id="chassis"),),
+        ),
+    )
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_isolation = _StageOwner()
+    controller._heatmap_presentation = _StageOwner()
+    catalog = SimpleNamespace(registry=_Registry())
+    monkeypatch.setattr(
+        runtime, "build_heatmap_catalog", lambda *_args, **_kwargs: catalog
+    )
+
+    controller.prepare_heatmaps_for_open_stage()
+
+    assert controller.heatmap_applied_settings_snapshot().xray_overlay_group_ids == ()
+
+
+def test_production_apply_recomposes_xray_housing_precedence(tmp_path) -> None:
+    controller, calls = _production_controller(tmp_path)
+    previous = HeatmapSettings(
+        isolation_selectors=("motherboard",),
+        xray_overlay_group_ids=("gpu_shrouds",),
+    )
+    housing_on = HeatmapSettings(
+        isolation_selectors=("gpu_01_housing",),
+        xray_overlay_group_ids=("gpu_shrouds",),
+    )
+    controller._heatmap_applied_settings = previous
+    controller._heatmap_settings_store.save(previous)
+    controller._heatmap_presentation_owner = controller._HEATMAP_PRODUCTION_OWNER
+
+    applied = controller.apply_heatmap_settings_in_kit(housing_on)
+
+    assert applied.success
+    assert controller.heatmap_production_active()
+    assert calls["released"] == 1
+    assert calls["xray"][-1] == (
+        frozenset({"gpu_shrouds"}),
+        ("/blackwell_rig/compute/gpu_01/shroud",),
+    )
+
+    applied = controller.apply_heatmap_settings_in_kit(previous)
+
+    assert applied.success
+    assert calls["xray"][-1] == (frozenset({"gpu_shrouds"}), ())
+
+
+def test_production_activation_uses_persisted_overlay_group_ids(tmp_path) -> None:
+    controller, calls = _production_controller(tmp_path)
+    settings = HeatmapSettings(
+        isolation_selectors=("gpu_01_housing",),
+        xray_overlay_group_ids=("gpu_shrouds",),
+    )
+    controller._heatmap_applied_settings = settings
+    controller._heatmap_settings_store.save(settings)
+    controller._heatmap_presentation.active = False
+
+    result = controller.activate_heatmap_production_in_kit()
+
+    assert result.success
+    assert controller.heatmap_production_active()
+    assert calls["xray"] == [
+        (
+            frozenset({"gpu_shrouds"}),
+            ("/blackwell_rig/compute/gpu_01/shroud",),
+        )
+    ]
+
+
+def test_failed_production_apply_restores_previous_complete_composition(
+    tmp_path,
+) -> None:
+    controller, calls = _production_controller(tmp_path)
+    previous = HeatmapSettings(
+        isolation_selectors=("motherboard",),
+        xray_overlay_group_ids=("gpu_shrouds",),
+    )
+    candidate = HeatmapSettings(
+        isolation_selectors=("gpu_01_housing",),
+        xray_overlay_group_ids=("gpu_shrouds",),
+    )
+    controller._heatmap_applied_settings = previous
+    controller._heatmap_settings_store.save(previous)
+    controller._heatmap_presentation_owner = controller._HEATMAP_PRODUCTION_OWNER
+
+    def activate(_stage, plan, *, visibility_target_paths=None):
+        calls["visibility"].append(visibility_target_paths)
+        if plan.settings == candidate:
+            return HeatmapRuntimeResult(False, False, "candidate presentation failed")
+        controller._heatmap_presentation.active = True
+        return HeatmapRuntimeResult(True, True, "presentation applied")
+
+    controller._activate_plan = activate
+
+    result = controller.apply_heatmap_settings_in_kit(candidate)
+
+    assert not result.success
+    assert controller.heatmap_production_active()
+    assert controller.heatmap_applied_settings_snapshot() == previous
+    assert controller._heatmap_settings_store.load() == previous
+    assert calls["xray"][-1] == (frozenset({"gpu_shrouds"}), ())
+
+
+def _production_controller(tmp_path):
+    controller = _Controller()
+    initialise_heatmap_runtime(controller, tmp_path / "runtime.toml")
+    target = SimpleNamespace(
+        prim_path="/blackwell_rig/compute/gpu_01/shroud/thermal_mesh",
+        selector_ids=("gpu_01_housing",),
+    )
+    controller._heatmap_catalog = _Catalog((target,))
+    controller.config = SimpleNamespace(
+        chassis_presentation=SimpleNamespace(
+            xray_target_groups=(
+                SimpleNamespace(
+                    group_id="gpu_shrouds",
+                    paths=("/blackwell_rig/compute/gpu_01/shroud",),
+                ),
+            ),
+        ),
+    )
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_presentation = _ActivePresentation()
+    controller._heatmap_isolation = _Isolation()
+    calls = {"released": 0, "xray": [], "visibility": []}
+
+    def prepare(settings):
+        return SimpleNamespace(settings=settings)
+
+    def activate(_stage, plan, *, visibility_target_paths=None):
+        calls["visibility"].append(visibility_target_paths)
+        controller._heatmap_presentation.active = True
+        return HeatmapRuntimeResult(True, True, "presentation applied")
+
+    def apply_xray(group_ids, excluded_paths):
+        calls["xray"].append((group_ids, excluded_paths))
+        return HeatmapRuntimeResult(True, True, "X-Ray applied")
+
+    def release_xray():
+        calls["released"] += 1
+        return HeatmapRuntimeResult(True, False, "X-Ray released")
+
+    controller._prepare_plan = prepare
+    controller._activate_plan = activate
+    controller.apply_heatmap_xray_override_in_kit = apply_xray
+    controller.release_heatmap_xray_override_in_kit = release_xray
+    return controller, calls
 
 
 class _StageOwner:

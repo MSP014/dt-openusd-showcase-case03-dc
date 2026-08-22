@@ -1,7 +1,10 @@
 version = 1
 
 [isolation]
-selectors = ["motherboard", "connectx_7", "gpu_01_internals", "gpu_01_housing", "gpu_02_internals", "gpu_02_housing", "gpu_03_internals", "gpu_03_housing", "ram"]
+selectors = ["motherboard", "connectx_7", "gpu_01_internals", "gpu_02_internals", "gpu_03_internals", "cpu_cooler", "ram", "psu"]
+
+[xray_overlay]
+selected_group_ids = ["chassis", "front_fans", "rear_fans", "cpu_cooler_fans", "gpu_shrouds", "cables", "psu_enclosure"]
 
 [color_scale]
 minimum_clamp_percent = 5
@@ -44,44 +47,44 @@ position_percent = 100
 color = [1, 0, 0]
 
 [calibration."cpu/cpu_cooler_coldplate/coldplate"]
-delta_celsius = 10
-temperature_offset_celsius = 2
+delta_celsius = 4
+temperature_offset_celsius = 12
 
 [calibration."cpu/cpu_cooler_heatpipes/base_plate"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = 10
 
 [calibration."cpu/cpu_cooler_heatpipes/heatpipe"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = 10
 
 [calibration."cpu/cpu_cooler_mount/mount_fastener"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = -6.4
 
 [calibration."cpu/cpu_cooler_mount/mounting_bracket"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = 8
 
 [calibration."cpu/cpu_cooler_radiator_fins/radiator_fin"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 16
+temperature_offset_celsius = 4
 
 [calibration."gpu_01/board/pcb"]
 delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."gpu_01/gpu_body/plug"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 6
+temperature_offset_celsius = -2
 
 [calibration."gpu_01/gpu_body/shroud"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = -4
 
 [calibration."gpu_01/gpu_cooling/blower"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = -20
 
 [calibration."gpu_01/gpu_core/gb203_die"]
 delta_celsius = 10
@@ -104,16 +107,16 @@ delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."gpu_02/gpu_body/plug"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 6
+temperature_offset_celsius = -2
 
 [calibration."gpu_02/gpu_body/shroud"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = -4
 
 [calibration."gpu_02/gpu_cooling/blower"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = -20
 
 [calibration."gpu_02/gpu_core/gb203_die"]
 delta_celsius = 10
@@ -136,16 +139,16 @@ delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."gpu_03/gpu_body/plug"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 6
+temperature_offset_celsius = -2
 
 [calibration."gpu_03/gpu_body/shroud"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = -4
 
 [calibration."gpu_03/gpu_cooling/blower"]
 delta_celsius = 2
-temperature_offset_celsius = -12
+temperature_offset_celsius = -20
 
 [calibration."gpu_03/gpu_core/gb203_die"]
 delta_celsius = 10
@@ -165,7 +168,7 @@ temperature_offset_celsius = 0
 
 [calibration."motherboard/cpu/cpu_package"]
 delta_celsius = 4
-temperature_offset_celsius = 32
+temperature_offset_celsius = 28
 
 [calibration."motherboard/cpu/socket"]
 delta_celsius = 8
@@ -253,79 +256,79 @@ temperature_offset_celsius = 10
 
 [calibration."nic/nic_board/pcb"]
 delta_celsius = 10
-temperature_offset_celsius = 0
+temperature_offset_celsius = -8
 
 [calibration."nic/nic_bracket/pcie_bracket"]
-delta_celsius = 10
+delta_celsius = 12
 temperature_offset_celsius = 0
 
 [calibration."nic/nic_compute/asic_heatsink"]
 delta_celsius = 10
-temperature_offset_celsius = 0
+temperature_offset_celsius = 4
 
 [calibration."nic/nic_cooling/osfp_heatsink"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 12
+temperature_offset_celsius = 8
 
 [calibration."nic/nic_cpu/mt2910"]
 delta_celsius = 10
-temperature_offset_celsius = 0
+temperature_offset_celsius = 8
 
 [calibration."nic/nic_io/osfp_module"]
 delta_celsius = 10
-temperature_offset_celsius = 0
+temperature_offset_celsius = 16
 
 [calibration."nic/nic_misc/small_electronics"]
 delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."nic/nic_power/vrm_heatsink"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 16
+temperature_offset_celsius = -8
 
 [calibration."psu/psu_chokes/choke"]
-delta_celsius = 10
-temperature_offset_celsius = 0
-
-[calibration."psu/psu_coils/coil"]
-delta_celsius = 10
-temperature_offset_celsius = 0
-
-[calibration."psu/psu_main_capacitors/capacitor"]
-delta_celsius = 10
-temperature_offset_celsius = 0
-
-[calibration."psu/psu_main_pcb/pcb"]
-delta_celsius = 10
-temperature_offset_celsius = 0
-
-[calibration."psu/psu_main_radiator/radiator"]
-delta_celsius = 10
+delta_celsius = 20
 temperature_offset_celsius = 16
 
+[calibration."psu/psu_coils/coil"]
+delta_celsius = 4
+temperature_offset_celsius = 20
+
+[calibration."psu/psu_main_capacitors/capacitor"]
+delta_celsius = 4
+temperature_offset_celsius = 8
+
+[calibration."psu/psu_main_pcb/pcb"]
+delta_celsius = 8
+temperature_offset_celsius = -8
+
+[calibration."psu/psu_main_radiator/radiator"]
+delta_celsius = 16
+temperature_offset_celsius = 28
+
 [calibration."psu/psu_main_transformer/transformer_core"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 6.4
+temperature_offset_celsius = 18
 
 [calibration."psu/psu_main_transformer/transformer_winding"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = 24
 
 [calibration."psu/psu_secondary_transformer/transformer_coil"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = 10
 
 [calibration."psu/psu_secondary_transformer/transformer_core"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 8
+temperature_offset_celsius = 4
 
 [calibration."psu/psu_small_capacitors/small_capacitor"]
 delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."psu/psu_small_radiator/radiator"]
-delta_celsius = 10
-temperature_offset_celsius = 4
+delta_celsius = 20
+temperature_offset_celsius = 32
 
 [calibration."ram/ram_clock_driver/clock_driver"]
 delta_celsius = 4

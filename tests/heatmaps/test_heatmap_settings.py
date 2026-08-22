@@ -20,6 +20,7 @@ def test_settings_round_trip_preserves_complete_applied_snapshot(tmp_path) -> No
     store = HeatmapSettingsStore(tmp_path / "heatmap_settings.toml")
     settings = HeatmapSettings(
         isolation_selectors=("motherboard", "ram", "gpu_01_housing"),
+        xray_overlay_group_ids=("chassis", "gpu_shrouds"),
         calibration={
             "ram/memory/dimm_slot": CalibrationSettings(6.5, -8.0),
         },
@@ -79,6 +80,7 @@ def test_settings_diff_reports_only_the_applied_parameter_values() -> None:
     )
     candidate = HeatmapSettings(
         isolation_selectors=("ram",),
+        xray_overlay_group_ids=("chassis",),
         calibration={
             "motherboard/vrm_west/vrm_heatsink": CalibrationSettings(40.0, 2.0)
         },
@@ -87,6 +89,7 @@ def test_settings_diff_reports_only_the_applied_parameter_values() -> None:
 
     assert diff_heatmap_settings(previous, candidate) == (
         ("isolation.selectors", "[ram]"),
+        ("xray_overlay.selected_group_ids", "[chassis]"),
         ("calibration.motherboard/vrm_west/vrm_heatsink.delta_celsius", "40"),
         (
             "calibration.motherboard/vrm_west/vrm_heatsink."

@@ -27,6 +27,15 @@ class SceneActionsWorkflowMixin:
         self._reload_task = asyncio.ensure_future(self._reload_config_and_stage())
 
     async def _reload_config_and_stage(self) -> None:
+        self._controller.cancel_visualization_transition()
+        if self._controller.heatmap_production_active():
+            heatmap_cleanup = self._controller.deactivate_heatmap_production_in_kit()
+            if not heatmap_cleanup.success:
+                self._set_status(
+                    "Heatmap cleanup before Reload Config failed: "
+                    f"{heatmap_cleanup.message}"
+                )
+                return
         try:
             cleanup = self._controller.clear_xray_material_in_kit()
         except RuntimeError as error:

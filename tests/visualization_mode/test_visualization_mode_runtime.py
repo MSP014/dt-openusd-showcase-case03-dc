@@ -103,6 +103,8 @@ class _Runtime(VisualizationModeRuntimeMixin):
         self._manual_targets = frozenset({"chassis"})
         self._override_owner = None
         self._override_targets = frozenset()
+        self._heatmap_visible = False
+        self._heatmap_activation_failure = False
         self.reset_visualization_mode_state()
 
     def resolve_current_airflow_dataset(self):
@@ -164,6 +166,27 @@ class _Runtime(VisualizationModeRuntimeMixin):
             "X-Ray override applied.",
             VisualizationMode.NORMAL,
         )
+
+    def heatmap_production_active(self):
+        return self._heatmap_visible
+
+    def activate_heatmap_production_in_kit(self):
+        if self._heatmap_activation_failure:
+            return VisualizationModeResult(
+                False,
+                "Heatmap presentation failed.",
+                VisualizationMode.NORMAL,
+            )
+        applied = self.apply_heatmap_xray_override_in_kit()
+        if applied.success:
+            self._heatmap_visible = True
+        return applied
+
+    def deactivate_heatmap_production_in_kit(self):
+        released = self.release_heatmap_xray_override_in_kit()
+        if released.success:
+            self._heatmap_visible = False
+        return released
 
     def release_heatmap_xray_override_in_kit(self):
         self._override_owner = None
@@ -773,6 +796,43 @@ def test_heatmap_preserves_manual_xray_selection_and_uses_all_configured_targets
         {"chassis", "fans"}
     )
     assert runtime.xray_target_snapshot().override_owner == "heatmap_preview"
+
+
+def test_heatmap_is_the_only_primary_presentation_until_normal_restores_it():
+    runtime = _Runtime()
+
+    applied = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
+
+    assert applied.success
+    snapshot = runtime.primary_visualization_presentation_snapshot_in_kit()
+    assert snapshot.heatmap_presentation_active
+    assert not snapshot.smoke_presentation_visible
+    assert not snapshot.streamlines_presentation_visible
+
+    restored = asyncio.run(runtime.request_visualization_mode_in_kit("Normal"))
+
+    assert restored.success
+    snapshot = runtime.primary_visualization_presentation_snapshot_in_kit()
+    assert not snapshot.primary_presentation_active
+
+
+def test_failed_heatmap_activation_restores_streamlines_xray_composition():
+    runtime = _Runtime()
+
+    assert asyncio.run(
+        runtime.request_visualization_mode_in_kit("Streamlines + X-Ray")
+    ).success
+    runtime._heatmap_activation_failure = True
+
+    result = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
+
+    assert not result.success
+    assert (
+        runtime.visualization_snapshot().committed is VisualizationMode.STREAMLINES_XRAY
+    )
+    assert runtime.streamlines_cached_presentation_is_visible_in_kit()
+    assert runtime._active_streamlines_playback_task_count() == 1
+    assert runtime.xray_target_snapshot().override_owner == "streamlines_xray"
 
 
 @pytest.mark.parametrize(

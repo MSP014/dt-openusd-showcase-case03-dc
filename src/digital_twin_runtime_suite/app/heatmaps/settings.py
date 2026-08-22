@@ -111,6 +111,7 @@ class HeatmapSettings:
     """One complete settings candidate, separate from UI draft and active state."""
 
     isolation_selectors: tuple[str, ...] = ()
+    xray_overlay_group_ids: tuple[str, ...] = ()
     calibration: Mapping[str, CalibrationSettings] = field(
         default_factory=lambda: MappingProxyType({})
     )
@@ -132,6 +133,10 @@ class HeatmapSettings:
             raise ValueError("Heatmap Isolation selectors must be unique.")
         if any(not selector for selector in self.isolation_selectors):
             raise ValueError("Heatmap Isolation selectors must not be empty.")
+        if len(set(self.xray_overlay_group_ids)) != len(self.xray_overlay_group_ids):
+            raise ValueError("Heatmap X-Ray Overlay groups must be unique.")
+        if any(not group_id for group_id in self.xray_overlay_group_ids):
+            raise ValueError("Heatmap X-Ray Overlay groups must not be empty.")
         for calibration_id, rule in self.calibration.items():
             if not calibration_id:
                 raise ValueError("Heatmap calibration id must not be empty.")
@@ -156,6 +161,13 @@ def diff_heatmap_settings(
         changes.append(
             ("isolation.selectors", _format_sequence(candidate.isolation_selectors))
         )
+    if previous.xray_overlay_group_ids != candidate.xray_overlay_group_ids:
+        changes.append(
+            (
+                "xray_overlay.selected_group_ids",
+                _format_sequence(candidate.xray_overlay_group_ids),
+            )
+        )
     _append_calibration_changes(changes, previous.calibration, candidate.calibration)
     _append_color_scale_changes(changes, previous.color_scale, candidate.color_scale)
     return tuple(changes)
@@ -177,6 +189,16 @@ class HeatmapSettingsStore:
         settings = _settings_from_document(document)
         settings.validate()
         return settings
+
+    def has_explicit_xray_overlay_selection(self) -> bool:
+        """Distinguish migrated-empty overlay selection from an older settings file."""
+
+        if not self.path.exists():
+            return False
+        with self.path.open("rb") as handle:
+            document = tomllib.load(handle)
+        overlay = document.get("xray_overlay")
+        return isinstance(overlay, Mapping) and "selected_group_ids" in overlay
 
     def save(self, settings: HeatmapSettings) -> None:
         """Atomically replace the persisted snapshot only after full validation."""
@@ -203,6 +225,7 @@ class HeatmapSettingsStore:
 
 def _settings_from_document(document: Mapping[str, object]) -> HeatmapSettings:
     isolation = _mapping(document.get("isolation"))
+    xray_overlay = _mapping(document.get("xray_overlay"))
     color_scale = _mapping(document.get("color_scale"))
     stop_documents = color_scale.get("stops", ())
     if not isinstance(stop_documents, list):
@@ -218,8 +241,16 @@ def _settings_from_document(document: Mapping[str, object]) -> HeatmapSettings:
         isinstance(selector, str) for selector in selectors
     ):
         raise ValueError("Heatmap Isolation selectors must be a TOML string array.")
+    group_ids = xray_overlay.get("selected_group_ids", [])
+    if not isinstance(group_ids, list) or not all(
+        isinstance(group_id, str) for group_id in group_ids
+    ):
+        raise ValueError(
+            "Heatmap X-Ray Overlay selected_group_ids must be a TOML string array."
+        )
     return HeatmapSettings(
         isolation_selectors=tuple(selectors),
+        xray_overlay_group_ids=tuple(group_ids),
         calibration=calibration,
         color_scale=ColorScaleSettings(
             minimum_clamp_percent=float(color_scale.get("minimum_clamp_percent", 0.0)),
@@ -327,7 +358,19 @@ def _format_color(color: tuple[float, float, float]) -> str:
 def _settings_to_toml(settings: HeatmapSettings) -> str:
     lines = ["version = 1", "", "[isolation]"]
     selectors = ", ".join(_toml_string(item) for item in settings.isolation_selectors)
-    lines.extend((f"selectors = [{selectors}]", "", "[color_scale]"))
+    group_ids = ", ".join(
+        _toml_string(item) for item in settings.xray_overlay_group_ids
+    )
+    lines.extend(
+        (
+            f"selectors = [{selectors}]",
+            "",
+            "[xray_overlay]",
+            f"selected_group_ids = [{group_ids}]",
+            "",
+            "[color_scale]",
+        )
+    )
     lines.append(
         f"minimum_clamp_percent = {settings.color_scale.minimum_clamp_percent:g}"
     )

@@ -137,6 +137,23 @@ def test_project_xray_target_groups_are_explicit_and_render_scoped():
     )
 
 
+def test_xray_path_exclusions_cover_mesh_subtrees_and_ancestor_bindings():
+    from digital_twin_runtime_suite.app.xray.runtime import XRayRuntimeMixin
+
+    assert XRayRuntimeMixin._xray_paths_overlap(
+        "/blackwell_rig/compute/gpu_01/shroud/mesh",
+        "/blackwell_rig/compute/gpu_01/shroud",
+    )
+    assert XRayRuntimeMixin._xray_paths_overlap(
+        "/blackwell_rig/compute/gpu_01/shroud",
+        "/blackwell_rig/compute/gpu_01/shroud/mesh",
+    )
+    assert not XRayRuntimeMixin._xray_paths_overlap(
+        "/blackwell_rig/compute/gpu_02/shroud/mesh",
+        "/blackwell_rig/compute/gpu_01/shroud",
+    )
+
+
 def test_xray_on_off_cycles_restore_authored_binding_and_remove_session_spec(tmp_path):
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
 
@@ -231,6 +248,53 @@ def test_xray_reconciles_configured_target_groups_without_persisting_selection(
     controller._clear_xray_session_overrides(stage, Sdf, Usd, UsdShade)
     assert _bound_material_path(front_fan, UsdShade) == str(authored.GetPath())
     assert stage.GetSessionLayer().GetPropertyAtPath(front_binding) is None
+
+
+def test_xray_exclusion_removes_only_matching_mesh_subtrees(tmp_path) -> None:
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
+
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    gpu_01_root = "/blackwell_rig/compute/gpu_01/shroud"
+    gpu_02_root = "/blackwell_rig/compute/gpu_02/shroud"
+    cables_root = "/blackwell_rig/cables"
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            xray_target_groups=(
+                XRayTargetGroupConfig(
+                    "gpu_shrouds",
+                    "GPU shrouds",
+                    (gpu_01_root, gpu_02_root),
+                ),
+                XRayTargetGroupConfig("cables", "Cables", (cables_root,)),
+            ),
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    authored = UsdShade.Material.Define(stage, "/Looks/Authored")
+    gpu_01 = UsdGeom.Mesh.Define(stage, f"{gpu_01_root}/mesh").GetPrim()
+    gpu_02 = UsdGeom.Mesh.Define(stage, f"{gpu_02_root}/mesh").GetPrim()
+    cables = UsdGeom.Mesh.Define(stage, f"{cables_root}/mesh").GetPrim()
+    for mesh in (gpu_01, gpu_02, cables):
+        UsdShade.MaterialBindingAPI.Apply(mesh).Bind(authored)
+    stage.SetEditTarget(stage.GetSessionLayer())
+
+    target_count, _diagnostics = controller._apply_xray_session_overrides(
+        stage,
+        XRayMaterialConfig(),
+        {"gpu_shrouds", "cables"},
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+        (gpu_01_root,),
+    )
+
+    assert target_count == 2
+    assert _bound_material_path(gpu_01, UsdShade) == str(authored.GetPath())
+    assert _bound_material_path(gpu_02, UsdShade) == controller.XRAY_MATERIAL_PATH
+    assert _bound_material_path(cables, UsdShade) == controller.XRAY_MATERIAL_PATH
 
 
 def test_streamlines_xray_override_uses_last_applied_ui_material(tmp_path, monkeypatch):

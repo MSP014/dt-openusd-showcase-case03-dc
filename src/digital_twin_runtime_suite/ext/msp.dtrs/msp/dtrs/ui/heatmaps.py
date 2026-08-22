@@ -40,7 +40,7 @@ class HeatmapsUiMixin:
         ready = catalog is not None and catalog.ready
         self._set_heatmap_test_button_state(
             self._controller.heatmap_test_active(),
-            ready=ready,
+            ready=ready and not self._controller.heatmap_production_active(),
         )
         frame.clear()
         with frame:
@@ -62,6 +62,11 @@ class HeatmapsUiMixin:
         self._heatmap_isolation_models = {
             selector_id: ui.SimpleBoolModel(selector_id in selected)
             for selector_id in selector_ids
+        }
+        selected_xray_groups = frozenset(settings.xray_overlay_group_ids)
+        self._heatmap_xray_overlay_models = {
+            group.group_id: ui.SimpleBoolModel(group.group_id in selected_xray_groups)
+            for group in self._controller.heatmap_xray_overlay_groups_snapshot()
         }
         descriptors = catalog.calibration if catalog is not None else ()
         self._heatmap_calibration_models = {
@@ -100,11 +105,12 @@ class HeatmapsUiMixin:
         )
 
     def _build_heatmap_settings_editor(self, catalog) -> None:
-        """Build Isolation, dynamic Calibration, and Color Scale draft frames."""
+        """Build Isolation, X-Ray, Calibration, and Color Scale draft frames."""
 
         with ui.VStack(spacing=6, height=0, content_clipping=True):
             ui.Label("Settings")
             self._build_heatmap_isolation_frame(catalog)
+            self._build_heatmap_xray_overlay_frame()
             self._build_heatmap_calibration_frame(catalog)
             self._build_heatmap_color_scale_frame()
             ui.Button(
@@ -135,6 +141,19 @@ class HeatmapsUiMixin:
                 ui.Spacer(width=indent)
             ui.CheckBox(model=model, width=24)
             ui.Label(selector.label)
+
+    def _build_heatmap_xray_overlay_frame(self) -> None:
+        """Build the production-only X-Ray overlay draft from project config."""
+
+        with ui.CollapsableFrame("X-Ray Overlay", collapsed=True, height=0):
+            with ui.VStack(spacing=3, height=0):
+                for group in self._controller.heatmap_xray_overlay_groups_snapshot():
+                    with ui.HStack(height=20):
+                        ui.CheckBox(
+                            model=self._heatmap_xray_overlay_models[group.group_id],
+                            width=24,
+                        )
+                        ui.Label(group.label)
 
     def _build_heatmap_calibration_frame(self, catalog) -> None:
         with ui.CollapsableFrame("Calibration", collapsed=True, height=0):
@@ -306,7 +325,15 @@ class HeatmapsUiMixin:
             return
         changes = _heatmap_settings_changes(previous, candidate)
         result = self._controller.apply_heatmap_settings_in_kit(candidate)
-        self._set_heatmap_test_button_state(result.enabled)
+        catalog = self._controller.heatmap_catalog_snapshot()
+        self._set_heatmap_test_button_state(
+            self._controller.heatmap_test_active(),
+            ready=bool(
+                catalog
+                and catalog.ready
+                and not self._controller.heatmap_production_active()
+            ),
+        )
         self._set_status(result.message)
         details = dict(changes)
         if not details:
@@ -378,6 +405,11 @@ class HeatmapsUiMixin:
         )
         return settings_type(
             isolation_selectors=selectors,
+            xray_overlay_group_ids=tuple(
+                group_id
+                for group_id, model in self._heatmap_xray_overlay_models.items()
+                if model.get_value_as_bool()
+            ),
             calibration=calibration,
             color_scale=settings_from_draft(
                 minimum_clamp_percent=(

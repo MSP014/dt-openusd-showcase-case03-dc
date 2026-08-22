@@ -12,6 +12,7 @@ class XRayTargetSnapshot:
     manual_target_ids: frozenset[str]
     override_owner: str | None
     override_target_ids: frozenset[str]
+    override_excluded_paths: frozenset[str] = frozenset()
 
     @property
     def effective_target_ids(self) -> frozenset[str]:
@@ -31,6 +32,7 @@ class XRayTargetState:
         self._manual_target_ids: frozenset[str] = frozenset()
         self._override_owner: str | None = None
         self._override_target_ids: frozenset[str] = frozenset()
+        self._override_excluded_paths: frozenset[str] = frozenset()
 
     @property
     def snapshot(self) -> XRayTargetSnapshot:
@@ -40,6 +42,7 @@ class XRayTargetState:
             self._manual_target_ids,
             self._override_owner,
             self._override_target_ids,
+            self._override_excluded_paths,
         )
 
     def set_manual_target_ids(self, target_ids: frozenset[str]) -> None:
@@ -47,13 +50,19 @@ class XRayTargetState:
 
         self._manual_target_ids = frozenset(target_ids)
 
-    def activate_override(self, owner: str, target_ids: frozenset[str]) -> bool:
+    def activate_override(
+        self,
+        owner: str,
+        target_ids: frozenset[str],
+        excluded_paths: frozenset[str] = frozenset(),
+    ) -> bool:
         """Give one named presentation owner temporary effective-target priority."""
 
         if self._override_owner not in (None, owner):
             return False
         self._override_owner = owner
         self._override_target_ids = frozenset(target_ids)
+        self._override_excluded_paths = frozenset(excluded_paths)
         return True
 
     def release_override(self, owner: str) -> bool:
@@ -63,6 +72,7 @@ class XRayTargetState:
             return False
         self._override_owner = None
         self._override_target_ids = frozenset()
+        self._override_excluded_paths = frozenset()
         return True
 
     def restore(self, snapshot: XRayTargetSnapshot) -> None:
@@ -71,3 +81,4 @@ class XRayTargetState:
         self._manual_target_ids = snapshot.manual_target_ids
         self._override_owner = snapshot.override_owner
         self._override_target_ids = snapshot.override_target_ids
+        self._override_excluded_paths = snapshot.override_excluded_paths

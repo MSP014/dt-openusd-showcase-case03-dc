@@ -60,10 +60,18 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             self._active_xray_material_config = xray
         return result
 
-    def apply_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
-        """Temporarily expose every configured X-Ray group for Heatmap preview."""
+    def apply_heatmap_xray_override_in_kit(
+        self,
+        selected_group_ids: frozenset[str] | None = None,
+        excluded_paths: tuple[str, ...] = (),
+    ) -> XRayApplyResult:
+        """Apply Heatmap-specific X-Ray groups without changing manual selection."""
 
-        return self._apply_xray_override_in_kit("heatmap_preview")
+        return self._apply_xray_override_in_kit(
+            "heatmap_preview",
+            selected_target_ids=selected_group_ids,
+            excluded_paths=excluded_paths,
+        )
 
     def release_heatmap_xray_override_in_kit(self) -> XRayApplyResult:
         """Release Heatmap targets and restore the preserved manual selection."""
@@ -102,18 +110,31 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             "Streamlines + X-Ray",
         )
 
-    def _apply_xray_override_in_kit(self, owner: str) -> XRayApplyResult:
-        """Give one primary presentation temporary access to all X-Ray groups."""
+    def _apply_xray_override_in_kit(
+        self,
+        owner: str,
+        *,
+        selected_target_ids: frozenset[str] | None = None,
+        excluded_paths: tuple[str, ...] = (),
+    ) -> XRayApplyResult:
+        """Give one primary presentation temporary X-Ray target ownership."""
 
         snapshot = self._xray_target_state.snapshot
-        target_ids = frozenset(
-            group.group_id for group in self._configured_xray_target_groups()
-        )
-        if not self._xray_target_state.activate_override(owner, target_ids):
+        target_ids = selected_target_ids
+        if target_ids is None:
+            target_ids = frozenset(
+                group.group_id for group in self._configured_xray_target_groups()
+            )
+        if not self._xray_target_state.activate_override(
+            owner,
+            target_ids,
+            frozenset(excluded_paths),
+        ):
             return XRayApplyResult(False, "Another X-Ray target override is active.")
         result = self.apply_xray_material_in_kit(
             self._active_xray_material_config_in_kit(),
             self._xray_target_state.snapshot.effective_target_ids,
+            excluded_paths=excluded_paths,
         )
         if not result.success:
             self._xray_target_state.restore(snapshot)
@@ -161,6 +182,7 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         return self.apply_xray_material_in_kit(
             self._active_xray_material_config_in_kit(),
             snapshot.effective_target_ids,
+            excluded_paths=tuple(snapshot.override_excluded_paths),
         )
 
     def _active_xray_material_config_in_kit(self) -> XRayMaterialConfig:
@@ -173,7 +195,11 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         )
 
     def apply_xray_material_in_kit(
-        self, xray: XRayMaterialConfig, selected_target_ids: frozenset[str]
+        self,
+        xray: XRayMaterialConfig,
+        selected_target_ids: frozenset[str],
+        *,
+        excluded_paths: tuple[str, ...] = (),
     ) -> XRayApplyResult:
         """Apply or release the production Custom MDL Fresnel override.
 
@@ -221,7 +247,14 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 )
             try:
                 target_count, diagnostics = self._apply_xray_session_overrides(
-                    stage, xray, selected_target_ids, Gf, Sdf, Usd, UsdShade
+                    stage,
+                    xray,
+                    selected_target_ids,
+                    Gf,
+                    Sdf,
+                    Usd,
+                    UsdShade,
+                    excluded_paths,
                 )
             except RuntimeError as error:
                 carb.log_error(
@@ -525,7 +558,15 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         return removed_count, diagnostics
 
     def _apply_xray_session_overrides(
-        self, stage, xray, selected_target_ids, Gf, Sdf, Usd, UsdShade
+        self,
+        stage,
+        xray,
+        selected_target_ids,
+        Gf,
+        Sdf,
+        Usd,
+        UsdShade,
+        excluded_paths=(),
     ):
         """Reconcile selected configured groups to one reversible Fresnel binding.
 
@@ -549,6 +590,10 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 "X-Ray selected target groups resolve no mesh targets: "
                 f"{selected_names}."
             )
+        selected_targets = self._exclude_xray_mesh_targets(
+            selected_targets,
+            excluded_paths,
+        )
         from pxr import UsdGeom
 
         # The operator-owned production X-Ray config is passed directly so
@@ -744,6 +789,32 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             displayed = XRayRuntimeMixin._format_xray_mismatch_paths(missing_paths)
             raise RuntimeError(f"X-Ray target roots are unavailable: {displayed}")
         return targets
+
+    @staticmethod
+    def _exclude_xray_mesh_targets(targets, excluded_paths):
+        """Remove meshes overlapping an exclusion root in either hierarchy direction."""
+
+        exclusions = tuple(str(path).rstrip("/") for path in excluded_paths)
+        if not exclusions:
+            return targets
+        return tuple(
+            (group_id, prim)
+            for group_id, prim in targets
+            if not any(
+                XRayRuntimeMixin._xray_paths_overlap(str(prim.GetPath()), path)
+                for path in exclusions
+            )
+        )
+
+    @staticmethod
+    def _xray_paths_overlap(left: str, right: str) -> bool:
+        """Return whether two USD prim paths overlap through ancestry or equality."""
+
+        return (
+            left == right
+            or left.startswith(f"{right}/")
+            or right.startswith(f"{left}/")
+        )
 
     def _is_xray_led_prim(self, prim) -> bool:
         """Identify telemetry-owned LED geometry within the resolved chassis set."""

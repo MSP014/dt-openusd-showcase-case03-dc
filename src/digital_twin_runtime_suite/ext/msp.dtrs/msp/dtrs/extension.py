@@ -303,6 +303,7 @@ class DigitalTwinRuntimeSuiteExtension(
                 self._validation_workflow.cancel()
             if self._visualization_workflow:
                 self._visualization_workflow.cancel()
+            self._controller.cancel_visualization_transition()
             if self._streamlines_workflow:
                 self._streamlines_workflow.cancel()
             cancel_material = getattr(
@@ -323,6 +324,17 @@ class DigitalTwinRuntimeSuiteExtension(
             self._telemetry_task.cancel()
             self._telemetry_task = None
         if self._controller:
+            try:
+                heatmap_cleanup = (
+                    self._controller.deactivate_heatmap_production_in_kit()
+                )
+                if not heatmap_cleanup.success:
+                    carb.log_error(
+                        "DTRS Heatmap shutdown cleanup failed: "
+                        f"{heatmap_cleanup.message}"
+                    )
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
+                carb.log_error(f"DTRS Heatmap shutdown cleanup failed: {error}")
             try:
                 receipt = (
                     self._controller.clear_streamlines_static_runtime_from_open_stage()

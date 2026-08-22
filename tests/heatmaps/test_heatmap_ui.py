@@ -12,6 +12,7 @@ def test_heatmap_ui_has_one_test_action_and_draft_settings_apply_boundary() -> N
     assert '"Restore Heatmap Test"' in source
     assert '"Apply Heatmaps Settings"' in source
     assert '"Isolation"' in source
+    assert '"X-Ray Overlay"' in source
     assert '"Calibration"' in source
     assert '"Color Scale"' in source
     assert '"Confirm"' not in source
@@ -40,6 +41,9 @@ def test_heatmap_sections_start_collapsed_and_apply_preserves_the_draft() -> Non
 
     assert "collapsed=True" in heatmaps_section
     assert 'with ui.CollapsableFrame("Isolation", collapsed=True, height=0)' in source
+    assert (
+        'with ui.CollapsableFrame("X-Ray Overlay", collapsed=True, height=0)' in source
+    )
     assert 'with ui.CollapsableFrame("Calibration", collapsed=True, height=0)' in source
     assert 'with ui.CollapsableFrame("Color Scale", collapsed=True, height=0)' in source
     assert 'with ui.CollapsableFrame("Clamps", collapsed=True, height=0)' in source
@@ -58,6 +62,8 @@ def test_heatmap_controls_follow_catalog_readiness_and_gpu_hierarchy() -> None:
     assert '"Heatmap Settings will load after the production stage is ready."' in source
     assert "selector.parent_label" in source
     assert "ui.Spacer(width=indent)" in source
+    assert "heatmap_xray_overlay_groups_snapshot()" in source
+    assert "xray_overlay_group_ids" in source
 
 
 def test_color_scale_ui_uses_hex_draft_feedback_without_runtime_callbacks() -> None:

@@ -9,13 +9,15 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 
-def test_reload_config_restores_pre_heatmaps_production_sequence(monkeypatch) -> None:
+def test_reload_config_leaves_active_production_heatmap_before_reopen(
+    monkeypatch,
+) -> None:
     events: list[str] = []
     mixin = _scene_actions_mixin(monkeypatch, events)
 
     class Owner(mixin):
-        def __init__(self) -> None:
-            self._controller = _Controller()
+        def __init__(self, *, heatmap_active: bool = False) -> None:
+            self._controller = _Controller(heatmap_active=heatmap_active)
             self._motion_controller = _Motion(events, "previous_motion_reset")
             self._asset_label = _Text()
             self._lighting_status_label = _Text()
@@ -47,6 +49,7 @@ def test_reload_config_restores_pre_heatmaps_production_sequence(monkeypatch) ->
     asyncio.run(owner._reload_config_and_stage())
 
     assert owner._controller.calls == [
+        "cancel_transition",
         "xray_cleanup",
         "streamlines_cleanup",
         "reload_config",
@@ -63,6 +66,52 @@ def test_reload_config_restores_pre_heatmaps_production_sequence(monkeypatch) ->
     ]
     assert owner._asset_label.text == "Blackwell Rig"
     assert owner._lighting_status_label.text == "HDRI: review.hdr"
+
+
+def test_reload_config_releases_active_heatmap_before_xray_cleanup(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    mixin = _scene_actions_mixin(monkeypatch, events)
+
+    class Owner(mixin):
+        def __init__(self) -> None:
+            self._controller = _Controller(heatmap_active=True)
+            self._motion_controller = _Motion(events, "previous_motion_reset")
+            self._asset_label = _Text()
+            self._lighting_status_label = _Text()
+            self._reload_task = None
+
+        def _set_lighting_controls(self, _lighting) -> None:
+            return None
+
+        def _set_grid_controls(self, _grid) -> None:
+            return None
+
+        def _set_chassis_visibility_controls(self, _presentation) -> None:
+            return None
+
+        def _set_camera_controls(self, _camera) -> None:
+            return None
+
+        def _set_airflow_status(self, _status: str) -> None:
+            return None
+
+        def _set_status(self, _status: str) -> None:
+            return None
+
+        async def _load_default_asset(self, _event_label: str):
+            return SimpleNamespace(success=True)
+
+    owner = Owner()
+    asyncio.run(owner._reload_config_and_stage())
+
+    assert owner._controller.calls[:3] == [
+        "cancel_transition",
+        "heatmap_cleanup",
+        "xray_cleanup",
+    ]
+    assert not owner._controller.heatmap_production_active()
 
 
 def _scene_actions_mixin(monkeypatch, events: list[str]):
@@ -92,12 +141,24 @@ def _scene_actions_mixin(monkeypatch, events: list[str]):
 
 
 class _Controller:
-    def __init__(self) -> None:
+    def __init__(self, *, heatmap_active: bool = False) -> None:
         self.calls: list[str] = []
+        self._heatmap_active = heatmap_active
 
     def clear_xray_material_in_kit(self):
         self.calls.append("xray_cleanup")
         return SimpleNamespace(success=True, message="ok")
+
+    def cancel_visualization_transition(self) -> None:
+        self.calls.append("cancel_transition")
+
+    def heatmap_production_active(self) -> bool:
+        return self._heatmap_active
+
+    def deactivate_heatmap_production_in_kit(self):
+        self.calls.append("heatmap_cleanup")
+        self._heatmap_active = False
+        return SimpleNamespace(success=True, message="Heatmap restored")
 
     def clear_streamlines_static_runtime_from_open_stage(self):
         self.calls.append("streamlines_cleanup")

@@ -73,6 +73,8 @@ def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> No
     assert camera_task.cancelled
     assert telemetry_task.cancelled
     assert controller.calls == [
+        "cancel_transition",
+        "heatmap_cleanup",
         "streamlines_cleanup",
         "xray_cleanup",
         "stop_flow_callbacks",
@@ -116,6 +118,13 @@ class _Controller:
     def clear_streamlines_static_runtime_from_open_stage(self):
         self.calls.append("streamlines_cleanup")
         return SimpleNamespace(clean=True)
+
+    def cancel_visualization_transition(self) -> None:
+        self.calls.append("cancel_transition")
+
+    def deactivate_heatmap_production_in_kit(self):
+        self.calls.append("heatmap_cleanup")
+        return SimpleNamespace(success=True)
 
     def clear_xray_material_in_kit(self) -> None:
         self.calls.append("xray_cleanup")

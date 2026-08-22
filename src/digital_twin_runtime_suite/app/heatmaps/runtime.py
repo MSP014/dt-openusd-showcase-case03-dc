@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .catalog import HeatmapCatalog, build_heatmap_catalog
+from .composition import HeatmapCompositionPlan, build_heatmap_composition_plan
 from .isolation import HeatmapIsolation
 from .presentation import (
     HeatmapPresentation,
@@ -56,6 +57,8 @@ class HeatmapRuntimeMixin:
     """Coordinate prepared catalog, settings, isolation, material, and smoothing."""
 
     HEATMAP_SERVER_ROOT_PATH = "/blackwell_rig"
+    _HEATMAP_DEBUG_OWNER = "debug"
+    _HEATMAP_PRODUCTION_OWNER = "production"
 
     def prepare_heatmaps_for_open_stage(self) -> HeatmapCatalog | None:
         """Build a read-only catalog after the production stage-open success barrier."""
@@ -68,7 +71,8 @@ class HeatmapRuntimeMixin:
         self._stop_heatmap_presentation_scheduler()
         self._heatmap_isolation.discard_stale_stage(stage)
         self._heatmap_presentation.discard_stale_stage(stage)
-        self._heatmap_applied_settings = self._heatmap_settings_store.load()
+        self._heatmap_presentation_owner = None
+        self._heatmap_applied_settings = self._load_heatmap_settings_for_open_stage()
         self._heatmap_catalog = build_heatmap_catalog(
             stage,
             root_path=self.HEATMAP_SERVER_ROOT_PATH,
@@ -92,9 +96,36 @@ class HeatmapRuntimeMixin:
         return self.heatmap_applied_settings_snapshot()
 
     def heatmap_test_active(self) -> bool:
-        """Return whether generic Heatmap presentation currently owns Session state."""
+        """Return whether the standalone debug harness owns Heatmap Session state."""
 
-        return self._heatmap_presentation.active
+        return self._heatmap_presentation_owner == self._HEATMAP_DEBUG_OWNER
+
+    def heatmap_production_active(self) -> bool:
+        """Return whether the primary visualization mode owns Heatmap state."""
+
+        return self._heatmap_presentation_owner == self._HEATMAP_PRODUCTION_OWNER
+
+    def heatmap_xray_overlay_groups_snapshot(self):
+        """Expose config-owned X-Ray group descriptors for the Heatmap UI draft."""
+
+        config = getattr(self, "config", None)
+        presentation = getattr(config, "chassis_presentation", None)
+        return getattr(presentation, "xray_target_groups", ())
+
+    def _load_heatmap_settings_for_open_stage(self) -> HeatmapSettings:
+        """Seed old settings files with the former all-groups X-Ray preview."""
+
+        settings = self._heatmap_settings_store.load()
+        if self._heatmap_settings_store.has_explicit_xray_overlay_selection():
+            return settings
+        seeded = replace(
+            settings,
+            xray_overlay_group_ids=tuple(
+                group.group_id for group in self.heatmap_xray_overlay_groups_snapshot()
+            ),
+        )
+        self._heatmap_settings_store.save(seeded)
+        return seeded
 
     def heatmap_global_celsius_scale_snapshot(
         self,
@@ -156,15 +187,23 @@ class HeatmapRuntimeMixin:
                 "Heatmap test requires an open production stage.",
             )
         settings = self._heatmap_applied_settings
+        if self.heatmap_production_active():
+            return self._result(
+                False,
+                "Heatmap production mode is active; Restore it from Visualization.",
+            )
         if not settings.isolation_selectors:
             return self.restore_heatmap_test_in_kit()
         try:
             plan = self._prepare_plan(settings)
         except ValueError as error:
             return self._result(False, str(error))
-        if self._heatmap_presentation.active:
+        if self.heatmap_test_active():
             return self._result(True, "Heatmap test is already active.")
-        return self._activate_plan(stage, plan)
+        result = self._activate_plan(stage, plan)
+        if result.success:
+            self._heatmap_presentation_owner = self._HEATMAP_DEBUG_OWNER
+        return result
 
     def restore_heatmap_test_in_kit(self) -> HeatmapRuntimeResult:
         """Restore exact Heatmap-owned state without saving configuration."""
@@ -172,7 +211,15 @@ class HeatmapRuntimeMixin:
         stage = self._heatmap_stage()
         if stage is None:
             return self._result(True, "Heatmap test is already restored.")
-        return self._restore_active_presentation(stage)
+        if self.heatmap_production_active():
+            return self._result(
+                False,
+                "Heatmap production mode is active; Restore it from Visualization.",
+            )
+        result = self._restore_active_presentation(stage)
+        if result.success:
+            self._heatmap_presentation_owner = None
+        return result
 
     def apply_heatmap_settings_in_kit(
         self,
@@ -184,9 +231,12 @@ class HeatmapRuntimeMixin:
             candidate.validate()
             catalog = self._require_heatmap_catalog()
             catalog.validate_selection(candidate.isolation_selectors)
+            self._validate_heatmap_xray_overlay_selection(candidate)
         except ValueError as error:
             return self._result(False, str(error))
         stage = self._heatmap_stage()
+        if self.heatmap_production_active():
+            return self._apply_production_heatmap_settings_in_kit(candidate, stage)
         active = self._heatmap_presentation.active
         if not active:
             try:
@@ -234,7 +284,63 @@ class HeatmapRuntimeMixin:
                 message += f" Candidate presentation cleanup failed: {cleanup.message}"
             return self._failed_apply_result(message, rollback)
         self._heatmap_applied_settings = candidate
+        if plan is None:
+            self._heatmap_presentation_owner = None
         return candidate_result
+
+    def activate_heatmap_production_in_kit(self) -> HeatmapRuntimeResult:
+        """Apply the existing Heatmap system plus its dedicated X-Ray overlay."""
+
+        stage = self._heatmap_stage()
+        if stage is None:
+            return self._result(
+                False,
+                "Heatmap production mode requires an open production stage.",
+            )
+        if self.heatmap_test_active():
+            return self._result(
+                False,
+                "Restore Heatmap Test before activating Heatmap visualization.",
+            )
+        if self.heatmap_production_active():
+            return self._result(True, "Heatmap production mode is already active.")
+        settings = self._heatmap_applied_settings
+        if not settings.isolation_selectors:
+            return self._result(
+                False,
+                "Heatmap production mode requires at least one Isolation selection.",
+            )
+        try:
+            plan, composition = self._prepare_production_plan(settings)
+        except ValueError as error:
+            return self._result(False, str(error))
+        return self._activate_production_plan(stage, plan, composition)
+
+    def deactivate_heatmap_production_in_kit(self) -> HeatmapRuntimeResult:
+        """Restore Heatmap state, then return X-Ray ownership to the manual UI."""
+
+        if not self.heatmap_production_active():
+            return self._result(True, "Heatmap production mode is already restored.")
+        stage = self._heatmap_stage()
+        if stage is None:
+            return self._result(
+                False, "Heatmap production cleanup requires an open stage."
+            )
+        restored = self._restore_active_presentation(stage)
+        if not restored.success:
+            return restored
+        released = self.release_heatmap_xray_override_in_kit()
+        if not released.success:
+            rollback = self._restore_production_after_failed_apply(
+                stage,
+                self._heatmap_applied_settings,
+            )
+            message = released.message
+            if not rollback.success:
+                message += f" Heatmap rollback failed: {rollback.message}"
+            return self._result(False, message)
+        self._heatmap_presentation_owner = None
+        return self._result(True, "Heatmap production mode restored the prior scene.")
 
     def set_heatmap_presentation_cadence_hz(self, cadence_hz: int) -> None:
         """Allow tests to request the existing 2 Hz cadence and reject other values."""
@@ -293,8 +399,21 @@ class HeatmapRuntimeMixin:
             self._heatmap_telemetry_config,
         )
 
-    def _activate_plan(self, stage, plan) -> HeatmapRuntimeResult:
-        isolation = self._heatmap_isolation.apply(stage, plan.selected_target_paths)
+    def _activate_plan(
+        self,
+        stage,
+        plan,
+        *,
+        visibility_target_paths: tuple[str, ...] | None = None,
+    ) -> HeatmapRuntimeResult:
+        isolation = self._heatmap_isolation.apply(
+            stage,
+            (
+                plan.selected_target_paths
+                if visibility_target_paths is None
+                else visibility_target_paths
+            ),
+        )
         if not isolation.success:
             return self._result(False, isolation.message)
         presentation = self._heatmap_presentation.apply(stage, plan)
@@ -317,7 +436,141 @@ class HeatmapRuntimeMixin:
         isolation = self._heatmap_isolation.restore(stage)
         if not isolation.success:
             return self._result(False, isolation.message)
-        return self._result(True, "Heatmap test restored the prior scene presentation.")
+        return self._result(True, "Heatmap presentation restored the prior scene.")
+
+    def _prepare_production_plan(
+        self,
+        settings: HeatmapSettings,
+    ) -> tuple[object, HeatmapCompositionPlan]:
+        """Prepare generic material and X-Ray precedence plans before mutation."""
+
+        catalog = self._require_heatmap_catalog()
+        plan = self._prepare_plan(settings)
+        composition = build_heatmap_composition_plan(
+            settings,
+            catalog,
+            self.heatmap_xray_overlay_groups_snapshot(),
+        )
+        return plan, composition
+
+    def _validate_heatmap_xray_overlay_selection(
+        self,
+        settings: HeatmapSettings,
+    ) -> None:
+        """Reject persisted overlay ids not present in the shared X-Ray config."""
+
+        configured_ids = {
+            group.group_id for group in self.heatmap_xray_overlay_groups_snapshot()
+        }
+        unknown = set(settings.xray_overlay_group_ids) - configured_ids
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ValueError(f"Unknown Heatmap X-Ray Overlay groups: {joined}")
+
+    def _activate_production_plan(
+        self,
+        stage,
+        plan,
+        composition: HeatmapCompositionPlan,
+    ) -> HeatmapRuntimeResult:
+        """Apply one prepared X-Ray/Heatmap composition as an all-or-nothing unit."""
+
+        xray = self.apply_heatmap_xray_override_in_kit(
+            frozenset(composition.xray_selected_group_ids),
+            composition.xray_excluded_paths,
+        )
+        if not xray.success:
+            return self._result(False, xray.message)
+        presentation = self._activate_plan(
+            stage,
+            plan,
+            visibility_target_paths=composition.visibility_target_paths,
+        )
+        if not presentation.success:
+            release = self.release_heatmap_xray_override_in_kit()
+            message = presentation.message
+            if not release.success:
+                message += f" X-Ray rollback failed: {release.message}"
+            return self._result(False, message)
+        self._heatmap_presentation_owner = self._HEATMAP_PRODUCTION_OWNER
+        return self._result(
+            True,
+            "Heatmap production mode is active.",
+            target_paths=presentation.target_paths,
+            unavailable_target_paths=presentation.unavailable_target_paths,
+        )
+
+    def _apply_production_heatmap_settings_in_kit(
+        self,
+        candidate: HeatmapSettings,
+        stage,
+    ) -> HeatmapRuntimeResult:
+        """Transactionally replace a live production composition before persistence."""
+
+        previous = self._heatmap_applied_settings
+        if not candidate.isolation_selectors:
+            restored = self.deactivate_heatmap_production_in_kit()
+            if not restored.success:
+                return restored
+            try:
+                self._heatmap_settings_store.save(candidate)
+            except OSError as error:
+                rollback = self._restore_production_after_failed_apply(stage, previous)
+                return self._failed_apply_result(
+                    f"Heatmap settings could not be saved: {error}", rollback
+                )
+            self._heatmap_applied_settings = candidate
+            self._visualization_mode_state.reset()
+            return self._result(
+                True,
+                "Heatmap selection cleared; visualization returned to Normal.",
+            )
+        try:
+            candidate_plan, candidate_composition = self._prepare_production_plan(
+                candidate
+            )
+        except ValueError as error:
+            return self._result(False, str(error))
+        restored = self.deactivate_heatmap_production_in_kit()
+        if not restored.success:
+            return restored
+        candidate_result = self._activate_production_plan(
+            stage,
+            candidate_plan,
+            candidate_composition,
+        )
+        if not candidate_result.success:
+            rollback = self._restore_production_after_failed_apply(stage, previous)
+            return self._failed_apply_result(candidate_result.message, rollback)
+        try:
+            self._heatmap_settings_store.save(candidate)
+        except OSError as error:
+            cleanup = self.deactivate_heatmap_production_in_kit()
+            rollback = self._restore_production_after_failed_apply(stage, previous)
+            message = f"Heatmap settings could not be saved: {error}"
+            if not cleanup.success:
+                message += f" Candidate cleanup failed: {cleanup.message}"
+            return self._failed_apply_result(message, rollback)
+        self._heatmap_applied_settings = candidate
+        return candidate_result
+
+    def _restore_production_after_failed_apply(
+        self,
+        stage,
+        settings: HeatmapSettings,
+    ) -> HeatmapRuntimeResult:
+        """Restore the prior complete production composition after failed Apply."""
+
+        if not settings.isolation_selectors:
+            return self._result(True, "Previous Heatmap production mode was off.")
+        try:
+            plan, composition = self._prepare_production_plan(settings)
+        except ValueError as error:
+            return self._result(
+                False,
+                f"Previous Heatmap production plan could not be prepared: {error}",
+            )
+        return self._activate_production_plan(stage, plan, composition)
 
     def _restore_previous_after_failed_apply(
         self,
@@ -450,6 +703,7 @@ def initialise_heatmap_runtime(controller, config_path) -> None:
         root_path=HeatmapRuntimeMixin.HEATMAP_SERVER_ROOT_PATH
     )
     controller._heatmap_presentation = HeatmapPresentation()
+    controller._heatmap_presentation_owner = None
     controller._heatmap_presentation_smoother = HeatmapPresentationSmoother(
         transition_duration_seconds=HEATMAP_PRESENTATION_TRANSITION_DURATION_SECONDS
     )
