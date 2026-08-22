@@ -34,6 +34,7 @@ def test_streamlines_xray_mode_follows_streamlines_in_selector_order():
         "Smoke",
         "Streamlines",
         "Streamlines + X-Ray",
+        "Heatmap",
     )
 
 
@@ -153,6 +154,33 @@ class _Runtime(VisualizationModeRuntimeMixin):
             True,
             "Flow workload reconciled.",
             VisualizationMode.STREAMLINES,
+        )
+
+    def apply_heatmap_xray_override_in_kit(self):
+        self._override_owner = "heatmap_preview"
+        self._override_targets = frozenset({"chassis", "fans"})
+        return VisualizationModeResult(
+            True,
+            "X-Ray override applied.",
+            VisualizationMode.NORMAL,
+        )
+
+    def release_heatmap_xray_override_in_kit(self):
+        self._override_owner = None
+        self._override_targets = frozenset()
+        return VisualizationModeResult(
+            True,
+            "X-Ray override released.",
+            VisualizationMode.NORMAL,
+        )
+
+    def restore_heatmap_xray_override_in_kit(self):
+        self._override_owner = "heatmap_preview"
+        self._override_targets = frozenset({"chassis", "fans"})
+        return VisualizationModeResult(
+            True,
+            "X-Ray override restored.",
+            VisualizationMode.NORMAL,
         )
 
     def apply_streamlines_xray_override_in_kit(self):
@@ -733,6 +761,20 @@ def test_normal_to_smoke_preserves_independent_manual_xray_selection():
     assert runtime.xray_target_snapshot().override_owner is None
 
 
+def test_heatmap_preserves_manual_xray_selection_and_uses_all_configured_targets():
+    runtime = _Runtime()
+
+    result = asyncio.run(runtime.request_visualization_mode_in_kit("Heatmap"))
+
+    assert result.success is True
+    assert runtime.visualization_snapshot().committed is VisualizationMode.HEATMAP
+    assert runtime.xray_target_snapshot().manual_target_ids == frozenset({"chassis"})
+    assert runtime.xray_target_snapshot().effective_target_ids == frozenset(
+        {"chassis", "fans"}
+    )
+    assert runtime.xray_target_snapshot().override_owner == "heatmap_preview"
+
+
 @pytest.mark.parametrize(
     ("source", "target"),
     (
@@ -742,12 +784,20 @@ def test_normal_to_smoke_preserves_independent_manual_xray_selection():
         ("Streamlines", "Normal"),
         ("Normal", "Streamlines + X-Ray"),
         ("Streamlines + X-Ray", "Normal"),
+        ("Normal", "Heatmap"),
+        ("Heatmap", "Normal"),
         ("Smoke", "Streamlines"),
         ("Streamlines", "Smoke"),
         ("Smoke", "Streamlines + X-Ray"),
         ("Streamlines + X-Ray", "Smoke"),
+        ("Smoke", "Heatmap"),
+        ("Heatmap", "Smoke"),
+        ("Streamlines", "Heatmap"),
+        ("Heatmap", "Streamlines"),
         ("Streamlines", "Streamlines + X-Ray"),
         ("Streamlines + X-Ray", "Streamlines"),
+        ("Streamlines + X-Ray", "Heatmap"),
+        ("Heatmap", "Streamlines + X-Ray"),
     ),
 )
 def test_supported_mode_graph_activates_target_independently(source, target):
@@ -769,6 +819,7 @@ def test_supported_mode_graph_activates_target_independently(source, target):
         "Smoke": (True, False, None, 0),
         "Streamlines": (False, True, None, 1),
         "Streamlines + X-Ray": (False, True, "streamlines_xray", 1),
+        "Heatmap": (False, False, "heatmap_preview", 0),
     }
     expected = visible[target]
     assert runtime._smoke_visible is expected[0]

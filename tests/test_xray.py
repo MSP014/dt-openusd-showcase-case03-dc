@@ -93,13 +93,42 @@ def test_project_xray_target_groups_are_explicit_and_render_scoped():
         "rear_fans",
         "cpu_cooler_fans",
         "gpu_shrouds",
+        "cables",
         "psu_enclosure",
     )
     assert groups["front_fans"].paths[-1].endswith("p120_fan_cable_d")
     assert groups["rear_fans"].paths[-1].endswith("p8_fan_cable_b")
     assert groups["cpu_cooler_fans"].paths[0].endswith("cpu_fan")
     assert any(path.endswith("RTX4500/power") for path in groups["gpu_shrouds"].paths)
+    assert {
+        path for path in groups["gpu_shrouds"].paths if path.endswith("io/ports")
+    } == {
+        f"/blackwell_rig/compute/gpu_{index:02d}/geo/render/RTX4500/io/ports"
+        for index in range(1, 4)
+    }
     assert any(path.endswith("cables_gpu_3") for path in groups["gpu_shrouds"].paths)
+    cables_root = "/blackwell_rig/power/cables/geo/render/cables"
+    non_gpu_cable_names = {
+        "connector",
+        "mb_face_panel_cable_right",
+        "p120_fan_cable_d",
+        "p120_fan_cable_c",
+        "p120_fan_cable_a",
+        "p120_fan_cable_b",
+        "p8_fan_cable_b",
+        "p8_fan_cable_a",
+        "mb_cpu_fan_cable_left",
+        "mb_cpu_fan_cable_right",
+        "mb_pcie_power",
+        "mb_cpu_power",
+        "mb_pcie_aux",
+        "mb_power_cables",
+    }
+    assert frozenset(groups["cables"].paths) == {
+        f"{cables_root}/{name}" for name in non_gpu_cable_names
+    }
+    assert all("cables_gpu_" not in path for path in groups["cables"].paths)
+    assert set(groups["cables"].paths).isdisjoint(groups["gpu_shrouds"].paths)
     assert groups["psu_enclosure"].paths == (
         "/blackwell_rig/power/psu/geo/render/psu/cooling",
         "/blackwell_rig/power/psu/geo/render/psu/housing",

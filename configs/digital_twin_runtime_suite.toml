@@ -88,15 +88,37 @@ paths = [
   "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/shroud",
   "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/blower",
   "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/power",
+  "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/io/ports",
   "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/shroud",
   "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/blower",
   "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/power",
+  "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/io/ports",
   "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/shroud",
   "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/blower",
   "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/power",
+  "/blackwell_rig/compute/gpu_03/geo/render/RTX4500/io/ports",
   "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_1",
   "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_2",
   "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_3",
+]
+
+[chassis_presentation.xray_target_groups.cables]
+label = "Cables"
+paths = [
+  "/blackwell_rig/power/cables/geo/render/cables/connector",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_face_panel_cable_right",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_d",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_c",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_a",
+  "/blackwell_rig/power/cables/geo/render/cables/p120_fan_cable_b",
+  "/blackwell_rig/power/cables/geo/render/cables/p8_fan_cable_b",
+  "/blackwell_rig/power/cables/geo/render/cables/p8_fan_cable_a",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_cpu_fan_cable_left",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_cpu_fan_cable_right",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_pcie_power",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_cpu_power",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_pcie_aux",
+  "/blackwell_rig/power/cables/geo/render/cables/mb_power_cables",
 ]
 
 [chassis_presentation.xray_target_groups.psu_enclosure]

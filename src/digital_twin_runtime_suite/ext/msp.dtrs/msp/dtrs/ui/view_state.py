@@ -57,22 +57,38 @@ class ViewStateUiMixin:
         self._sync_xray_target_controls()
 
     def _sync_xray_target_controls(self) -> None:
-        """Reflect X-Ray's effective target owner without simulating UI callbacks."""
+        """Synchronize temporary X-Ray ownership without discarding a draft."""
 
         if not self._controller:
             return
-        from digital_twin_runtime_suite.app.view_controls import bool_model_value
+        from digital_twin_runtime_suite.app.view_controls import (
+            bool_model_value,
+            xray_target_draft_requires_snapshot_sync,
+        )
 
         snapshot = self._controller.xray_target_snapshot()
         effective = snapshot.effective_target_ids
         override_active = snapshot.override_owner is not None
+        previous_override_owner = getattr(
+            self,
+            "_xray_target_controls_override_owner",
+            None,
+        )
+        initialized = getattr(self, "_xray_target_controls_initialized", False)
+        sync_draft = xray_target_draft_requires_snapshot_sync(
+            initialized=initialized,
+            previous_override_owner=previous_override_owner,
+            current_override_owner=snapshot.override_owner,
+        )
         for group_id, model in self._xray_target_models.items():
             expected = group_id in effective
-            if bool_model_value(model) != expected:
+            if sync_draft and bool_model_value(model) != expected:
                 model.set_value(expected)
             checkbox = self._xray_target_checkboxes.get(group_id)
             if checkbox:
                 checkbox.enabled = not override_active
+        self._xray_target_controls_initialized = True
+        self._xray_target_controls_override_owner = snapshot.override_owner
 
     @staticmethod
     def _health_colour(health: str) -> int:

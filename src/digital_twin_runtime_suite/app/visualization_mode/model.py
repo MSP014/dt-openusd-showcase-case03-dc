@@ -14,6 +14,7 @@ class VisualizationMode(str, Enum):
     SMOKE = "Smoke"
     STREAMLINES = "Streamlines"
     STREAMLINES_XRAY = "Streamlines + X-Ray"
+    HEATMAP = "Heatmap"
 
 
 @dataclass(frozen=True)

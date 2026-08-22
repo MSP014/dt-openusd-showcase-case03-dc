@@ -28,6 +28,26 @@ def bool_model_value(model: Any) -> bool:
     return bool(model)
 
 
+def xray_target_draft_requires_snapshot_sync(
+    *,
+    initialized: bool,
+    previous_override_owner: str | None,
+    current_override_owner: str | None,
+) -> bool:
+    """Return whether runtime X-Ray state must replace the UI target draft.
+
+    Normal-mode target checkboxes are an operator draft until Apply. A temporary
+    presentation override owns those controls, so entering or leaving one must
+    reflect its effective runtime targets instead.
+    """
+
+    return (
+        not initialized
+        or previous_override_owner is not None
+        or current_override_owner is not None
+    )
+
+
 def int_model_value(model: Any) -> int:
     """Read an integer selection from an OmniUI-like model or test double."""
 

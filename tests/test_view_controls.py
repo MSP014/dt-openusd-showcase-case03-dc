@@ -25,6 +25,7 @@ from digital_twin_runtime_suite.app.view_controls import (
     rgb_to_hex,
     rgb_to_hsv,
     smoke_tuning_option_index,
+    xray_target_draft_requires_snapshot_sync,
 )
 
 
@@ -148,6 +149,32 @@ def test_bool_model_value_accepts_integer_and_truthiness_fallbacks():
     assert bool_model_value(IntGetterModel(0)) is False
     assert bool_model_value(TruthyModel("checked")) is True
     assert bool_model_value(TruthyModel("")) is False
+
+
+def test_xray_target_draft_is_not_overwritten_by_normal_mode_refreshes():
+    assert xray_target_draft_requires_snapshot_sync(
+        initialized=False,
+        previous_override_owner=None,
+        current_override_owner=None,
+    )
+    assert not xray_target_draft_requires_snapshot_sync(
+        initialized=True,
+        previous_override_owner=None,
+        current_override_owner=None,
+    )
+
+
+def test_xray_target_draft_syncs_when_a_temporary_override_changes_owner():
+    assert xray_target_draft_requires_snapshot_sync(
+        initialized=True,
+        previous_override_owner=None,
+        current_override_owner="heatmap_preview",
+    )
+    assert xray_target_draft_requires_snapshot_sync(
+        initialized=True,
+        previous_override_owner="heatmap_preview",
+        current_override_owner=None,
+    )
 
 
 def test_face_panel_action_label_describes_next_available_action():
