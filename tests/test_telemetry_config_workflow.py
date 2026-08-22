@@ -8,6 +8,14 @@ from pathlib import Path
 
 import pytest
 
+from digital_twin_runtime_suite.app.telemetry.config import (
+    COMPONENT_TUNING_GROUPS,
+    TelemetryConfig,
+)
+from digital_twin_runtime_suite.app.telemetry.provider import SyntheticTelemetryProvider
+
+CONFIG_PATH = Path("configs/telemetry_provider.toml")
+
 
 @pytest.mark.parametrize(
     ("field", "value", "message"),
@@ -35,6 +43,34 @@ def test_target_must_stay_inside_the_safe_range():
 
     with pytest.raises(ValueError, match="Target"):
         module.TelemetryConfigWorkflow._validate(edit)
+
+
+@pytest.mark.parametrize("group_metric", ("nvme_temp_c", "ram_temp_c"))
+def test_grouped_thermal_tuning_updates_every_repeated_metric(tmp_path, group_metric):
+    module = _load_workflow()
+    config_path = tmp_path / "telemetry_provider.toml"
+    config_path.write_text(CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    config = TelemetryConfig.load(config_path, apply_local_overrides=False)
+    provider = SyntheticTelemetryProvider(config, seed=1)
+    edit = module.TelemetryConfigEdit(
+        default_mode="Nominal",
+        default_refresh_interval_s=1.0,
+        provider_tick_seconds=1.0,
+        interpolation_factor=0.5,
+        mode_name="Nominal",
+        metric_ids=COMPONENT_TUNING_GROUPS[group_metric],
+        target=45.0,
+        jitter=0.4,
+        minimum=35.0,
+        maximum=55.0,
+    )
+
+    replacement = module.TelemetryConfigWorkflow(config_path).save(provider, edit)
+
+    assert all(
+        replacement.config.modes["Nominal"].numeric[metric_id].target == 45.0
+        for metric_id in COMPONENT_TUNING_GROUPS[group_metric]
+    )
 
 
 def _edit_payload() -> dict[str, object]:

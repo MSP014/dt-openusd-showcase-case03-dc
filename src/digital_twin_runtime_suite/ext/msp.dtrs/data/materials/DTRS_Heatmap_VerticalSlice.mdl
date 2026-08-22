@@ -1,0 +1,89 @@
+mdl 1.7;
+
+import ::df::*;
+import ::math::*;
+import ::state::*;
+
+float dtrs_clamp01(float value) = value < 0.0 ? 0.0 :
+    (value > 1.0 ? 1.0 : value);
+
+float dtrs_cold_biased_weight(float normalized_weight) =
+    normalized_weight <= 0.75 ? 0.5 * (normalized_weight / 0.75) :
+    0.5 + 0.5 * ((normalized_weight - 0.75) / 0.25);
+
+color dtrs_palette(
+    float scalar,
+    float stop_0, color color_0,
+    float stop_1, color color_1,
+    float stop_2, color color_2,
+    float stop_3, color color_3,
+    float stop_4, color color_4,
+    float stop_5, color color_5,
+    float stop_6, color color_6
+) = let {
+    float value = dtrs_clamp01(scalar);
+} in value <= stop_1 ? math::lerp(color_0, color_1,
+        (value - stop_0) / (stop_1 - stop_0)) :
+    value <= stop_2 ? math::lerp(color_1, color_2,
+        (value - stop_1) / (stop_2 - stop_1)) :
+    value <= stop_3 ? math::lerp(color_2, color_3,
+        (value - stop_2) / (stop_3 - stop_2)) :
+    value <= stop_4 ? math::lerp(color_3, color_4,
+        (value - stop_3) / (stop_4 - stop_3)) :
+    value <= stop_5 ? math::lerp(color_4, color_5,
+        (value - stop_4) / (stop_5 - stop_4)) :
+    value <= stop_6 ? math::lerp(color_5, color_6,
+        (value - stop_5) / (stop_6 - stop_5)) : color_6;
+
+export material DTRS_Heatmap_VerticalSlice(
+    float telemetry_celsius = 60.0,
+    float delta_minimum_celsius = 0.0,
+    float delta_maximum_celsius = 0.0,
+    float scale_minimum_celsius = 0.0,
+    float scale_maximum_celsius = 100.0,
+    float thermal_weight_minimum = 0.0,
+    float thermal_weight_maximum = 1.0,
+    float thermal_weight_remap_mode = 0.0,
+    float stop_0 = 0.0, color color_0 = color(0.29, 0.0, 0.51),
+    float stop_1 = 0.166667, color color_1 = color(0.0, 0.0, 1.0),
+    float stop_2 = 0.333333, color color_2 = color(0.0, 1.0, 1.0),
+    float stop_3 = 0.5, color color_3 = color(0.0, 1.0, 0.0),
+    float stop_4 = 0.666667, color color_4 = color(1.0, 1.0, 0.0),
+    float stop_5 = 0.833333, color color_5 = color(1.0, 0.5, 0.0),
+    float stop_6 = 1.0, color color_6 = color(1.0, 0.0, 0.0)
+) = let {
+    float authored_weight = dtrs_clamp01(state::texture_coordinate(0).x);
+    float weight_minimum = dtrs_clamp01(thermal_weight_minimum);
+    float weight_maximum = dtrs_clamp01(thermal_weight_maximum);
+    float weight_span = weight_maximum - weight_minimum;
+    float normalized_weight = weight_span <= 0.0 ? authored_weight :
+        dtrs_clamp01((authored_weight - weight_minimum) / weight_span);
+    float remapped_weight = thermal_weight_remap_mode < 0.5 ? normalized_weight :
+        dtrs_cold_biased_weight(normalized_weight);
+    float weight = weight_span <= 0.0 ? authored_weight :
+        weight_minimum + weight_span * dtrs_clamp01(remapped_weight);
+    float delta = math::lerp(delta_minimum_celsius, delta_maximum_celsius, weight);
+    float temperature = telemetry_celsius + delta;
+    float span = scale_maximum_celsius - scale_minimum_celsius;
+    float scalar = span <= 0.0 ? 0.0 : dtrs_clamp01(
+        (temperature - scale_minimum_celsius) / span
+    );
+    color heatmap_color = dtrs_palette(
+        scalar,
+        stop_0, color_0,
+        stop_1, color_1,
+        stop_2, color_2,
+        stop_3, color_3,
+        stop_4, color_4,
+        stop_5, color_5,
+        stop_6, color_6
+    );
+} in material(
+    surface: material_surface(
+        scattering: df::diffuse_reflection_bsdf(tint: heatmap_color),
+        emission: material_emission(
+            df::diffuse_edf(),
+            intensity: heatmap_color * color(1.5)
+        )
+    )
+);

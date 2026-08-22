@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from digital_twin_runtime_suite.app.telemetry.config import (
+    COMPONENT_TUNING_GROUPS,
     NUMERIC_METRICS,
     TUNING_METRICS,
     TelemetryConfig,
@@ -41,7 +42,20 @@ def test_packaged_telemetry_config_loads_all_modes_and_metrics():
     assert config.modes["Nominal"].strings["health_state"] == "OK"
     assert set(config.modes["Nominal"].numeric) == NUMERIC_METRICS
     assert "gpu_power_w_total" not in NUMERIC_METRICS
-    assert len(TUNING_METRICS) == 23
+    assert {"nvme_temp_c", "ram_temp_c"} <= TUNING_METRICS
+    assert {
+        "motherboard_temp_c",
+        "chipset_temp_c",
+        "vrm_e_temp_c",
+        "vrm_w_temp_c",
+    } <= TUNING_METRICS
+    assert COMPONENT_TUNING_GROUPS["nvme_temp_c"] == (
+        "nvme_1_temp_c",
+        "nvme_2_temp_c",
+    )
+    assert COMPONENT_TUNING_GROUPS["ram_temp_c"] == tuple(
+        f"ram_{index}_temp_c" for index in range(1, 9)
+    )
     for mode in config.modes.values():
         assert (
             len({mode.numeric[f"gpu_{index}_temp_c"].target for index in range(1, 4)})
@@ -67,6 +81,30 @@ def test_packaged_telemetry_config_loads_all_modes_and_metrics():
         assert all(
             mode.numeric[f"rear_fan_{index}_rpm"].maximum <= 5000.0
             for index in range(1, 3)
+        )
+        assert all(
+            mode.numeric[f"nvme_{index}_temp_c"].maximum < 70.0 for index in range(1, 3)
+        )
+        assert all(
+            mode.numeric[f"ram_{index}_temp_c"].maximum <= 70.0 for index in range(1, 9)
+        )
+
+    expected_targets = {
+        "motherboard_temp_c": (31.0, 37.0, 43.0, 48.0),
+        "chipset_temp_c": (42.0, 50.0, 58.0, 66.0),
+        "vrm_e_temp_c": (39.0, 54.0, 68.0, 80.0),
+        "vrm_w_temp_c": (39.0, 54.0, 68.0, 80.0),
+        "nvme_1_temp_c": (36.0, 45.0, 55.0, 63.0),
+        "nvme_2_temp_c": (36.0, 45.0, 55.0, 63.0),
+        "ram_1_temp_c": (34.0, 43.0, 52.0, 60.0),
+    }
+    for metric_id, targets in expected_targets.items():
+        assert (
+            tuple(
+                config.modes[mode_name].numeric[metric_id].target
+                for mode_name in ("Idle", "Nominal", "Surge", "Critical")
+            )
+            == targets
         )
 
 

@@ -33,6 +33,7 @@ class _Controller:
         status_callback("cache=1/8; workload=Idle; profile=volume_coverage")
         return SimpleNamespace(
             success=True,
+            results=(SimpleNamespace(reused=False),),
             message="All configured production Streamlines caches are VALID.",
         )
 
@@ -66,6 +67,16 @@ def test_cache_set_action_recalculates_and_saves_the_shared_speed_scale():
             self.enabled = []
             self.statuses = []
             self.material_statuses = []
+            self._validation_workflow = SimpleNamespace(cache_rebuilds=0)
+            setattr(
+                self._validation_workflow,
+                "invalidate_streamlines_receipts_after_cache_rebuild",
+                lambda: setattr(
+                    self._validation_workflow,
+                    "cache_rebuilds",
+                    self._validation_workflow.cache_rebuilds + 1,
+                ),
+            )
 
         def _set_streamlines_cache_buttons_enabled(self, enabled: bool) -> None:
             self.enabled.append(enabled)
@@ -91,3 +102,4 @@ def test_cache_set_action_recalculates_and_saves_the_shared_speed_scale():
         "scale saved locally: 0.25..3.5 source velocity units."
     ]
     assert owner.enabled == [True]
+    assert owner._validation_workflow.cache_rebuilds == 1

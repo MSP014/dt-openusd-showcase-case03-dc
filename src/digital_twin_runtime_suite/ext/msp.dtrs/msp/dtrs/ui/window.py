@@ -114,7 +114,7 @@ class DtrsWindowUiMixin:
                 with self._config_frame:
                     self._build_config_tab(config, default_asset)
 
-        self._select_sidebar_tab("Telemetry")
+        self._select_sidebar_tab("View")
 
     def _build_config_tab(self, config, default_asset: str) -> None:
         with ui.ScrollingFrame(
@@ -157,14 +157,21 @@ class DtrsWindowUiMixin:
                     lambda: self._build_server_appearance_controls(
                         config.chassis_presentation
                     ),
+                    collapsed=True,
                 )
                 self._build_config_section(
                     "Visualization",
                     self._build_visualization_controls,
+                    collapsed=True,
+                )
+                self._build_config_section(
+                    "Heatmaps",
+                    self._build_heatmaps_controls,
                 )
                 self._build_config_section(
                     "Streamlines",
                     self._build_streamlines_profile_controls,
+                    collapsed=True,
                 )
                 self._build_config_section(
                     "Development validation",
@@ -174,6 +181,7 @@ class DtrsWindowUiMixin:
                 self._build_config_section(
                     "Airflow cache",
                     self._build_airflow_cache_controls,
+                    collapsed=True,
                 )
 
     def _build_server_appearance_controls(self, presentation) -> None:

@@ -41,6 +41,90 @@ jitter = 0.5
 min = 35.0
 max = 55.0
 
+[modes.Idle.motherboard_temp_c]
+target = 31.0
+jitter = 0.3
+min = 26.0
+max = 38.0
+
+[modes.Idle.chipset_temp_c]
+target = 42.0
+jitter = 0.4
+min = 34.0
+max = 50.0
+
+[modes.Idle.vrm_e_temp_c]
+target = 39.0
+jitter = 0.5
+min = 30.0
+max = 50.0
+
+[modes.Idle.vrm_w_temp_c]
+target = 39.0
+jitter = 0.5
+min = 30.0
+max = 50.0
+
+[modes.Idle.nvme_1_temp_c]
+target = 36.0
+jitter = 0.4
+min = 28.0
+max = 45.0
+
+[modes.Idle.nvme_2_temp_c]
+target = 36.0
+jitter = 0.4
+min = 28.0
+max = 45.0
+
+[modes.Idle.ram_1_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_2_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_3_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_4_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_5_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_6_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_7_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
+[modes.Idle.ram_8_temp_c]
+target = 34.0
+jitter = 0.25
+min = 28.0
+max = 42.0
+
 [modes.Idle.cpu_power_w]
 target = 75.0
 jitter = 3.0
@@ -105,6 +189,90 @@ target = 57.0
 jitter = 0.7
 min = 48.0
 max = 66.0
+
+[modes.Nominal.motherboard_temp_c]
+target = 37.0
+jitter = 0.4
+min = 30.0
+max = 45.0
+
+[modes.Nominal.chipset_temp_c]
+target = 50.0
+jitter = 0.5
+min = 40.0
+max = 59.0
+
+[modes.Nominal.vrm_e_temp_c]
+target = 54.0
+jitter = 0.6
+min = 42.0
+max = 66.0
+
+[modes.Nominal.vrm_w_temp_c]
+target = 54.0
+jitter = 0.6
+min = 42.0
+max = 66.0
+
+[modes.Nominal.nvme_1_temp_c]
+target = 45.0
+jitter = 0.5
+min = 35.0
+max = 55.0
+
+[modes.Nominal.nvme_2_temp_c]
+target = 45.0
+jitter = 0.5
+min = 35.0
+max = 55.0
+
+[modes.Nominal.ram_1_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_2_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_3_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_4_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_5_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_6_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_7_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
+
+[modes.Nominal.ram_8_temp_c]
+target = 43.0
+jitter = 0.35
+min = 35.0
+max = 52.0
 
 [modes.Nominal.cpu_power_w]
 target = 165.0
@@ -171,6 +339,90 @@ jitter = 0.8
 min = 64.0
 max = 80.0
 
+[modes.Surge.motherboard_temp_c]
+target = 43.0
+jitter = 0.5
+min = 35.0
+max = 52.0
+
+[modes.Surge.chipset_temp_c]
+target = 58.0
+jitter = 0.6
+min = 47.0
+max = 68.0
+
+[modes.Surge.vrm_e_temp_c]
+target = 68.0
+jitter = 0.7
+min = 55.0
+max = 82.0
+
+[modes.Surge.vrm_w_temp_c]
+target = 68.0
+jitter = 0.7
+min = 55.0
+max = 82.0
+
+[modes.Surge.nvme_1_temp_c]
+target = 55.0
+jitter = 0.6
+min = 44.0
+max = 64.0
+
+[modes.Surge.nvme_2_temp_c]
+target = 55.0
+jitter = 0.6
+min = 44.0
+max = 64.0
+
+[modes.Surge.ram_1_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_2_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_3_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_4_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_5_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_6_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_7_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
+[modes.Surge.ram_8_temp_c]
+target = 52.0
+jitter = 0.45
+min = 43.0
+max = 62.0
+
 [modes.Surge.cpu_power_w]
 target = 255.0
 jitter = 6.0
@@ -235,6 +487,90 @@ target = 86.0
 jitter = 0.6
 min = 82.0
 max = 92.0
+
+[modes.Critical.motherboard_temp_c]
+target = 48.0
+jitter = 0.5
+min = 40.0
+max = 58.0
+
+[modes.Critical.chipset_temp_c]
+target = 66.0
+jitter = 0.7
+min = 54.0
+max = 78.0
+
+[modes.Critical.vrm_e_temp_c]
+target = 80.0
+jitter = 0.8
+min = 68.0
+max = 92.0
+
+[modes.Critical.vrm_w_temp_c]
+target = 80.0
+jitter = 0.8
+min = 68.0
+max = 92.0
+
+[modes.Critical.nvme_1_temp_c]
+target = 63.0
+jitter = 0.6
+min = 52.0
+max = 69.0
+
+[modes.Critical.nvme_2_temp_c]
+target = 63.0
+jitter = 0.6
+min = 52.0
+max = 69.0
+
+[modes.Critical.ram_1_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_2_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_3_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_4_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_5_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_6_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_7_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
+
+[modes.Critical.ram_8_temp_c]
+target = 60.0
+jitter = 0.5
+min = 50.0
+max = 70.0
 
 [modes.Critical.cpu_power_w]
 target = 315.0

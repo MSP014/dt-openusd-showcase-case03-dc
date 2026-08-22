@@ -57,6 +57,7 @@ from digital_twin_runtime_suite.app.flow.quality_runtime import (
 from digital_twin_runtime_suite.app.flow.workload_transition import (
     AttachedWorkloadTransitionMixin,
 )
+from digital_twin_runtime_suite.app.heatmaps.runtime import HeatmapRuntimeMixin
 from digital_twin_runtime_suite.app.smoke.runtime import SmokeRuntimeMixin
 from digital_twin_runtime_suite.app.streamlines.runtime import (
     StreamlinesRuntimeMixin,
@@ -138,6 +139,7 @@ class FacePanelApplyResult:
 
 
 class RuntimeController(
+    HeatmapRuntimeMixin,
     VisualizationModeRuntimeMixin,
     StreamlinesRuntimeMixin,
     FlowRuntimeMixin,
@@ -184,6 +186,55 @@ class RuntimeController(
         # overlay rather than an owner of somebody else's Session opinion.
         self._xray_session_binding_layer_id: str | None = None
         self._xray_session_binding_snapshots: dict[str, object] = {}
+        # The Heatmap bootstrap writes only temporary Session visibility
+        # opinions. The dedicated mixin restores these snapshots during reload
+        # and shutdown without taking ownership of authored production layers.
+        self._heatmap_test_isolation_session_layer_id: str | None = None
+        self._heatmap_test_isolation_visibility_snapshots: dict[str, object] = {}
+        self._heatmap_test_isolation_created_scope_paths: set[str] = set()
+        self._heatmap_test_isolation_active = False
+        self._heatmap_test_isolation_target_path: str | None = None
+        self._heatmap_semantic_registry = None
+        self._heatmap_current_telemetry_snapshot = None
+        self._heatmap_telemetry_snapshot = None
+        self._heatmap_telemetry_config = None
+        self._heatmap_acceptance_filter_metric_ids: tuple[str, ...] = ()
+        self._heatmap_binding_calibration_active = False
+        self._heatmap_binding_calibration_focus = None
+        self._heatmap_binding_calibration_scope_path: str | None = None
+        self._heatmap_test_presentation_scope_paths: tuple[str, ...] = ()
+        self._heatmap_vertical_slice_contract = None
+        self._heatmap_vertical_slice_state = None
+        self._heatmap_full_server_contract = None
+        self._heatmap_full_server_state = None
+        from digital_twin_runtime_suite.app.heatmaps.smoothing import (
+            HEATMAP_PRESENTATION_CADENCE_HZ,
+            HEATMAP_PRESENTATION_TRANSITION_DURATION_SECONDS,
+            HeatmapPresentationSmoother,
+        )
+
+        self._heatmap_presentation_smoother = HeatmapPresentationSmoother(
+            transition_duration_seconds=(
+                HEATMAP_PRESENTATION_TRANSITION_DURATION_SECONDS
+            )
+        )
+        self._heatmap_presentation_task = None
+        self._heatmap_presentation_scheduler_id = 0
+        self._heatmap_presentation_owner: str | None = None
+        # One package-wide default applies to every Heatmap hardware family.
+        self._heatmap_presentation_cadence_hz = HEATMAP_PRESENTATION_CADENCE_HZ
+        self._heatmap_presentation_scheduler_ticks = 0
+        self._heatmap_presentation_target_changes = 0
+        self._heatmap_presentation_groups_considered = 0
+        self._heatmap_presentation_measurement_start = None
+        from digital_twin_runtime_suite.app.heatmaps.material import (
+            HeatmapMaterialPresenter,
+        )
+
+        self._heatmap_material_presenter = HeatmapMaterialPresenter()
+        self._heatmap_full_server_material_presenter = HeatmapMaterialPresenter(
+            material_root="/DTRS_Runtime/Heatmaps/FullServer"
+        )
         self._xray_baseline_composed_bindings: dict[str, str] = {}
         self._xray_last_lifecycle_diagnostics: list[dict[str, object]] = []
         self._xray_target_state = XRayTargetState()
@@ -438,19 +489,24 @@ class RuntimeController(
             self._validation_receipt_store.has_vti(selector, digest)
             for selector, digest in vti_identities.items()
         )
-        streamlines_valid = sum(
-            self._validation_receipt_store.has_streamlines(
+        streamlines_missing_or_mismatched = tuple(
+            key
+            for key, value in streamlines_identities.items()
+            if not self._validation_receipt_store.has_streamlines(
                 key=key,
                 resource_fingerprint=tuple(value["resource_fingerprint"]),
                 dependency_identity=tuple(value["dependency_identity"]),
             )
-            for key, value in streamlines_identities.items()
+        )
+        streamlines_valid = len(streamlines_identities) - len(
+            streamlines_missing_or_mismatched
         )
         return {
             "vti_valid": vti_valid,
             "vti_total": len(vti_identities),
             "streamlines_valid": streamlines_valid,
             "streamlines_total": len(streamlines_identities),
+            "streamlines_missing_or_mismatched": streamlines_missing_or_mismatched,
             "store_path": self._validation_receipt_store.path,
         }
 

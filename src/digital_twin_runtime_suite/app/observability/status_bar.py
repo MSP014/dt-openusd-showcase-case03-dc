@@ -34,6 +34,10 @@ class KitStatusBarProgressSink:
         """Replace the current Kit status-bar message and progress value."""
 
         progress = state.fraction if state.fraction is not None else -1.0
+        # Kit-CAE can publish another status update in the same frame.  Some
+        # Kit status-bar builds concatenate consecutive activity events unless
+        # the old activity is explicitly cleared first.
+        self._queue_event(_ACTIVITY_EVENT, payload={"text": ""})
         self._queue_event(_PROGRESS_EVENT, payload={"progress": progress})
         self._queue_event(
             _ACTIVITY_EVENT,

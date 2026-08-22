@@ -1043,24 +1043,41 @@ class StreamlinesCacheRuntimeMixin:
                 )
 
     def persist_session_streamlines_cache_validation_receipts(self) -> None:
-        """Publish current VALID session receipts after opt-in becomes enabled."""
+        """Persist only current-session receipts matching current cache resources."""
 
         if not self._reuse_streamlines_receipts_enabled():
             return
-        for (workload, dataset_identity, profile_value), receipt in getattr(
-            self,
-            "_streamlines_cache_validation_receipts",
-            {},
-        ).items():
-            binding = SimpleNamespace(
-                workload_mode=workload,
-                dataset_identity=dataset_identity,
-            )
-            if receipt.inspection.valid:
+        if getattr(self, "_airflow_dataset_registry_error", None) is not None:
+            return
+        receipts = getattr(self, "_streamlines_cache_validation_receipts", {})
+        for target in self.resolve_configured_airflow_targets():
+            for profile_id in StreamlinesProfileId:
+                key = self._streamlines_cache_receipt_key(
+                    target.binding,
+                    profile_id,
+                )
+                receipt = receipts.get(key)
+                if receipt is None or not receipt.inspection.valid:
+                    continue
+                paths = streamlines_cache_paths(
+                    self.config.repo_root,
+                    self._streamlines_cache_ownership(target.binding, profile_id),
+                )
+                resource_fingerprint = streamlines_cache_resource_fingerprint(paths)
+                dependency_identity = self._streamlines_cache_dependency_identity(
+                    target.binding,
+                    target.dataset,
+                    profile_id,
+                )
+                if (
+                    receipt.resource_fingerprint != resource_fingerprint
+                    or receipt.dependency_identity != dependency_identity
+                ):
+                    continue
                 self._persist_streamlines_cache_validation_receipt(
-                    binding,
+                    target.binding,
                     receipt,
-                    profile_id=StreamlinesProfileId(profile_value),
+                    profile_id=profile_id,
                 )
 
     def _log_streamlines_cache_validation_receipt(

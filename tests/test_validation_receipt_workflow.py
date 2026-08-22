@@ -49,7 +49,7 @@ def test_disabling_reuse_clears_checkpoint_and_starts_fresh_validation():
     workflow._checkpoint = {"baseline_identities": controller.identities}
     controller.checkpoint = workflow._checkpoint
     started = []
-    workflow.start_background_work = lambda: started.append("fresh")
+    workflow.start_background_work = lambda **_kwargs: started.append("fresh")
     controller.save_validation_receipt_reuse_override = lambda **_kwargs: Path(
         "receipts.local.toml"
     )
@@ -60,6 +60,38 @@ def test_disabling_reuse_clears_checkpoint_and_starts_fresh_validation():
     assert workflow.checkpoint is None
     assert workflow.acceptance_owns_actions is False
     assert started == ["fresh"]
+
+
+def test_enabling_both_reuse_settings_preserves_current_validation_sweep():
+    controller = _AcceptanceController()
+    workflow, _messages = _workflow(controller)
+    starts = []
+    workflow.start_background_work = lambda **kwargs: starts.append(kwargs)
+    controller.save_validation_receipt_reuse_override = lambda **_kwargs: Path(
+        "receipts.local.toml"
+    )
+
+    async def exercise() -> None:
+        workflow.save_reuse_settings(reuse_vti=True, reuse_streamlines=True)
+        await asyncio.sleep(0)
+
+    asyncio.run(exercise())
+
+    assert starts == [{}]
+
+
+def test_cache_rebuild_resets_only_streamlines_receipts():
+    controller = _AcceptanceController()
+    workflow, _messages = _workflow(controller)
+    stale = _Task()
+    workflow._streamlines_receipt_sweep_task = stale
+    controller.config.validation_receipts.reuse_verified_vti_receipts = False
+
+    workflow.invalidate_streamlines_receipts_after_cache_rebuild()
+
+    assert stale.cancelled is True
+    assert controller.streamlines_receipts_reset is True
+    assert controller.checkpoint_cleared is True
 
 
 def test_startup_discards_stale_checkpoint_when_reuse_is_disabled():
@@ -310,6 +342,9 @@ class _Task:
     def cancel(self) -> None:
         self.cancelled = True
 
+    def done(self) -> bool:
+        return False
+
 
 class _ProgressReporter:
     def __init__(self) -> None:
@@ -383,7 +418,11 @@ class _AcceptanceController:
             "vti_total": 4,
             "streamlines_valid": 8,
             "streamlines_total": 8,
+            "streamlines_missing_or_mismatched": (),
         }
+
+    def reset_streamlines_cache_validation_receipts(self):
+        self.streamlines_receipts_reset = True
 
     def validation_receipt_metrics_snapshot(self):
         return self._metrics
