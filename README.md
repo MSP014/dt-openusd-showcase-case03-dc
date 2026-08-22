@@ -19,8 +19,9 @@ controls, config-driven synthetic telemetry, Engineering X-Ray review, and
 manifest-driven Houdini VTI airflow playback through Kit-CAE and NVIDIA Flow.
 The shared workload state now selects the corresponding validated airflow cache
 without creating a second operational workload model. Heatmaps are available
-as a settings-driven test harness; velocity trails, lighting, and HUD
-navigation remain staged runtime work.
+as a persisted-settings production visualisation with Heatmap-specific X-Ray
+composition; the separate Test/Restore controls remain a debug harness.
+Velocity trails, lighting, and HUD navigation remain staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -33,8 +34,9 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 Unlike traditional linear animation, this ecosystem is structured as a **State
 Machine**. One semantic workload state drives telemetry, hardware behaviour,
 and manifest-backed airflow selection. Streamlines is a production cached
-presentation. Heatmaps are a settings-driven test harness; lighting and HUD
-cues remain staged extensions rather than fixed-shot animation.
+presentation. Heatmaps are a production settings-driven visualisation with a
+separate Test/Restore debug harness; lighting and HUD cues remain staged
+extensions rather than fixed-shot animation.
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
