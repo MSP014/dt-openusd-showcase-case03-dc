@@ -18,8 +18,9 @@ export in a runnable Omniverse application with asset review, look-review
 controls, config-driven synthetic telemetry, Engineering X-Ray review, and
 manifest-driven Houdini VTI airflow playback through Kit-CAE and NVIDIA Flow.
 The shared workload state now selects the corresponding validated airflow cache
-without creating a second operational workload model. Velocity trails,
-heatmaps, lighting, and HUD navigation remain staged runtime work.
+without creating a second operational workload model. Heatmaps are available
+as a settings-driven test harness; velocity trails, lighting, and HUD
+navigation remain staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
 
@@ -32,8 +33,8 @@ The project visualises a **"Viral Inference Surge"** — a dynamic stress-test s
 Unlike traditional linear animation, this ecosystem is structured as a **State
 Machine**. One semantic workload state drives telemetry, hardware behaviour,
 and manifest-backed airflow selection. Streamlines is a production cached
-presentation; heatmaps, lighting, and HUD cues remain staged extensions rather
-than fixed-shot animation.
+presentation. Heatmaps are a settings-driven test harness; lighting and HUD
+cues remain staged extensions rather than fixed-shot animation.
 
 > [!NOTE]
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
@@ -214,9 +215,8 @@ Houdini is the closed creative environment of this hybrid pipeline. Houdini proj
 * **Application**: **Digital Twin Runtime Suite**.
 * **Extension**: `msp.dtrs`.
 * **Logic**: A State Machine that consumes the Python Data Provider and drives
-  node presentation controls, hardware behaviour, manifest-backed airflow, and
-  validated cached Streamlines. Thermal heatmaps remain a later staged visual
-  layer.
+  node presentation controls, hardware behaviour, manifest-backed airflow,
+  validated cached Streamlines, and the settings-driven Heatmaps test harness.
 * **UI**: OmniUI sidebar with `Telemetry`, `View`, and `Config` tabs, plus runtime status and performance overlays. Hierarchical Hall/Rack/Node navigation and a viewport HUD remain future work.
 
 ---
