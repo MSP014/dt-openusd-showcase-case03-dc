@@ -26,6 +26,7 @@ class HeatmapsUiMixin:
             height=28,
             clicked_fn=self._toggle_heatmap_test,
         )
+        self._heatmap_test_button.enabled = False
         self._heatmap_settings_frame = ui.Frame()
         self._refresh_heatmap_settings_controls()
 
@@ -36,21 +37,26 @@ class HeatmapsUiMixin:
         if frame is None or self._controller is None:
             return
         catalog = self._controller.heatmap_catalog_snapshot()
-        settings = self._controller.heatmap_applied_settings_snapshot()
-        self._build_heatmap_draft_models(settings, catalog)
+        ready = catalog is not None and catalog.ready
+        self._set_heatmap_test_button_state(
+            self._controller.heatmap_test_active(),
+            ready=ready,
+        )
         frame.clear()
         with frame:
-            if catalog is None:
-                ui.Label("Heatmap Settings will load after the production stage opens.")
+            if not ready:
+                ui.Label(
+                    "Heatmap Settings will load after the production stage is ready."
+                )
                 return
+            settings = self._controller.heatmap_applied_settings_snapshot()
+            self._build_heatmap_draft_models(settings, catalog)
             self._build_heatmap_settings_editor(catalog)
 
     def _build_heatmap_draft_models(self, settings, catalog) -> None:
         """Create detached models; their edits cannot call runtime or mutate USD."""
 
-        calibration_settings, _color_scale_settings, _color_stop_settings, _settings = (
-            _heatmap_settings_types()
-        )
+        calibration_settings, _settings = _heatmap_settings_types()
         selector_ids = catalog.selector_ids if catalog is not None else ()
         selected = frozenset(settings.isolation_selectors)
         self._heatmap_isolation_models = {
@@ -79,10 +85,13 @@ class HeatmapsUiMixin:
             stop.stop_id: {
                 "enabled": ui.SimpleBoolModel(stop.enabled),
                 "position": ui.SimpleFloatModel(stop.position_percent),
+                "hex": ui.SimpleStringModel(_heatmap_rgb_to_hex(stop.color)),
             }
             for stop in settings.color_scale.stops
         }
-        self._heatmap_color_stops = settings.color_scale.stops
+        self._heatmap_global_celsius_scale = (
+            self._controller.heatmap_global_celsius_scale_snapshot()
+        )
         self._heatmap_minimum_clamp_model = ui.SimpleFloatModel(
             settings.color_scale.minimum_clamp_percent
         )
@@ -107,11 +116,25 @@ class HeatmapsUiMixin:
     def _build_heatmap_isolation_frame(self, catalog) -> None:
         with ui.CollapsableFrame("Isolation", collapsed=True, height=0):
             with ui.VStack(spacing=3, height=0):
+                displayed_parents: set[str] = set()
                 for selector in catalog.selectors:
-                    model = self._heatmap_isolation_models[selector.selector_id]
-                    with ui.HStack(height=20):
-                        ui.CheckBox(model=model, width=24)
-                        ui.Label(selector.label)
+                    if selector.parent_id is not None:
+                        if selector.parent_id not in displayed_parents:
+                            ui.Label(selector.parent_label, height=20)
+                            displayed_parents.add(selector.parent_id)
+                        self._build_heatmap_isolation_selector(selector, indent=16)
+                        continue
+                    self._build_heatmap_isolation_selector(selector)
+
+    def _build_heatmap_isolation_selector(self, selector, *, indent: int = 0) -> None:
+        """Build one draft-only selector with optional hierarchy indentation."""
+
+        model = self._heatmap_isolation_models[selector.selector_id]
+        with ui.HStack(height=20):
+            if indent:
+                ui.Spacer(width=indent)
+            ui.CheckBox(model=model, width=24)
+            ui.Label(selector.label)
 
     def _build_heatmap_calibration_frame(self, catalog) -> None:
         with ui.CollapsableFrame("Calibration", collapsed=True, height=0):
@@ -159,20 +182,93 @@ class HeatmapsUiMixin:
     def _build_heatmap_color_scale_frame(self) -> None:
         with ui.CollapsableFrame("Color Scale", collapsed=True, height=0):
             with ui.VStack(spacing=3, height=0):
-                with ui.HStack(height=20):
-                    ui.Label("Minimum Clamp %", width=150)
-                    ui.FloatField(model=self._heatmap_minimum_clamp_model)
-                with ui.HStack(height=20):
-                    ui.Label("Maximum Clamp %", width=150)
-                    ui.FloatField(model=self._heatmap_maximum_clamp_model)
-                for stop in self._heatmap_color_stops:
-                    models = self._heatmap_color_stop_models[stop.stop_id]
-                    with ui.HStack(height=20):
+                with ui.CollapsableFrame("Clamps", collapsed=True, height=0):
+                    with ui.VStack(spacing=3, height=0):
+                        with ui.HStack(height=20):
+                            ui.Label("Minimum Clamp %", width=150)
+                            ui.FloatField(model=self._heatmap_minimum_clamp_model)
+                        with ui.HStack(height=20):
+                            ui.Label("Maximum Clamp %", width=150)
+                            ui.FloatField(model=self._heatmap_maximum_clamp_model)
+                feedback = self._heatmap_color_scale_draft_feedback()
+                feedback_by_stop_id = {item.stop_id: item for item in feedback}
+                self._heatmap_color_stop_label_widgets = {}
+                self._heatmap_color_preview_widgets = {}
+                for stop_id, models in self._heatmap_color_stop_models.items():
+                    stop_feedback = feedback_by_stop_id[stop_id]
+                    with ui.HStack(height=20, spacing=8):
                         ui.CheckBox(model=models["enabled"], width=24)
-                        ui.Label(stop.stop_id.title(), width=80)
+                        self._heatmap_color_stop_label_widgets[stop_id] = ui.Label(
+                            stop_feedback.temperature_label,
+                            width=88,
+                        )
                         ui.Label("Position %", width=75)
                         ui.FloatField(model=models["position"], width=90)
-                        ui.Label(_colour_swatch_text(stop.color), width=100)
+                        ui.StringField(model=models["hex"], width=95)
+                        self._heatmap_color_preview_widgets[stop_id] = ui.Rectangle(
+                            style=_heatmap_preview_style(stop_feedback.preview_color),
+                            width=32,
+                            height=20,
+                        )
+                self._install_heatmap_color_scale_draft_callbacks()
+
+    def _install_heatmap_color_scale_draft_callbacks(self) -> None:
+        """Refresh draft-only labels and previews without submitting settings."""
+
+        for models in self._heatmap_color_stop_models.values():
+            for model in (models["enabled"], models["position"], models["hex"]):
+                model.add_value_changed_fn(self._refresh_heatmap_color_scale_draft)
+        self._heatmap_minimum_clamp_model.add_value_changed_fn(
+            self._refresh_heatmap_color_scale_draft
+        )
+        self._heatmap_maximum_clamp_model.add_value_changed_fn(
+            self._refresh_heatmap_color_scale_draft
+        )
+
+    def _refresh_heatmap_color_scale_draft(self, _model) -> None:
+        """Update informational widgets only; Apply remains the mutation boundary."""
+
+        feedback = self._heatmap_color_scale_draft_feedback()
+        for item in feedback:
+            self._heatmap_color_stop_label_widgets[item.stop_id].text = (
+                item.temperature_label
+            )
+            preview = self._heatmap_color_preview_widgets[item.stop_id]
+            preview.set_style(_heatmap_preview_style(item.preview_color))
+
+    def _heatmap_color_scale_draft_feedback(self):
+        """Read current draft models through the pure Heatmap palette helper."""
+
+        draft_stop, feedback, _settings_from_draft, _rgb_to_hex = (
+            _heatmap_color_scale_functions()
+        )
+        stops = tuple(
+            draft_stop(
+                stop_id=stop_id,
+                enabled=models["enabled"].get_value_as_bool(),
+                position_percent=models["position"].get_value_as_float(),
+                hex_color=models["hex"].get_value_as_string(),
+            )
+            for stop_id, models in self._heatmap_color_stop_models.items()
+        )
+        scale = self._heatmap_global_celsius_scale
+        if scale is None:
+            return feedback(
+                None,
+                minimum_clamp_percent=0.0,
+                maximum_clamp_percent=100.0,
+                stops=stops,
+            )
+        return feedback(
+            _heatmap_celsius_scale(scale),
+            minimum_clamp_percent=(
+                self._heatmap_minimum_clamp_model.get_value_as_float()
+            ),
+            maximum_clamp_percent=(
+                self._heatmap_maximum_clamp_model.get_value_as_float()
+            ),
+            stops=stops,
+        )
 
     def _toggle_heatmap_test(self) -> None:
         """Use persisted settings for Test and exact Session restoration for Restore."""
@@ -254,8 +350,6 @@ class HeatmapsUiMixin:
 
         (
             calibration_settings,
-            color_scale_settings,
-            color_stop_settings,
             settings_type,
         ) = _heatmap_settings_types()
         selectors = tuple(
@@ -270,20 +364,22 @@ class HeatmapsUiMixin:
             )
             for calibration_id, models in self._heatmap_calibration_models.items()
         }
+        draft_stop, _feedback, settings_from_draft, _rgb_to_hex = (
+            _heatmap_color_scale_functions()
+        )
         stops = tuple(
-            color_stop_settings(
-                stop_id=stop.stop_id,
+            draft_stop(
+                stop_id=stop_id,
                 enabled=models["enabled"].get_value_as_bool(),
                 position_percent=models["position"].get_value_as_float(),
-                color=stop.color,
+                hex_color=models["hex"].get_value_as_string(),
             )
-            for stop in self._heatmap_color_stops
-            for models in (self._heatmap_color_stop_models[stop.stop_id],)
+            for stop_id, models in self._heatmap_color_stop_models.items()
         )
         return settings_type(
             isolation_selectors=selectors,
             calibration=calibration,
-            color_scale=color_scale_settings(
+            color_scale=settings_from_draft(
                 minimum_clamp_percent=(
                     self._heatmap_minimum_clamp_model.get_value_as_float()
                 ),
@@ -303,19 +399,72 @@ class HeatmapsUiMixin:
         self._controller.configure_heatmap_telemetry_config(provider.config)
         self._controller.refresh_heatmap_telemetry_snapshot(provider.latest_snapshot)
 
-    def _set_heatmap_test_button_state(self, enabled: bool) -> None:
+    def _set_heatmap_test_button_state(
+        self,
+        active: bool,
+        *,
+        ready: bool | None = None,
+    ) -> None:
+        """Synchronize the next action and availability with runtime state."""
+
         button = getattr(self, "_heatmap_test_button", None)
         if button is None:
             return
-        label = heatmap_test_action_label(enabled)
+        label = heatmap_test_action_label(active)
         button.text = label
         button.tooltip = label
+        if ready is not None:
+            button.enabled = ready
 
 
-def _colour_swatch_text(color: tuple[float, float, float]) -> str:
-    """Show a read-only stable RGB swatch label until colour editing is required."""
+def _heatmap_preview_style(color: tuple[float, float, float] | None) -> dict:
+    """Build one draft preview style without any material or USD operation."""
 
-    return "RGB " + ", ".join(f"{channel:g}" for channel in color)
+    return {
+        "background_color": _heatmap_rgb_to_omniui_color(
+            color if color is not None else (0.2, 0.2, 0.2)
+        )
+    }
+
+
+def _heatmap_rgb_to_omniui_color(color: tuple[float, float, float]) -> int:
+    red, green, blue = (round(channel * 255) for channel in color)
+    return 0xFF000000 | (blue << 16) | (green << 8) | red
+
+
+def _heatmap_celsius_scale(snapshot):
+    """Adapt the runtime read-only snapshot to the palette's existing scale type."""
+
+    from digital_twin_runtime_suite.app.heatmaps.scalar import CelsiusScale
+
+    return CelsiusScale(snapshot.minimum_celsius, snapshot.maximum_celsius)
+
+
+def _heatmap_rgb_to_hex(color: tuple[float, float, float]) -> str:
+    """Import strict Heatmap HEX formatting after the extension source root exists."""
+
+    _draft_stop, _feedback, _settings_from_draft, rgb_to_hex = (
+        _heatmap_color_scale_functions()
+    )
+    return rgb_to_hex(color)
+
+
+def _heatmap_color_scale_functions():
+    """Load pure Color Scale draft helpers without creating a second colour store."""
+
+    from digital_twin_runtime_suite.app.heatmaps.palette import (
+        ColorScaleStopDraft,
+        color_scale_draft_feedback,
+        color_scale_settings_from_draft,
+        heatmap_rgb_to_hex,
+    )
+
+    return (
+        ColorScaleStopDraft,
+        color_scale_draft_feedback,
+        color_scale_settings_from_draft,
+        heatmap_rgb_to_hex,
+    )
 
 
 def _heatmap_settings_changes(previous, candidate) -> tuple[tuple[str, str], ...]:
@@ -341,14 +490,10 @@ def _heatmap_settings_types():
 
     from digital_twin_runtime_suite.app.heatmaps.settings import (
         CalibrationSettings,
-        ColorScaleSettings,
-        ColorStopSettings,
         HeatmapSettings,
     )
 
     return (
         CalibrationSettings,
-        ColorScaleSettings,
-        ColorStopSettings,
         HeatmapSettings,
     )

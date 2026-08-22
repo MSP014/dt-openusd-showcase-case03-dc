@@ -1,11 +1,11 @@
 version = 1
 
 [isolation]
-selectors = ["motherboard", "ram"]
+selectors = ["motherboard", "connectx_7", "gpu_01_internals", "gpu_01_housing", "gpu_02_internals", "gpu_02_housing", "gpu_03_internals", "gpu_03_housing", "ram"]
 
 [color_scale]
-minimum_clamp_percent = 0
-maximum_clamp_percent = 100
+minimum_clamp_percent = 5
+maximum_clamp_percent = 95
 
 [[color_scale.stops]]
 id = "blue"
@@ -15,7 +15,7 @@ color = [0, 0, 1]
 
 [[color_scale.stops]]
 id = "cyan"
-enabled = false
+enabled = true
 position_percent = 20
 color = [0, 1, 1]
 
@@ -35,7 +35,7 @@ color = [1, 1, 0]
 id = "orange"
 enabled = true
 position_percent = 80
-color = [1, 0.5, 0]
+color = [1, 0.501961, 0]
 
 [[color_scale.stops]]
 id = "red"
@@ -144,8 +144,8 @@ delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."gpu_03/gpu_cooling/blower"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = -12
 
 [calibration."gpu_03/gpu_core/gb203_die"]
 delta_celsius = 10
@@ -164,92 +164,92 @@ delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."motherboard/cpu/cpu_package"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = 32
 
 [calibration."motherboard/cpu/socket"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 8
+temperature_offset_celsius = 10
 
 [calibration."motherboard/dimm_01/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -12
 
 [calibration."motherboard/dimm_02/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -10
 
 [calibration."motherboard/dimm_03/memory/dimm_slot"]
-delta_celsius = 10
+delta_celsius = 8
 temperature_offset_celsius = -8
 
 [calibration."motherboard/dimm_04/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -6
 
 [calibration."motherboard/dimm_05/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -6
 
 [calibration."motherboard/dimm_06/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -7
 
 [calibration."motherboard/dimm_07/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -7
 
 [calibration."motherboard/dimm_08/memory/dimm_slot"]
-delta_celsius = 10
-temperature_offset_celsius = -8
+delta_celsius = 8
+temperature_offset_celsius = -5
 
 [calibration."motherboard/mb_base/passive_geometry"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 2
+temperature_offset_celsius = -4
 
 [calibration."motherboard/mb_capacitors/capacitor"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 16
+temperature_offset_celsius = 12
 
 [calibration."motherboard/mb_chips/small_ic"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 18
+temperature_offset_celsius = 10
 
 [calibration."motherboard/mb_chokes/choke"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 16
+temperature_offset_celsius = 8
 
 [calibration."motherboard/mb_nvme/nvme_heatsink_a"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 20
+temperature_offset_celsius = 8
 
 [calibration."motherboard/mb_nvme/nvme_heatsink_b"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 16
+temperature_offset_celsius = 10
 
 [calibration."motherboard/mb_pcie_gpu/pcie_gpu_slot"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 8
+temperature_offset_celsius = 8
 
 [calibration."motherboard/mb_resistors/small_ic"]
 delta_celsius = 10
 temperature_offset_celsius = 0
 
 [calibration."motherboard/motherboard_passive/heatsink"]
-delta_celsius = 10
-temperature_offset_celsius = -4
+delta_celsius = 12
+temperature_offset_celsius = 4
 
 [calibration."motherboard/motherboard_power/power_connector"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 4
+temperature_offset_celsius = 12
 
 [calibration."motherboard/vrm_east/vrm_heatsink"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 12
+temperature_offset_celsius = 10
 
 [calibration."motherboard/vrm_west/vrm_heatsink"]
-delta_celsius = 10
-temperature_offset_celsius = 0
+delta_celsius = 12
+temperature_offset_celsius = 10
 
 [calibration."nic/nic_board/pcb"]
 delta_celsius = 10
@@ -329,16 +329,16 @@ temperature_offset_celsius = 4
 
 [calibration."ram/ram_clock_driver/clock_driver"]
 delta_celsius = 4
-temperature_offset_celsius = 4
+temperature_offset_celsius = 20
 
 [calibration."ram/ram_memory_chips/memory_chip"]
-delta_celsius = 5
-temperature_offset_celsius = 2
+delta_celsius = 4
+temperature_offset_celsius = 16
 
 [calibration."ram/ram_pcb/pcb"]
 delta_celsius = 10
-temperature_offset_celsius = 0
+temperature_offset_celsius = 4
 
 [calibration."ram/ram_small_components/small_component"]
 delta_celsius = 10
-temperature_offset_celsius = 4
+temperature_offset_celsius = 10

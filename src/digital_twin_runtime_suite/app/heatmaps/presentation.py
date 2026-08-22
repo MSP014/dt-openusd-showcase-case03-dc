@@ -57,18 +57,7 @@ def build_heatmap_presentation_plan(
         return HeatmapPresentationPlan(settings, (), (), None, ())
     if telemetry_snapshot is None:
         raise ValueError("Heatmap telemetry is unavailable.")
-    metric_ids = tuple(
-        target.binding.telemetry_binding.metric_id
-        for target in catalog.targets
-        if target.binding.telemetry_binding.metric_id is not None
-    )
-    if not metric_ids:
-        raise ValueError(
-            "Selected Heatmap targets have no documented telemetry metrics."
-        )
-    if telemetry_config is None:
-        raise ValueError("Heatmap telemetry configuration is unavailable.")
-    scale = resolve_server_wide_celsius_scale(telemetry_config, metric_ids).scale
+    scale = resolve_heatmap_global_celsius_scale(catalog, telemetry_config)
     normalized_weights = _normalized_thermal_weights(catalog)
     material_targets: list[HeatmapMaterialTarget] = []
     unavailable: list[str] = []
@@ -105,6 +94,24 @@ def build_heatmap_presentation_plan(
         scale=scale,
         unavailable_target_paths=tuple(sorted(unavailable)),
     )
+
+
+def resolve_heatmap_global_celsius_scale(
+    catalog: HeatmapCatalog,
+    telemetry_config,
+):
+    """Resolve the one server-wide scale shared by plans and read-only UI."""
+
+    metric_ids = tuple(
+        target.binding.telemetry_binding.metric_id
+        for target in catalog.targets
+        if target.binding.telemetry_binding.metric_id is not None
+    )
+    if not metric_ids:
+        raise ValueError("Heatmap targets have no documented telemetry metrics.")
+    if telemetry_config is None:
+        raise ValueError("Heatmap telemetry configuration is unavailable.")
+    return resolve_server_wide_celsius_scale(telemetry_config, metric_ids).scale
 
 
 class HeatmapPresentation:

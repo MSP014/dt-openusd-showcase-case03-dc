@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
 
 from .scalar import DeltaProfile
 from .settings import CalibrationSettings, HeatmapSettings
@@ -31,11 +30,3 @@ def resolve_calibration(
         delta_profile=DeltaProfile(-rule.delta_celsius, rule.delta_celsius),
         temperature_offset_celsius=rule.temperature_offset_celsius,
     )
-
-
-def catalogue_calibration_defaults(
-    calibration_ids: tuple[str, ...],
-) -> Mapping[str, CalibrationSettings]:
-    """Expose neutral defaults for stage-discovered settings rows only."""
-
-    return {calibration_id: CalibrationSettings() for calibration_id in calibration_ids}

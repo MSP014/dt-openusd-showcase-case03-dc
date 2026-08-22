@@ -36,13 +36,13 @@ def test_legacy_semantic_offsets_are_seeded_only_in_heatmap_settings() -> None:
         settings.calibration[
             "motherboard/motherboard_passive/heatsink"
         ].temperature_offset_celsius
-        == -4.0
+        == 4.0
     )
     assert (
         settings.calibration[
             "ram/ram_memory_chips/memory_chip"
         ].temperature_offset_celsius
-        == 2.0
+        == 16.0
     )
     assert (
         settings.calibration[

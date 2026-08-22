@@ -67,6 +67,35 @@ def test_each_isolation_selector_can_be_represented_by_an_arbitrary_union() -> N
     assert isolation.restore(stage).success
 
 
+def test_isolation_does_not_reveal_authored_hidden_selected_geometry() -> None:
+    from pxr import Usd, UsdGeom
+
+    stage = _stage(Usd, UsdGeom)
+    connector_path = "/blackwell_rig/motherboard/geo/rack_only_rj45"
+    UsdGeom.Mesh.Define(stage, connector_path)
+    UsdGeom.Imageable(stage.GetPrimAtPath(connector_path)).CreateVisibilityAttr().Set(
+        UsdGeom.Tokens.invisible
+    )
+    before = stage.GetSessionLayer().ExportToString()
+    isolation = HeatmapIsolation()
+
+    enabled = isolation.apply(
+        stage,
+        (
+            "/blackwell_rig/motherboard/geo/board",
+            connector_path,
+        ),
+    )
+
+    assert enabled.success
+    assert (
+        UsdGeom.Imageable(stage.GetPrimAtPath(connector_path)).ComputeVisibility()
+        == UsdGeom.Tokens.invisible
+    )
+    assert isolation.restore(stage).success
+    assert stage.GetSessionLayer().ExportToString() == before
+
+
 def test_replacement_stage_discards_stale_ownership_without_mutating_new_session() -> (
     None
 ):

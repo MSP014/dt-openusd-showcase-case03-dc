@@ -8,7 +8,11 @@ from dataclasses import dataclass
 
 from .catalog import HeatmapCatalog, build_heatmap_catalog
 from .isolation import HeatmapIsolation
-from .presentation import HeatmapPresentation, build_heatmap_presentation_plan
+from .presentation import (
+    HeatmapPresentation,
+    build_heatmap_presentation_plan,
+    resolve_heatmap_global_celsius_scale,
+)
 from .settings import SETTINGS_FILENAME, HeatmapSettings, HeatmapSettingsStore
 from .smoothing import (
     HEATMAP_PRESENTATION_CADENCE_HZ,
@@ -40,6 +44,14 @@ class HeatmapPresentationDiagnostics:
     material_group_count: int
 
 
+@dataclass(frozen=True)
+class HeatmapCelsiusScaleSnapshot:
+    """Read-only current global scale for Heatmap UI information only."""
+
+    minimum_celsius: float
+    maximum_celsius: float
+
+
 class HeatmapRuntimeMixin:
     """Coordinate prepared catalog, settings, isolation, material, and smoothing."""
 
@@ -56,6 +68,7 @@ class HeatmapRuntimeMixin:
         self._stop_heatmap_presentation_scheduler()
         self._heatmap_isolation.discard_stale_stage(stage)
         self._heatmap_presentation.discard_stale_stage(stage)
+        self._heatmap_applied_settings = self._heatmap_settings_store.load()
         self._heatmap_catalog = build_heatmap_catalog(
             stage,
             root_path=self.HEATMAP_SERVER_ROOT_PATH,
@@ -82,6 +95,26 @@ class HeatmapRuntimeMixin:
         """Return whether generic Heatmap presentation currently owns Session state."""
 
         return self._heatmap_presentation.active
+
+    def heatmap_global_celsius_scale_snapshot(
+        self,
+    ) -> HeatmapCelsiusScaleSnapshot | None:
+        """Expose the plan's existing global scale without preparing presentation."""
+
+        catalog = self._heatmap_catalog
+        if catalog is None or self._heatmap_telemetry_config is None:
+            return None
+        try:
+            scale = resolve_heatmap_global_celsius_scale(
+                catalog,
+                self._heatmap_telemetry_config,
+            )
+        except ValueError:
+            return None
+        return HeatmapCelsiusScaleSnapshot(
+            minimum_celsius=scale.minimum,
+            maximum_celsius=scale.maximum,
+        )
 
     def configure_heatmap_telemetry_config(self, telemetry_config) -> None:
         """Accept provider configuration without changing USD or active settings."""
@@ -189,14 +222,17 @@ class HeatmapRuntimeMixin:
             else self._result(True, "Heatmap selection cleared; presentation restored.")
         )
         if not candidate_result.success:
-            self._restore_previous_after_failed_apply(stage, previous)
-            return self._result(False, candidate_result.message)
+            rollback = self._restore_previous_after_failed_apply(stage, previous)
+            return self._failed_apply_result(candidate_result.message, rollback)
         try:
             self._heatmap_settings_store.save(candidate)
         except OSError as error:
-            self._restore_active_presentation(stage)
-            self._restore_previous_after_failed_apply(stage, previous)
-            return self._result(False, f"Heatmap settings could not be saved: {error}")
+            cleanup = self._restore_active_presentation(stage)
+            rollback = self._restore_previous_after_failed_apply(stage, previous)
+            message = f"Heatmap settings could not be saved: {error}"
+            if not cleanup.success:
+                message += f" Candidate presentation cleanup failed: {cleanup.message}"
+            return self._failed_apply_result(message, rollback)
         self._heatmap_applied_settings = candidate
         return candidate_result
 
@@ -287,13 +323,35 @@ class HeatmapRuntimeMixin:
         self,
         stage,
         settings: HeatmapSettings,
-    ) -> None:
+    ) -> HeatmapRuntimeResult:
+        """Restore the prior valid plan and report a rollback failure explicitly."""
+
         if not settings.isolation_selectors:
-            return
+            return self._result(True, "Previous Heatmap presentation was already off.")
         try:
-            self._activate_plan(stage, self._prepare_plan(settings))
-        except ValueError:
-            return
+            plan = self._prepare_plan(settings)
+        except ValueError as error:
+            return self._result(
+                False,
+                f"Previous Heatmap presentation could not be prepared: {error}",
+            )
+        return self._activate_plan(stage, plan)
+
+    def _failed_apply_result(
+        self,
+        candidate_message: str,
+        rollback: HeatmapRuntimeResult,
+    ) -> HeatmapRuntimeResult:
+        """Preserve a candidate failure while making rollback failure actionable."""
+
+        if rollback.success:
+            return self._result(False, candidate_message)
+        return self._result(
+            False,
+            "Candidate apply failed: "
+            f"{candidate_message} AND previous presentation rollback failed: "
+            f"{rollback.message}",
+        )
 
     def _activate_heatmap_smoothing(self, plan) -> None:
         values = plan.telemetry_by_material_key()
