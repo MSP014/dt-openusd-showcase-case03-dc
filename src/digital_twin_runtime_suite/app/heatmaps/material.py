@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .palette import compact_active_stops
+from .telemetry_texture import HeatmapTelemetryTexture
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class HeatmapMaterialPresenter:
         self._session_layer_id: str | None = None
         self._targets: dict[str, _TargetPresentation] = {}
         self._material_keys: set[str] = set()
+        self._telemetry_texture: HeatmapTelemetryTexture | None = None
         self._created_scope_paths: tuple[str, ...] = ()
         self._created_target_scope_paths: set[str] = set()
         self._material_creations = 0
@@ -104,6 +106,12 @@ class HeatmapMaterialPresenter:
             material_prim_creations=self._material_prim_creations,
         )
 
+    @property
+    def dynamic_telemetry_active(self) -> bool:
+        """Return whether the active presentation retains its texture transport."""
+
+        return bool(self._telemetry_texture and self._telemetry_texture.active)
+
     def enable(
         self,
         stage,
@@ -112,7 +120,7 @@ class HeatmapMaterialPresenter:
         scale,
         palette,
     ) -> HeatmapPresentationResult:
-        """Synchronize target materials without rebuilding stable bindings."""
+        """Reconcile activation-time materials; dynamic telemetry stays in data."""
 
         from pxr import Gf, Sdf, UsdGeom, UsdShade, Vt
 
@@ -133,6 +141,12 @@ class HeatmapMaterialPresenter:
                 if path not in desired:
                     self._restore_target(stage, self._targets.pop(path), Sdf)
             grouped_targets = _targets_by_material_key(targets)
+            # MDL connects this named texture once during activation. Later
+            # presentation ticks update only its pixel payload, never USD.
+            telemetry_texture = self._ensure_telemetry_texture()
+            telemetry_indices = telemetry_texture.register_material_keys(
+                grouped_targets
+            )
             for material_key, group_targets in grouped_targets.items():
                 existing = material_key in self._material_keys
                 material_path = self._material_path(material_key)
@@ -151,6 +165,8 @@ class HeatmapMaterialPresenter:
                     Gf,
                     Sdf,
                     UsdShade,
+                    telemetry_texture.dynamic_url,
+                    telemetry_indices[material_key],
                     include_static=not existing,
                 )
             for target in targets:
@@ -164,6 +180,12 @@ class HeatmapMaterialPresenter:
                         UsdShade,
                         Vt,
                     )
+            telemetry_texture.update(
+                {
+                    material_key: group_targets[0].telemetry_celsius
+                    for material_key, group_targets in grouped_targets.items()
+                }
+            )
             self._parameter_updates += 1
         except Exception as error:  # noqa: BLE001 - leave no partial presentation.
             self._restore_all(stage, Sdf)
@@ -180,7 +202,7 @@ class HeatmapMaterialPresenter:
         scale,
         palette,
     ) -> HeatmapPresentationResult:
-        """Refresh dynamic telemetry parameters and retain target material ownership."""
+        """Reconcile applied presentation settings without replacing ownership."""
 
         return self.enable(stage, targets=targets, scale=scale, palette=palette)
 
@@ -189,33 +211,24 @@ class HeatmapMaterialPresenter:
         stage,
         telemetry_by_material_key,
     ) -> HeatmapPresentationResult:
-        """Write only changed dynamic telemetry inputs for existing materials."""
-
-        from pxr import Sdf, UsdShade
+        """Upload changed values through the shared texture without mutating USD."""
 
         self._discard_stale_state(stage)
         if not self.active:
             return self._result(True, "Heatmap presentation is inactive.")
-        previous_target = stage.GetEditTarget()
-        stage.SetEditTarget(stage.GetSessionLayer())
+        telemetry_texture = self._telemetry_texture
+        if telemetry_texture is None:
+            return self._result(False, "Heatmap telemetry texture is unavailable.")
         try:
-            for material_key, telemetry_celsius in sorted(
-                telemetry_by_material_key.items()
-            ):
-                if material_key not in self._material_keys:
-                    continue
-                self._set_dynamic_telemetry(
-                    stage,
-                    self._material_path(material_key),
-                    telemetry_celsius,
-                    Sdf,
-                    UsdShade,
-                )
-        except Exception as error:  # noqa: BLE001 - dynamic updates own no topology.
+            changed = telemetry_texture.update(telemetry_by_material_key)
+        except Exception as error:  # noqa: BLE001 - texture updates own no topology.
             return self._result(False, f"Heatmap telemetry update failed: {error}")
-        finally:
-            stage.SetEditTarget(previous_target)
-        return self._result(True, "Heatmap telemetry parameters synchronized.")
+        message = (
+            "Heatmap telemetry texture synchronized."
+            if changed
+            else "Heatmap telemetry texture is unchanged."
+        )
+        return self._result(True, message)
 
     def disable(self, stage) -> HeatmapPresentationResult:
         """Remove every Heatmap-owned target opinion and reveal prior presentation."""
@@ -292,6 +305,7 @@ class HeatmapMaterialPresenter:
         self._material_binding_writes = 0
         self._primvar_st_writes = 0
         self._material_prim_creations = 0
+        self._release_telemetry_texture()
 
     def _restore_target(self, stage, presentation, Sdf) -> None:
         binding_path = Sdf.Path(presentation.target_path).AppendProperty(
@@ -343,12 +357,15 @@ class HeatmapMaterialPresenter:
         Gf,
         Sdf,
         UsdShade,
+        telemetry_texture_url,
+        telemetry_texel_index,
         *,
         include_static: bool,
     ) -> None:
+        """Author activation-time MDL inputs, never periodic telemetry values."""
+
         shader = UsdShade.Shader.Get(stage, f"{material_path}/Shader")
         for name, value in (
-            ("telemetry_celsius", target.telemetry_celsius),
             ("delta_minimum_celsius", target.delta_profile.minimum_celsius),
             ("delta_maximum_celsius", target.delta_profile.maximum_celsius),
             ("temperature_offset_celsius", target.temperature_offset_celsius),
@@ -362,6 +379,20 @@ class HeatmapMaterialPresenter:
             )
         if not include_static:
             return
+        self._set_shader_input(
+            shader,
+            "telemetry_texture",
+            Sdf.ValueTypeNames.Asset,
+            Sdf.AssetPath(telemetry_texture_url),
+            structural=True,
+        )
+        self._set_shader_input(
+            shader,
+            "telemetry_texel_index",
+            Sdf.ValueTypeNames.Int,
+            int(telemetry_texel_index),
+            structural=True,
+        )
         self._set_shader_input(
             shader,
             "scale_minimum_celsius",
@@ -414,23 +445,6 @@ class HeatmapMaterialPresenter:
                 Gf.Vec3f(*stop.color),
                 structural=True,
             )
-
-    def _set_dynamic_telemetry(
-        self,
-        stage,
-        material_path,
-        telemetry_celsius,
-        Sdf,
-        UsdShade,
-    ) -> None:
-        shader = UsdShade.Shader.Get(stage, f"{material_path}/Shader")
-        self._set_shader_input(
-            shader,
-            "telemetry_celsius",
-            Sdf.ValueTypeNames.Float,
-            float(telemetry_celsius),
-            structural=False,
-        )
 
     def _set_shader_input(
         self,
@@ -530,7 +544,7 @@ class HeatmapMaterialPresenter:
             current = current.GetParentPath()
 
     def _remove_empty_created_target_scopes(self, stage, Sdf) -> None:
-        """Remove empty target overs without touching pre-existing Session state."""
+        """Remove empty target specs without touching pre-existing Session state."""
 
         session = stage.GetSessionLayer()
         for path in sorted(
@@ -547,17 +561,34 @@ class HeatmapMaterialPresenter:
                 del parent.nameChildren[prim_spec.name]
 
     def _discard_stale_state(self, stage) -> None:
+        """Release Session ownership when a stage replacement changes its layer."""
+
         layer_id = stage.GetSessionLayer().identifier
         if self._session_layer_id == layer_id:
             return
         self._session_layer_id = layer_id
         self._targets.clear()
         self._material_keys.clear()
+        self._release_telemetry_texture()
         self._created_scope_paths = ()
         self._created_target_scope_paths.clear()
 
     def _material_path(self, material_key: str) -> str:
         return f"{self._material_root}/{material_key}"
+
+    def _ensure_telemetry_texture(self) -> HeatmapTelemetryTexture:
+        """Create the one shared provider before activation-time MDL wiring."""
+
+        if self._telemetry_texture is None:
+            self._telemetry_texture = HeatmapTelemetryTexture.create_runtime()
+        return self._telemetry_texture
+
+    def _release_telemetry_texture(self) -> None:
+        """Release the stage-specific dynamic texture with its presentation."""
+
+        if self._telemetry_texture is not None:
+            self._telemetry_texture.release()
+            self._telemetry_texture = None
 
     def _result(self, success: bool, message: str) -> HeatmapPresentationResult:
         return HeatmapPresentationResult(

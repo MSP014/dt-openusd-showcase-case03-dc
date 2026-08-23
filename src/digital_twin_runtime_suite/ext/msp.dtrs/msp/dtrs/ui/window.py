@@ -153,15 +153,15 @@ class DtrsWindowUiMixin:
         ):
             with ui.VStack(spacing=6, content_clipping=True):
                 self._build_config_section(
+                    "Visualization",
+                    self._build_visualization_controls,
+                    collapsed=False,
+                )
+                self._build_config_section(
                     "Server Appearance",
                     lambda: self._build_server_appearance_controls(
                         config.chassis_presentation
                     ),
-                    collapsed=True,
-                )
-                self._build_config_section(
-                    "Visualization",
-                    self._build_visualization_controls,
                     collapsed=True,
                 )
                 self._build_config_section(

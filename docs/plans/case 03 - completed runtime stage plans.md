@@ -2231,8 +2231,8 @@ Stage 9 does **not** claim:
 The current airflow is a presentation-oriented visualization derived from the
 authored Houdini velocity fields.
 
-The current Heatmap mode remains an X-Ray-backed preview until the Stage 10
-thermal presentation work is completed.
+Stage 10 supersedes the former Heatmap preview with the accepted production
+thermal presentation contract.
 
 Higher sample-count snapshot residency remains a future characterization topic,
 not a reopened Stage 9 requirement.
@@ -2266,6 +2266,24 @@ solely for cached presentation, workload-state corruption, duplicate scheduler
 ownership, or presentation lifecycle accumulation.
 
 **Status: ✅ PASS/CLOSED.**
+
+## Stage 10 - Production Heatmaps
+
+**Status:** PASS/CLOSED
+**Completed:** 2026-08-23
+**Release:** `0.5.0`
+
+Stage 10 delivers the single-server Heatmap production presentation. Applied
+settings preserve the authored thermal metadata and calibration contract;
+dynamic telemetry updates use the named runtime texture rather than periodic
+USD material mutation. Heatmap owns selected geometry while X-Ray excludes
+only conflicting shroud/blower targets, preserving unrelated GPU geometry and
+manual X-Ray selection.
+
+Manual Kit acceptance on the reference RTX 3080 passed visual Heatmap/X-Ray
+composition, Nominal/Surge/Critical workload response, per-GPU Housing
+precedence, mode handoffs, and stable interactive performance without periodic
+fan stalls or resource accumulation.
 
 ## Cancelled Runtime Features
 

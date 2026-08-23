@@ -531,6 +531,7 @@ class FlowTemporalMixin:
                         ),
                     ),
                 ),
+                state="PROGRESS",
             )
         )
 
@@ -636,7 +637,11 @@ class FlowTemporalMixin:
                 ),
             )
         sections += (("", (("RESULT:", "PASS" if summary["passed"] else "FAIL"),)),)
-        message = self._format_flow_log_block("TEMPORAL LOOP PROOF", sections)
+        message = self._format_flow_log_block(
+            "TEMPORAL LOOP PROOF",
+            sections,
+            state="PASS" if summary["passed"] else "FAIL",
+        )
         if summary["passed"]:
             carb.log_warn(message)
         else:
@@ -834,38 +839,9 @@ class FlowTemporalMixin:
                         ),
                     ),
                 ),
+                ("Property stack", (("Entries:", property_stack),)),
             ),
-        )
-        property_lines = ["", "Property stack:"]
-        for index, entry in enumerate(property_stack):
-            samples = entry["authored_time_samples"]
-            sample_text = (
-                ", ".join(
-                    f"{time_code} -> "
-                    f"{' | '.join(Path(value).name for value in values)}"
-                    for time_code, values in samples.items()
-                )
-                or "none"
-            )
-            default_text = (
-                " | ".join(Path(value).name for value in entry["default"]) or "[]"
-            )
-            property_lines.extend(
-                (
-                    "",
-                    f"  Layer {index}:",
-                    f"    Path: {entry['layer']}",
-                    f"    TCPS: {entry['time_codes_per_second']}",
-                    f"    Default: {default_text}",
-                    f"    Samples: {sample_text}",
-                )
-            )
-        message = (
-            message.rsplit("\n", 1)[0]
-            + "\n"
-            + "\n".join(property_lines)
-            + "\n"
-            + "=" * 63
+            state="DEBUG",
         )
         carb.log_warn(message)
 
@@ -1226,6 +1202,7 @@ class FlowTemporalMixin:
                         ),
                     ),
                 ),
+                state="FAIL",
             )
         )
 

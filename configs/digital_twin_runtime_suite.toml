@@ -1,6 +1,6 @@
 [app]
 name = "Digital Twin Runtime Suite"
-version = "0.4.0"
+version = "0.5.0"
 
 [paths]
 app_root = "src/digital_twin_runtime_suite"
@@ -219,7 +219,7 @@ power_color = [0.95, 0.98, 1.0]
 hdd_color = [0.95, 0.98, 1.0]
 lan_01_color = [0.95, 0.98, 1.0]
 lan_02_color = [0.95, 0.98, 1.0]
-off_color = [0.62, 0.65, 0.68]
+off_color = [0.24, 0.24, 0.24]
 emission_intensity = 1.0
 storage_metric_id = "storage_activity_percent"
 lan_01_metric_id = "lan_1_activity_percent"

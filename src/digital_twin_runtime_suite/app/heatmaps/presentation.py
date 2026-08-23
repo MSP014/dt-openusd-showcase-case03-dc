@@ -8,10 +8,7 @@ from dataclasses import dataclass
 from .calibration import resolve_calibration
 from .catalog import HeatmapCatalog
 from .material import HeatmapMaterialPresenter, HeatmapMaterialTarget
-from .scalar import (
-    normalize_thermal_weight_group,
-    resolve_server_wide_celsius_scale,
-)
+from .scalar import normalize_thermal_weight_group, resolve_server_wide_celsius_scale
 from .settings import HeatmapSettings
 
 
@@ -139,6 +136,12 @@ class HeatmapPresentation:
 
         return self._presenter.write_counts
 
+    @property
+    def dynamic_telemetry_active(self) -> bool:
+        """Return whether active values have a live non-USD transport."""
+
+        return self._presenter.dynamic_telemetry_active
+
     def apply(self, stage, plan: HeatmapPresentationPlan):
         """Apply one prepared generic plan and retain it only on material success."""
 
@@ -160,8 +163,8 @@ class HeatmapPresentation:
             self._plan = None
         return result
 
-    def update_telemetry(self, stage, values: dict[str, float]):
-        """Update only dynamic material telemetry inputs at the shared cadence."""
+    def update_telemetry(self, stage, values: dict[str, float | None]):
+        """Update dynamic values or mark unavailable groups without USD mutation."""
 
         return self._presenter.update_telemetry(stage, values)
 

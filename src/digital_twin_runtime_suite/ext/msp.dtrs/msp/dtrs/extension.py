@@ -132,6 +132,7 @@ class DigitalTwinRuntimeSuiteExtension(
         self._lighting_task = None
         self._camera_sync_task = None
         self._telemetry_task = None
+        self._periodic_performance_workflow = None
         self._motion_controller = None
         self._suspend_camera_sync_until = 0.0
         self._updating_camera_controls = False
@@ -253,6 +254,12 @@ class DigitalTwinRuntimeSuiteExtension(
             progress_reporter=self._observability_reporter,
         )
         self._validation_workflow.load_checkpoint()
+        from msp.dtrs.workflows.performance import PeriodicPerformanceWorkflow
+
+        self._periodic_performance_workflow = PeriodicPerformanceWorkflow(
+            log_status=carb.log_info,
+            append_local_timestamp=_with_dtrs_local_timestamp,
+        )
         from msp.dtrs.workflows.visualization import VisualizationWorkflow
 
         self._visualization_workflow = VisualizationWorkflow(
@@ -261,8 +268,14 @@ class DigitalTwinRuntimeSuiteExtension(
             report_status=self._set_airflow_status,
             refresh_cache_selector=self._refresh_airflow_cache_selector_label,
             refresh_visualization_controls=self._update_visualization_controls,
+            airflow_operation_active=lambda: bool(
+                self._airflow_task and not self._airflow_task.done()
+            ),
             log_warning=carb.log_warn,
             append_local_timestamp=_with_dtrs_local_timestamp,
+            on_mode_committed=(
+                self._periodic_performance_workflow.observe_committed_mode
+            ),
         )
         from msp.dtrs.workflows.streamlines import StreamlinesWorkflow
 
@@ -293,7 +306,7 @@ class DigitalTwinRuntimeSuiteExtension(
         )
         self._camera_sync_task = asyncio.ensure_future(self._sync_camera_panel())
         self._telemetry_task = asyncio.ensure_future(self._run_telemetry())
-
+        self._periodic_performance_workflow.start()
         if self._settings.get_as_bool(f"{EXTENSION_SETTINGS}/autoLoad"):
             self._schedule_load()
 
@@ -306,6 +319,13 @@ class DigitalTwinRuntimeSuiteExtension(
             self._controller.cancel_visualization_transition()
             if self._streamlines_workflow:
                 self._streamlines_workflow.cancel()
+            periodic_performance_workflow = getattr(
+                self,
+                "_periodic_performance_workflow",
+                None,
+            )
+            if periodic_performance_workflow:
+                periodic_performance_workflow.cancel()
             cancel_material = getattr(
                 self._controller,
                 "cancel_streamlines_material_apply",
@@ -325,10 +345,14 @@ class DigitalTwinRuntimeSuiteExtension(
             self._telemetry_task = None
         if self._controller:
             try:
-                heatmap_cleanup = (
-                    self._controller.deactivate_heatmap_production_in_kit()
-                )
-                if not heatmap_cleanup.success:
+                heatmap_cleanup = None
+                if self._controller.heatmap_production_active():
+                    heatmap_cleanup = (
+                        self._controller.deactivate_heatmap_production_in_kit()
+                    )
+                elif self._controller.heatmap_test_active():
+                    heatmap_cleanup = self._controller.restore_heatmap_test_in_kit()
+                if heatmap_cleanup is not None and not heatmap_cleanup.success:
                     carb.log_error(
                         "DTRS Heatmap shutdown cleanup failed: "
                         f"{heatmap_cleanup.message}"
@@ -347,10 +371,16 @@ class DigitalTwinRuntimeSuiteExtension(
                 carb.log_error(f"DTRS Streamlines shutdown cleanup failed: {error}")
             try:
                 self._controller.clear_xray_material_in_kit()
-            except RuntimeError as error:
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
                 carb.log_error(f"DTRS X-Ray shutdown cleanup failed: {error}")
-            self._controller.stop_flow_runtime_callbacks()
-            self._controller.clear_flow_validation_cache()
+            try:
+                self._controller.stop_flow_runtime_callbacks()
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
+                carb.log_error(f"DTRS Flow callback shutdown cleanup failed: {error}")
+            try:
+                self._controller.clear_flow_validation_cache()
+            except Exception as error:  # noqa: BLE001 - shutdown must continue.
+                carb.log_error(f"DTRS Flow validation shutdown cleanup failed: {error}")
         if self._motion_controller:
             self._motion_controller.reset()
         self._motion_controller = None

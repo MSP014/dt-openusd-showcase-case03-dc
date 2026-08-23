@@ -86,6 +86,39 @@ def test_gpu_housing_off_leaves_its_xray_group_path_available() -> None:
     assert plan.xray_selected_group_ids == ("gpu_shrouds",)
 
 
+def test_gpu_housing_exclusion_keeps_power_and_io_xray_paths_available() -> None:
+    gpu_root = "/blackwell_rig/compute/gpu_01/geo/render/RTX4500"
+    catalog = _Catalog(
+        (
+            _target(f"{gpu_root}/shroud/thermal_mesh", "gpu_01_housing"),
+            _target(f"{gpu_root}/blower/thermal_mesh", "gpu_01_housing"),
+            _target(f"{gpu_root}/power/thermal_mesh", "gpu_01_housing"),
+            _target(f"{gpu_root}/io/ports/thermal_mesh", "gpu_01_housing"),
+        )
+    )
+    groups = (
+        _group(
+            "gpu_shrouds",
+            f"{gpu_root}/shroud",
+            f"{gpu_root}/blower",
+            f"{gpu_root}/power",
+            f"{gpu_root}/io/ports",
+            "/blackwell_rig/power/cables/geo/render/cables/cables_gpu_1",
+        ),
+    )
+    settings = HeatmapSettings(
+        isolation_selectors=("gpu_01_housing",),
+        xray_overlay_group_ids=("gpu_shrouds",),
+    )
+
+    plan = build_heatmap_composition_plan(settings, catalog, groups)
+
+    assert plan.xray_excluded_paths == (
+        f"{gpu_root}/blower",
+        f"{gpu_root}/shroud",
+    )
+
+
 @pytest.mark.parametrize(
     ("selectors", "excluded_gpu_ids"),
     (

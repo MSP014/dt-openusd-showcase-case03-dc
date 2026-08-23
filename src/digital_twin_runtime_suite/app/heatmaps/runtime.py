@@ -11,6 +11,7 @@ from .composition import HeatmapCompositionPlan, build_heatmap_composition_plan
 from .isolation import HeatmapIsolation
 from .presentation import (
     HeatmapPresentation,
+    HeatmapPresentationPlan,
     build_heatmap_presentation_plan,
     resolve_heatmap_global_celsius_scale,
 )
@@ -43,6 +44,21 @@ class HeatmapPresentationDiagnostics:
     scheduler_ticks: int
     target_changes: int
     material_group_count: int
+    scheduler_tasks: int
+    dynamic_transport_active: bool
+    last_dynamic_update_success: bool
+    unavailable_material_groups: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class HeatmapPresentationSnapshot:
+    """Read-only active Heatmap ownership for guided acceptance checks."""
+
+    production_active: bool
+    debug_active: bool
+    target_paths: tuple[str, ...]
+    settings: HeatmapSettings
+    diagnostics: HeatmapPresentationDiagnostics
 
 
 @dataclass(frozen=True)
@@ -51,6 +67,23 @@ class HeatmapCelsiusScaleSnapshot:
 
     minimum_celsius: float
     maximum_celsius: float
+
+
+@dataclass(frozen=True)
+class PreparedHeatmapProductionPlan:
+    """Validated Heatmap composition ready for one later mutating activation."""
+
+    presentation: HeatmapPresentationPlan
+    composition: HeatmapCompositionPlan
+
+
+@dataclass(frozen=True)
+class HeatmapProductionPreparationResult:
+    """Outcome of a non-mutating Heatmap production candidate preparation."""
+
+    success: bool
+    message: str
+    prepared: PreparedHeatmapProductionPlan | None = None
 
 
 class HeatmapRuntimeMixin:
@@ -72,6 +105,8 @@ class HeatmapRuntimeMixin:
         self._heatmap_isolation.discard_stale_stage(stage)
         self._heatmap_presentation.discard_stale_stage(stage)
         self._heatmap_presentation_owner = None
+        self._heatmap_last_dynamic_update_success = True
+        self._heatmap_unavailable_material_groups = ()
         self._heatmap_applied_settings = self._load_heatmap_settings_for_open_stage()
         self._heatmap_catalog = build_heatmap_catalog(
             stage,
@@ -290,6 +325,53 @@ class HeatmapRuntimeMixin:
 
     def activate_heatmap_production_in_kit(self) -> HeatmapRuntimeResult:
         """Apply the existing Heatmap system plus its dedicated X-Ray overlay."""
+        if self.heatmap_production_active():
+            return self._result(True, "Heatmap production mode is already active.")
+        prepared = self.prepare_heatmap_production_plan_in_kit()
+        if not prepared.success:
+            return self._result(False, prepared.message)
+        if prepared.prepared is None:
+            return self._result(
+                False, "Heatmap production preparation returned no plan."
+            )
+        return self.activate_prepared_heatmap_production_in_kit(prepared.prepared)
+
+    def prepare_heatmap_production_plan_in_kit(
+        self,
+    ) -> HeatmapProductionPreparationResult:
+        """Build the next production composition without mutating presentation."""
+
+        if self._heatmap_stage() is None:
+            return self._preparation_result(
+                False,
+                "Heatmap production mode requires an open production stage.",
+            )
+        if self.heatmap_test_active():
+            return self._preparation_result(
+                False,
+                "Restore Heatmap Test before activating Heatmap visualization.",
+            )
+        settings = self._heatmap_applied_settings
+        if not settings.isolation_selectors:
+            return self._preparation_result(
+                False,
+                "Heatmap production mode requires at least one Isolation selection.",
+            )
+        try:
+            plan, composition = self._prepare_production_plan(settings)
+        except ValueError as error:
+            return self._preparation_result(False, str(error))
+        return self._preparation_result(
+            True,
+            "Heatmap production candidate is ready.",
+            PreparedHeatmapProductionPlan(plan, composition),
+        )
+
+    def activate_prepared_heatmap_production_in_kit(
+        self,
+        prepared: PreparedHeatmapProductionPlan,
+    ) -> HeatmapRuntimeResult:
+        """Activate one already validated production composition."""
 
         stage = self._heatmap_stage()
         if stage is None:
@@ -304,17 +386,11 @@ class HeatmapRuntimeMixin:
             )
         if self.heatmap_production_active():
             return self._result(True, "Heatmap production mode is already active.")
-        settings = self._heatmap_applied_settings
-        if not settings.isolation_selectors:
-            return self._result(
-                False,
-                "Heatmap production mode requires at least one Isolation selection.",
-            )
-        try:
-            plan, composition = self._prepare_production_plan(settings)
-        except ValueError as error:
-            return self._result(False, str(error))
-        return self._activate_production_plan(stage, plan, composition)
+        return self._activate_production_plan(
+            stage,
+            prepared.presentation,
+            prepared.composition,
+        )
 
     def deactivate_heatmap_production_in_kit(self) -> HeatmapRuntimeResult:
         """Restore Heatmap state, then return X-Ray ownership to the manual UI."""
@@ -373,10 +449,41 @@ class HeatmapRuntimeMixin:
             scheduler_ticks=self._heatmap_presentation_scheduler_ticks,
             target_changes=self._heatmap_presentation_target_changes,
             material_group_count=self._heatmap_presentation_smoother.group_count,
+            scheduler_tasks=int(
+                self._heatmap_presentation_task is not None
+                and not self._heatmap_presentation_task.done()
+            ),
+            dynamic_transport_active=(
+                bool(
+                    getattr(
+                        self._heatmap_presentation,
+                        "dynamic_telemetry_active",
+                        False,
+                    )
+                )
+            ),
+            last_dynamic_update_success=self._heatmap_last_dynamic_update_success,
+            unavailable_material_groups=self._heatmap_unavailable_material_groups,
+        )
+
+    def heatmap_presentation_snapshot(self) -> HeatmapPresentationSnapshot:
+        """Expose presentation identity without leaking internals."""
+
+        plan = self._heatmap_presentation.plan
+        if plan is None:
+            target_paths = ()
+        else:
+            target_paths = plan.selected_target_paths
+        return HeatmapPresentationSnapshot(
+            production_active=self.heatmap_production_active(),
+            debug_active=self.heatmap_test_active(),
+            target_paths=target_paths,
+            settings=self._heatmap_applied_settings,
+            diagnostics=self.heatmap_presentation_diagnostics_snapshot(),
         )
 
     def advance_heatmap_presentation_in_kit(self, now: float | None = None) -> bool:
-        """Write only changed smoothed telemetry inputs for one scheduler tick."""
+        """Upload only changed smoothed telemetry texels for one scheduler tick."""
 
         stage = self._heatmap_stage()
         if stage is None or not self._heatmap_presentation.active:
@@ -388,7 +495,11 @@ class HeatmapRuntimeMixin:
         )
         if not changed:
             return True
-        return self._heatmap_presentation.update_telemetry(stage, dict(changed)).success
+        result = self._heatmap_presentation.update_telemetry(
+            stage, dict(changed)
+        ).success
+        self._heatmap_last_dynamic_update_success = result
+        return result
 
     def _prepare_plan(self, settings: HeatmapSettings):
         catalog = self._require_heatmap_catalog()
@@ -520,7 +631,9 @@ class HeatmapRuntimeMixin:
                     f"Heatmap settings could not be saved: {error}", rollback
                 )
             self._heatmap_applied_settings = candidate
-            self._visualization_mode_state.reset()
+            committed = self.commit_normal_after_heatmap_selection_cleared_in_kit()
+            if not committed.success:
+                return self._result(False, committed.message)
             return self._result(
                 True,
                 "Heatmap selection cleared; visualization returned to Normal.",
@@ -609,6 +722,8 @@ class HeatmapRuntimeMixin:
     def _activate_heatmap_smoothing(self, plan) -> None:
         values = plan.telemetry_by_material_key()
         self._heatmap_presentation_smoother.reset(values, now=time.monotonic())
+        self._heatmap_last_dynamic_update_success = True
+        self._heatmap_unavailable_material_groups = ()
         self._ensure_heatmap_presentation_scheduler()
 
     def _ensure_heatmap_presentation_scheduler(self) -> None:
@@ -622,6 +737,8 @@ class HeatmapRuntimeMixin:
         )
 
     async def _run_heatmap_presentation_scheduler(self, scheduler_id: int) -> None:
+        """Advance one scheduler generation until replacement or restoration."""
+
         try:
             import omni.kit.app
 
@@ -642,6 +759,8 @@ class HeatmapRuntimeMixin:
                 self._heatmap_presentation_task = None
 
     def _stop_heatmap_presentation_scheduler(self) -> None:
+        """Invalidate the current generation before cancelling its Kit task."""
+
         self._heatmap_presentation_scheduler_id += 1
         task = self._heatmap_presentation_task
         self._heatmap_presentation_task = None
@@ -688,6 +807,14 @@ class HeatmapRuntimeMixin:
             unavailable_target_paths=unavailable_target_paths,
         )
 
+    @staticmethod
+    def _preparation_result(
+        success: bool,
+        message: str,
+        prepared: PreparedHeatmapProductionPlan | None = None,
+    ) -> HeatmapProductionPreparationResult:
+        return HeatmapProductionPreparationResult(success, message, prepared)
+
 
 def initialise_heatmap_runtime(controller, config_path) -> None:
     """Install Heatmap owners on RuntimeController without a cooperative mixin init."""
@@ -711,4 +838,6 @@ def initialise_heatmap_runtime(controller, config_path) -> None:
     controller._heatmap_presentation_task = None
     controller._heatmap_presentation_scheduler_id = 0
     controller._heatmap_presentation_scheduler_ticks = 0
+    controller._heatmap_last_dynamic_update_success = True
+    controller._heatmap_unavailable_material_groups = ()
     controller._heatmap_presentation_target_changes = 0

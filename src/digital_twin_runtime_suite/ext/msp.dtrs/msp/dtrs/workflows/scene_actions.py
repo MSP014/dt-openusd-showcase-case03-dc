@@ -240,7 +240,6 @@ class SceneActionsWorkflowMixin:
             while self._controller and self._window:
                 await app.next_update_async()
                 self._controller.sync_xray_fresnel_material_camera_in_kit()
-                self._controller.advance_xray_material_performance_sampler_in_kit()
                 panel_counter += 1
                 if panel_counter < 15:
                     continue
@@ -280,6 +279,9 @@ class SceneActionsWorkflowMixin:
             )
             if refresh_heatmap_controls is not None:
                 refresh_heatmap_controls()
+            acceptance = getattr(self, "_stage10_acceptance", None)
+            if acceptance is not None:
+                acceptance.begin_if_ready()
         return result
 
     async def _attach_airflow(self) -> None:

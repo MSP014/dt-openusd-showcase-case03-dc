@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from digital_twin_runtime_suite.app.airflow_dataset import (
-    AirflowDatasetError,
-)
+from digital_twin_runtime_suite.app.airflow_dataset import AirflowDatasetError
 from digital_twin_runtime_suite.app.airflow_validation import family as airflow_family
 from digital_twin_runtime_suite.app.airflow_validation.cache import (
     build_dataset_validation_signature,
@@ -16,6 +14,7 @@ from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
 from digital_twin_runtime_suite.app.flow import temporal as flow_temporal
 from digital_twin_runtime_suite.app.flow import validation as flow_validation
 from digital_twin_runtime_suite.app.flow.runtime import SimulationCacheResult
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
 from digital_twin_runtime_suite.app.workload_binding import BackgroundValidationError
 
 StatusCallback = Callable[[str], None]
@@ -1463,10 +1462,20 @@ class AttachedWorkloadTransitionMixin:
         event: str,
         fields: tuple[tuple[str, object], ...],
     ) -> str:
-        """Format transition evidence in the same bounded Kit Warning style."""
+        """Adapt legacy transition evidence to the shared block formatter."""
 
-        rule = "=" * 63
-        lines = [f"=== DTRS AIRFLOW TRANSITION / {event} {rule}"]
-        lines.extend(f"  {label:<43}{value}" for label, value in fields)
-        lines.extend(("", rule))
-        return with_dtrs_local_timestamp("\n".join(lines))
+        details = {
+            label.rstrip(":")
+            .lower()
+            .replace(" ", "_")
+            .replace("-", "_")
+            .replace("/", "_"): value
+            for label, value in fields
+        }
+        return format_dtrs_diagnostic_block(
+            owner="AIRFLOW TRANSITION",
+            process="WORKLOAD",
+            state=event,
+            details=details,
+            append_local_timestamp=with_dtrs_local_timestamp,
+        )

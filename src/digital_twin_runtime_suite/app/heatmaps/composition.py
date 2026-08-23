@@ -71,7 +71,10 @@ def _housing_xray_excluded_paths(
         ):
             continue
         for path in candidates:
-            if _is_ancestor_or_same(path, target.prim_path):
+            if _is_gpu_housing_xray_root(path) and _is_ancestor_or_same(
+                path,
+                target.prim_path,
+            ):
                 excluded.add(path)
     return tuple(sorted(excluded))
 
@@ -80,3 +83,9 @@ def _is_ancestor_or_same(ancestor_path: str, path: str) -> bool:
     """Match a USD prim root and every descendant without string-prefix ambiguity."""
 
     return path == ancestor_path or path.startswith(f"{ancestor_path}/")
+
+
+def _is_gpu_housing_xray_root(path: str) -> bool:
+    """Retain non-housing GPU X-Ray roots when a housing selector is active."""
+
+    return path.endswith(("/shroud", "/blower"))

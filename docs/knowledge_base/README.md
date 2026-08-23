@@ -16,6 +16,9 @@ The overarching mechanics, definitions, and logics of the Digital Twin.
 * **[DTRS Telemetry Provider Contract](./dtrs_telemetry_contract.md)**
   Defines the Stage 3 synthetic telemetry subset and the future live-provider
   superset for mapping real monitoring feeds into Digital Twin Runtime Suite.
+* **[DTRS Heatmap Contract](./dtrs_heatmap_contract.md)**
+  Defines the single-server thermal presentation, Heatmap/X-Ray precedence, and
+  dynamic telemetry update boundary.
 * **[Digital Twin Maturity Levels](./digital_twin_maturity_levels.md)**
   Strategic justification identifying this project precisely as a **Level 1** Digital Twin. *(Includes authoritative PDF reference).*
 * **[Runtime Packaging Guardrail](./runtime_packaging_guardrail.md)**

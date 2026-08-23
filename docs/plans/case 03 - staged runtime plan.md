@@ -896,7 +896,7 @@ transitions leave exactly one healthy primary presentation without stale or
 corrupted state.
 
 
-#### Phase 10.5 - Acceptance and release
+#### Phase 10.5 - Acceptance and release ✅
 
 - run focused Heatmap tests and the full DTRS test suite;
 - perform Kit-side acceptance against the production server stage;
@@ -906,6 +906,51 @@ corrupted state.
 - close `DC-50`;
 - create the Stage 10 checkpoint;
 - release DTRS `0.5.0`.
+
+
+#### Post-acceptance Heatmap performance fix - periodic viewport stalls
+
+**Symptom.** With Heatmap enabled, fan animation regularly appeared to stop:
+`spins -> freezes -> spins`. Fan controllers continued to update each Kit
+frame, so the defect was a brief viewport/update-loop stall rather than an RPM
+calculation error. Average FPS could remain acceptable; fan motion made each
+periodic main-loop stall conspicuous.
+
+**Diagnosis.** Heatmap presentation ran at its preserved 2 Hz cadence through
+the smoother, presentation update, material telemetry update, and then a
+USD/UsdShade mutation consumed by Hydra/RTX. The decisive A/B left Heatmap
+materials, bindings, Isolation, X-Ray composition, scheduler, and ownership
+active, but suppressed only periodic dynamic presentation writes:
+
+- dynamic presentation ON: regular fan stalls;
+- `Freeze Heatmap Presentation`: stalls disappeared completely.
+
+This isolated the defect to dynamic Heatmap presentation, not fan motion,
+Streamlines, X-Ray, or static Heatmap composition.
+
+**Rejected approaches.** The shader-input path was batched by precomputing
+changes, skipping unchanged values, using one Session edit target and one
+`Sdf.ChangeBlock`, reusing inputs, and avoiding periodic `CreateInput()`. It
+did not remove the stalls. A `primvar` / `scene::data_lookup_float` experiment
+was substantially worse: geometry/Hydra dirtying reduced the viewport to about
+1-2 FPS. That experiment was fully reverted.
+
+**Root cause and fix.** USD/UsdShade had been used as transport for frequently
+changing telemetry. Even a small material mutation could invalidate
+Hydra/RTX work and occupy a later Kit frame for hundreds of milliseconds. Fan
+motion was not the defect; it exposed the defect.
+
+The final production path creates and binds the Heatmap MDL/material graph and
+one compact named dynamic GPU texture at activation. Each periodic update now
+applies existing smoothing, calibration, and palette semantics, then uploads
+only texture pixel data; MDL reads the current texel value. No periodic
+`UsdShade` input set, USD primvar set, material recreation, or rebinding is
+performed. USD remains the transport for structural/static presentation state.
+
+**Result.** Regular fan-animation freezes disappeared while live thermal colours
+continued to respond to telemetry. Production Heatmap + X-Ray remained
+interactive on the reference RTX 3080 (approximately 30 FPS in the observed
+view), without changing the 2 Hz cadence, 2 s smoothing, or fan-motion logic.
 
 
 ### Stage 10 Acceptance
@@ -935,7 +980,8 @@ Stage 10 is complete when:
 
 8. Test/Restore leave authored layers and exact prior Session opinions intact.
    Reload returns Heatmaps to OFF and reloads persisted settings. Production
-   lifecycle composition and X-Ray precedence remain Phase 10.4 work.
+   lifecycle composition and Heatmap/X-Ray precedence are validated as part
+   of the completed Phase 10.4 contract.
 
 9. Enable/disable and metric changes leave no stale Heatmap harness state and
    do not modify production asset layers.
@@ -949,477 +995,6 @@ Heatmap over Houdini-authored thermal distributions without inventing
 measurements or implying validated thermal simulation.
 
 
-### Post-Stage 10 Enhancement - Thermal-Aware Flow Smoke
-
-This enhancement begins only after Stage 10 Heatmap is complete and its
-thermal metadata, telemetry binding, scalar mapping, palette, lifecycle, and
-acceptance contracts are stable.
-
-It is not a replacement for the Heatmap and does not introduce another primary
-Visualization mode.
-
-The purpose is to connect two already-proven visual systems:
-
-`telemetry-driven component thermal state`
-`-> authored Heatmap distribution`
-`-> thermal influence injected into the existing Flow simulation`
-`-> temperature-aware smoke colour`
-
-The result should make airflow and thermal state read as parts of one system:
-cold intake smoke enters the server, passes thermal sources, acquires thermal
-colour, and is advected by the existing Houdini-authored velocity field.
-
-This remains an engineering visualisation. The Flow temperature channel is a
-temperature-derived presentation scalar seeded from component telemetry; it
-must not be presented as a measured or validated per-voxel air-temperature
-field.
-
-
-#### Architecture contract
-
-Do not create:
-
-- a second Flow simulation;
-- another telemetry binding system inside `smoke`;
-- a second Heatmap scalar/palette implementation;
-- RGB values authored independently for Heatmap and Flow;
-- workload-specific thermal-smoke logic;
-- high-density emitters corresponding to every thermal-weight vertex.
-
-Reuse:
-
-- the existing Flow velocity simulation and smoke tracers;
-- the Stage 10 semantic thermal registry and telemetry bindings;
-- the Stage 10 fixed scalar ranges and normalization;
-- the Stage 10 thermal colour palette;
-- the existing Flow lifecycle and performance instrumentation.
-
-Thermal Smoke is a secondary Smoke presentation option:
-
-`Smoke colour = Neutral | Thermal`
-
-It must not become a new primary `VisualizationMode`.
-
-
-#### Stage 10 compatibility requirements
-
-Stage 10 should leave the following reusable boundaries so this enhancement
-does not require a Heatmap refactor.
-
-`heatmaps/scalar.py`
-
-- remains dependency-light and independent from Kit/material code;
-- owns the canonical fixed thermal scalar mapping;
-- exposes the normalized thermal display scalar used by presentation systems;
-- contains no USD material or Flow-specific logic.
-
-`heatmaps/palette.py`
-
-- owns colour-stop validation, clamp, active-stop handling, and interpolation;
-- maps the scalar from `scalar.py` to the shared Heatmap colour policy;
-- contains no USD material or Flow-specific logic.
-
-`heatmaps/bindings.py`
-
-- remains the single owner of semantic thermal-region -> telemetry binding;
-- preserves repeated hardware identity;
-- preserves telemetry quality and unavailable state;
-- contains no Flow-specific bindings.
-
-`heatmaps/discovery.py`
-
-- remains the owner of the authored thermal metadata contract;
-- preserves deterministic prim identity, `thermal_zone`,
-  `thermal_component`, and `thermal_weight` information needed for bounded
-  spatial sampling;
-- must not add Flow-specific presentation policy.
-
-`heatmaps/runtime.py`
-
-- exposes a small immutable/plain-data thermal-state snapshot sufficient for
-  other presentation consumers;
-- the snapshot should expose resolved component identity, telemetry binding,
-  normalized thermal state, quality/availability, and target identity without
-  exposing Heatmap material internals;
-- other systems must not inspect Heatmap private runtime state.
-
-`heatmaps/material.py`
-
-- remains surface presentation only;
-- Thermal Smoke must not import or reuse Heatmap material-binding code.
-
-This establishes:
-
-`heatmaps scalar/binding state`
-`-> reusable thermal presentation contract`
-
-rather than:
-
-`smoke`
-`-> Heatmap material implementation`.
-
-
-#### Smoke implementation ownership
-
-Add:
-
-`src/digital_twin_runtime_suite/app/smoke/thermal.py`
-
-This module owns the translation from the reusable Stage 10 thermal state into
-a bounded Flow thermal-source description.
-
-Responsibilities:
-
-- consume the public Stage 10 thermal-state snapshot;
-- select thermal source regions supported at single-server detail level;
-- generate a sparse, bounded set of source samples from authored thermal
-  distributions;
-- preserve repeated component identity;
-- convert canonical normalized thermal scalars into Flow temperature source
-  values;
-- enforce a configurable maximum sample/source count;
-- exclude unavailable regions instead of fabricating temperatures;
-- avoid using presentation-proxy geometry such as the single-server GPU shroud
-  as an additional thermal source when that would double-count internal GPU
-  sources.
-
-It contains no direct telemetry-provider queries and no Flow lifecycle
-orchestration.
-
-
-`smoke/flow.py`
-
-Extend the existing low-level Flow authoring helpers.
-
-Responsibilities:
-
-- create/update DTRS-owned sparse temperature Point Emitter data;
-- author temperature and temperature coupling only;
-- keep smoke, fuel, burn, divergence, and self-velocity contribution disabled
-  for these thermal sources;
-- apply the shared thermal palette to the native Flow temperature colormap;
-- validate that authored Flow state retained the requested values;
-- remove only DTRS-owned thermal-source/colormap runtime opinions during
-  cleanup.
-
-Existing passive smoke tracers remain unchanged.
-
-
-`smoke/runtime.py`
-
-Extend `SmokeRuntimeMixin` with Thermal Smoke presentation lifecycle.
-
-Responsibilities:
-
-- expose `Neutral` and `Thermal` smoke-colour modes;
-- enable Thermal only against an already prepared/attached Flow source;
-- request the current public thermal-state snapshot from the Heatmap subsystem;
-- build/update sparse thermal sources through `smoke/thermal.py`;
-- apply them through `smoke/flow.py`;
-- refresh source values when telemetry/workload changes without rebuilding the
-  Flow simulation;
-- restore neutral smoke presentation cleanly;
-- rollback to the last valid Neutral state if Thermal activation fails;
-- prevent duplicate thermal emitters/tasks after repeated Apply or rapid mode
-  changes;
-- clean thermal state on Flow detach, stage reload, Normal/Streamlines
-  transition, and shutdown.
-
-Thermal Smoke activation must not perform Flow Attach, VTI import, Streamlines
-cache work, or Flow reconstruction unless the existing Smoke transition already
-requires that operation.
-
-
-#### Renderer proof before full implementation
-
-Before expanding across the server, perform one bounded Kit-side proof.
-
-Use:
-
-- one existing attached Flow simulation;
-- the existing passive smoke tracer;
-- one representative thermal source;
-- one simple low/high temperature change;
-- the Stage 10 palette.
-
-Prove that the installed Kit/Flow renderer can visibly map the advected
-temperature channel through the required colormap while preserving the current
-smoke-density presentation.
-
-Do not build full-server source generation until this proof succeeds.
-
-Gate:
-
-`existing smoke + one thermal source -> visibly advected temperature colour`
-
-must work without a second Flow simulation or runtime Flow reset.
-
-
-#### Full-server implementation
-
-After the renderer proof:
-
-- create sparse thermal sources only for supported Stage 10 thermal regions;
-- begin with GPU, CPU, and PSU sources;
-- expand to other components only when they have truthful Stage 10 bindings and
-  visible value;
-- reuse the same fixed scalar mapping and palette used by Heatmap;
-- keep source density bounded; do not mirror every authored
-  `thermal_weight` point into Flow;
-- workload changes update source scalar values through the existing telemetry
-  path;
-- the Houdini velocity field remains the sole airflow velocity source.
-
-The goal is readable thermal transport, not reconstructing CFD heat transfer.
-
-
-#### Automated tests
-
-Extend existing Heatmap tests where the shared contract is involved:
-
-`tests/heatmaps/test_heatmap_scalar.py`
-
-- canonical normalization remains deterministic;
-- identical normalized scalar produces the canonical palette result;
-- scalar/palette behavior is workload-independent.
-
-`tests/heatmaps/test_heatmap_runtime.py`
-
-- public thermal-state snapshot exposes supported component state without
-  exposing material/runtime internals;
-- quality and unavailable state survive the snapshot unchanged.
-
-Add focused Smoke tests, preferably under `tests/smoke/`:
-
-`test_thermal_smoke_sources.py`
-
-- sparse source generation from thermal-state snapshots;
-- repeated hardware identity;
-- bounded source count;
-- unavailable-region exclusion;
-- correct normalized temperature values;
-- no duplicated source identities.
-
-`test_thermal_smoke_flow.py`
-
-- thermal emitters author temperature coupling only;
-- smoke/fuel/burn/self-velocity coupling stays disabled;
-- canonical palette is translated to the Flow colormap correctly;
-- cleanup removes only Thermal-Smoke-owned opinions.
-
-`test_thermal_smoke_runtime.py`
-
-- Neutral -> Thermal -> Neutral Happy Path;
-- telemetry/workload refresh updates thermal sources without Flow reset;
-- repeated Apply is idempotent;
-- failure rolls back to valid Neutral smoke;
-- detach/reload/shutdown leaves no thermal-source state behind.
-
-Extend visualization-mode tests to prove that Thermal Smoke remains a secondary
-Smoke setting and does not become another primary visualization mode.
-
-
-#### Required boundary cases
-
-In addition to the Happy Path, automated tests must cover at least these
-boundary cases:
-
-1. **No truthful thermal source**
-   - all candidate regions are unavailable;
-   - Thermal activation must not invent source temperatures;
-   - report unavailable or remain Neutral according to the Stage 10
-     missing-data policy.
-
-2. **Mixed valid and unavailable regions**
-   - valid components continue to contribute;
-   - unavailable components are skipped;
-   - no whole-server failure is caused by one optional missing binding.
-
-3. **Invalid/stale/out-of-range telemetry**
-   - use the exact Stage 10 scalar/quality policy;
-   - do not silently promote stale data or create NaN/invalid Flow values;
-   - clamping, rejection, or suppression must match the canonical thermal
-     contract.
-
-4. **Rapid supersession**
-   - workload or Neutral/Thermal mode changes while a previous update is
-     pending;
-   - the latest committed request wins;
-   - no duplicate emitters, tasks, or stale source values remain.
-
-5. **Presentation/lifecycle exit**
-   - transition from Thermal Smoke to Normal or Streamlines, Flow Detach, stage
-     reload, and shutdown;
-   - thermal emitters and colormap overrides are cleaned while unrelated Flow,
-     Heatmap, X-Ray, and Streamlines state remains owned by their respective
-     subsystems.
-
-Additional Case 03 guard:
-
-- the GPU shroud may remain Heatmap-capable for future rack/hall use, but at
-  single-server level it must not become an extra Thermal Smoke source if the
-  internal GPU thermal regions already represent that device.
-
-
-#### Performance acceptance
-
-Use the existing Flow viewport-performance sampler; do not introduce a second
-profiling system.
-
-Run a fixed-camera A/B comparison using the same:
-
-- workload;
-- airflow dataset;
-- voxel resolution;
-- raymarch quality;
-- smoke tuning;
-- camera;
-- measurement duration.
-
-Compare:
-
-A. `Neutral Smoke`
-B. `Thermal Smoke`
-
-Record at minimum:
-
-- average FPS;
-- minimum FPS;
-- average frame time;
-- GPU memory use.
-
-Initial performance guardrail:
-
-- Thermal Smoke should remain within approximately 10% of the Neutral Smoke
-  average-FPS baseline at the accepted fixed camera/settings;
-- a larger regression requires source-density or renderer tuning before the
-  feature is accepted;
-- no performance claim is made until measured on the production RTX 3080
-  configuration.
-
-If source count materially changes active Flow allocation, characterize that
-separately instead of attributing the entire regression to colour mapping.
-
-
-#### Guided Kit acceptance
-
-Use the existing reusable `GuidedAcceptanceSession` /
-`format_manual_acceptance_event()` mechanism.
-
-The guided workflow belongs in a focused extension workflow, not in
-`smoke/runtime.py`, `heatmaps/runtime.py`, or `extension.py`.
-
-Suggested workflow:
-
-`thermal_smoke_acceptance.py`
-
-Automatic preflight before READY must verify:
-
-- Stage 10 thermal contract is available;
-- production server stage is loaded;
-- current workload has at least one valid thermal source;
-- no conflicting visualization transition is pending;
-- Flow/Smoke can be selected normally;
-- fixed performance camera/bookmark is available.
-
-Only then emit:
-
-`READY`
-
-followed by:
-
-`NEXT_ACTION | Select "Smoke" in "Visualization".`
-
-After Smoke is visibly prepared and stable:
-
-`NEXT_ACTION | Set "Smoke colour" to "Thermal" and press "Apply".`
-
-The workflow then automatically verifies:
-
-- one existing Flow simulation remains in use;
-- no Flow reset/re-Attach occurred;
-- thermal source prims exist exactly once;
-- valid source values match the Stage 10 thermal snapshot;
-- Flow temperature presentation is active;
-- the canonical thermal palette is installed;
-- playback continues;
-- performance sampling is live.
-
-Then emit:
-
-`NEXT_ACTION | Change workload to "Critical".`
-
-After the workload transition, automatically verify:
-
-- telemetry identity changed to the committed workload state;
-- thermal source values changed through the shared Stage 10 mapping;
-- source geometry/identity was not rebuilt unnecessarily;
-- Flow playback remained live;
-- no duplicate source prims appeared.
-
-Then emit:
-
-`NEXT_ACTION | Set "Smoke colour" to "Neutral" and press "Apply".`
-
-Automatically verify:
-
-- thermal source influence is disabled/removed;
-- neutral smoke colour is restored;
-- the original Flow source remains valid;
-- no stale thermal presentation remains.
-
-Then emit:
-
-`NEXT_ACTION | Select "Normal" in "Visualization".`
-
-Automatically verify final cleanup and emit exactly one terminal result:
-
-`TEST COMPLETE | PASS`
-
-or:
-
-`TEST COMPLETE | FAIL`
-
-After `TEST COMPLETE`, emit no further manual action.
-
-
-#### Thermal Smoke Enhancement Acceptance
-
-This enhancement is complete when:
-
-1. Thermal Smoke reuses the accepted Stage 10 thermal scalar and palette
-   contract rather than implementing a second mapping.
-
-2. Thermal Smoke uses the existing Flow simulation and existing Houdini
-   velocity field.
-
-3. Sparse Flow temperature sources are driven only by truthful Stage 10 thermal
-   state.
-
-4. The existing passive smoke emitters remain smoke-only and are not converted
-   into fake thermal sensors.
-
-5. Thermal colour visibly advects through the server airflow rather than merely
-   recolouring the entire volume uniformly.
-
-6. Neutral/Thermal switching does not rebuild or re-Attach Flow.
-
-7. Workload changes update thermal influence through the existing telemetry
-   path.
-
-8. Missing, stale, or unavailable data follows the Stage 10 quality policy and
-   never fabricates a valid-looking thermal result.
-
-9. Neutral Smoke, Thermal Smoke, Heatmap, X-Ray, Streamlines, reload, detach,
-   and shutdown retain clean subsystem ownership and cleanup.
-
-10. Fixed-camera performance evidence shows the measured Thermal Smoke cost
-    relative to the accepted Neutral Smoke baseline.
-
-Done when DTRS can use the same telemetry-derived thermal language for both
-surface Heatmap presentation and Flow smoke colouring, while keeping thermal
-transport explicitly a presentation layer rather than claiming validated
-per-voxel air-temperature simulation.
 
 
 ### Stage 11 - Scale Navigation Foundation Slice

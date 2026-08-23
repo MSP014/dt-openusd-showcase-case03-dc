@@ -8,6 +8,7 @@ from typing import Callable
 from digital_twin_runtime_suite.app.airflow_dataset import AirflowDatasetSelector
 from digital_twin_runtime_suite.app.config import SimulationCacheConfig
 from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
 
 
 @dataclass(frozen=True)
@@ -26,9 +27,15 @@ class WorkloadAirflowBinding:
     def format_mapping_log(self) -> str:
         """Return the diagnostic without implying a Flow lifecycle change."""
 
-        return with_dtrs_local_timestamp(
-            "DTRS WORKLOAD CACHE MAPPING | "
-            f"workload={self.workload_mode} | dataset={self.dataset_identity}"
+        return format_dtrs_diagnostic_block(
+            owner="WORKLOAD CACHE",
+            process="MAPPING",
+            state="RESOLVED",
+            details={
+                "workload": self.workload_mode,
+                "dataset": self.dataset_identity,
+            },
+            append_local_timestamp=with_dtrs_local_timestamp,
         )
 
 

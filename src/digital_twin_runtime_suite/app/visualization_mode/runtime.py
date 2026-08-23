@@ -98,6 +98,24 @@ class VisualizationModeRuntimeMixin:
 
         return self._visualization_mode_state.snapshot
 
+    def commit_normal_after_heatmap_selection_cleared_in_kit(
+        self,
+    ) -> VisualizationModeResult:
+        """Commit Normal after Heatmaps has restored its empty composition."""
+
+        if self.heatmap_production_active():
+            return self._result(
+                False,
+                "Heatmap presentation remains active after clearing its selection.",
+            )
+        if self.xray_target_snapshot().override_owner == _HEATMAP_XRAY_OVERRIDE_OWNER:
+            return self._result(
+                False,
+                "Heatmap X-Ray override remains active after clearing its selection.",
+            )
+        self._visualization_mode_state.reset()
+        return self._result(True, "Visualization returned to Normal.")
+
     def primary_visualization_presentation_snapshot_in_kit(
         self,
     ) -> PrimaryPresentationSnapshot:
@@ -404,8 +422,8 @@ class VisualizationModeRuntimeMixin:
             if self._cancel_running_flow_temporal_proof_for_streamlines():
                 self._report_visualization_progress(
                     status_callback,
-                    "Streamlines: cancelled the running Flow temporal proof; "
-                    "retained Flow source remains prepared.",
+                    "Streamlines: cancelled the running Flow temporal proof "
+                    "before cached presentation preparation.",
                 )
             self._report_visualization_progress(
                 status_callback,
@@ -430,7 +448,13 @@ class VisualizationModeRuntimeMixin:
                 status_callback,
                 "Streamlines: starting the accepted 200 ms scheduler.",
             )
-            await self.start_streamlines_cached_playback_in_kit(
+            contract = self._streamlines_cache_playback_contract
+            await self.start_streamlines_cached_contract_playback_in_kit(
+                contract,
+                authorization=lambda: self._streamlines_transition_playback_authorized(
+                    transition,
+                    contract,
+                ),
                 status_callback=status_callback,
             )
             if not self._visualization_transition_is_current(transition):
@@ -565,15 +589,22 @@ class VisualizationModeRuntimeMixin:
         )
 
     async def _quiesce_previous_mode_for_streamlines(self, previous_mode) -> None:
-        """Remove only the previous primary presentation after target proof."""
+        """Release the previous primary only after Streamlines is proven ready."""
 
         if previous_mode is VisualizationMode.SMOKE:
-            hidden_smoke = self.set_smoke_presentation_visible_in_kit(False)
-            if not hidden_smoke.success:
-                raise RuntimeError(hidden_smoke.message)
-            if not await self.await_smoke_presentation_visibility_in_kit(False):
+            # Streamlines is a persisted presentation and does not need the
+            # live Flow source.  Release the volume before committing so an
+            # invisible Smoke renderer cannot retain its RTX memory budget.
+            detached = await self.detach_simulation_cache_in_kit()
+            if not detached.success:
+                raise RuntimeError(detached.message)
+            if self._flow_lifecycle_state != "DETACHED":
                 raise RuntimeError(
-                    "Native Flow Smoke renderer remained visible after handoff."
+                    "Flow remained attached after the Smoke to Streamlines handoff."
+                )
+            if self.smoke_presentation_is_visible_in_kit():
+                raise RuntimeError(
+                    "Native Flow Smoke renderer remained visible after detach."
                 )
             return
         if previous_mode is VisualizationMode.HEATMAP:
@@ -588,6 +619,12 @@ class VisualizationModeRuntimeMixin:
         """Prove rollback to the prior committed presentation after target failure."""
 
         if previous_mode is VisualizationMode.SMOKE:
+            if self._flow_lifecycle_state == "DETACHED":
+                attached = await self._attach_flow_for_visualization_mode()
+                if not attached.success:
+                    return "Smoke rollback could not reattach Flow: " + attached.message
+            elif self._flow_lifecycle_state != "ATTACHED":
+                return "Smoke rollback found Flow lifecycle busy."
             restored = await self.resume_smoke_presentation_in_kit()
             if not restored.success or not self.smoke_presentation_is_visible_in_kit():
                 return restored.message
@@ -861,9 +898,30 @@ class VisualizationModeRuntimeMixin:
         pending = self._visualization_mode_state.snapshot.pending
         return bool(pending and pending.transition_id == transition.transition_id)
 
+    def _streamlines_transition_playback_authorized(
+        self,
+        transition,
+        contract,
+    ) -> bool:
+        """Allow a prepared contract through commit, but never a replaced mode."""
+
+        if self._visualization_transition_is_current(transition):
+            return True
+        snapshot = self._visualization_mode_state.snapshot
+        return bool(
+            snapshot.pending is None
+            and snapshot.committed in _STREAMLINES_PRIMARY_MODES
+            and contract is self._streamlines_cache_playback_contract
+        )
+
     async def _activate_heatmap_mode(self) -> VisualizationModeResult:
         """Activate the production Heatmap composition transactionally."""
 
+        prepared = self.prepare_heatmap_production_plan_in_kit()
+        if not prepared.success:
+            return self._result(False, prepared.message)
+        if prepared.prepared is None:
+            return self._result(False, "Heatmap preparation returned no plan.")
         previous_mode = self._visualization_mode_state.committed
         released_streamlines_xray = False
         if previous_mode is VisualizationMode.STREAMLINES_XRAY:
@@ -900,7 +958,7 @@ class VisualizationModeRuntimeMixin:
                     if not restored.success:
                         rollback += f" X-Ray rollback failed: {restored.message}"
                 return self._result(False, rollback)
-        applied = self.activate_heatmap_production_in_kit()
+        applied = self.activate_prepared_heatmap_production_in_kit(prepared.prepared)
         if not applied.success:
             rollback = await self._restore_previous_after_heatmap_failure(previous_mode)
             message = applied.message

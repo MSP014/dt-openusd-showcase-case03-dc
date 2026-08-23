@@ -24,18 +24,12 @@ from digital_twin_runtime_suite.app.airflow_validation.cache import (
     ValidationCacheLookup,
     build_dataset_validation_signature,
 )
-from digital_twin_runtime_suite.app.diagnostics import (
-    with_dtrs_local_timestamp,
-)
+from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
 from digital_twin_runtime_suite.app.flow import static_source
 from digital_twin_runtime_suite.app.flow import temporal as flow_temporal
 from digital_twin_runtime_suite.app.flow import validation as flow_validation
-from digital_twin_runtime_suite.app.flow.diagnostics import (
-    FlowDiagnosticsMixin,
-)
-from digital_twin_runtime_suite.app.flow.performance import (
-    FlowPerformanceMixin,
-)
+from digital_twin_runtime_suite.app.flow.diagnostics import FlowDiagnosticsMixin
+from digital_twin_runtime_suite.app.flow.performance import FlowPerformanceMixin
 from digital_twin_runtime_suite.app.flow.progress import (
     TemporalProofProgress,
     TemporalProofResultSource,
@@ -46,9 +40,8 @@ from digital_twin_runtime_suite.app.kit_cae_flow_parity import (
     capture_flow_scene,
     write_flow_snapshot,
 )
-from digital_twin_runtime_suite.app.workload_binding import (
-    BackgroundValidationError,
-)
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
+from digital_twin_runtime_suite.app.workload_binding import BackgroundValidationError
 
 StatusCallback = Callable[[str], None]
 
@@ -102,7 +95,15 @@ class FlowRuntimeMixin(
         """Record a measured Attach phase without affecting runtime state."""
 
         elapsed_ms = (time.monotonic() - started_at) * 1000.0
-        carb.log_warn(f"DTRS FLOW ATTACH PHASE | {phase} | {elapsed_ms:.0f} ms")
+        carb.log_warn(
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="ATTACH PHASE",
+                state="PROGRESS",
+                details={"phase": phase, "elapsed_ms": f"{elapsed_ms:.0f}"},
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
+        )
 
     def _log_dataset_validation_cache(
         self,
@@ -314,10 +315,26 @@ class FlowRuntimeMixin(
                     progress_callback=update_progress,
                 )
             except asyncio.CancelledError:
-                carb.log_info("DTRS FLOW TEMPORAL PROOF | cancelled")
+                carb.log_info(
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="TEMPORAL PROOF",
+                        state="CANCELLED",
+                        details={},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
+                )
                 raise
             except Exception as error:  # noqa: BLE001
-                carb.log_error(f"DTRS FLOW TEMPORAL PROOF | failed: {error}")
+                carb.log_error(
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="TEMPORAL PROOF",
+                        state="FAIL",
+                        details={"reason": str(error)},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
+                )
                 if generation == self._flow_temporal_proof_generation:
                     self._flow_temporal_failure = {"reason": str(error)}
                     self._set_temporal_proof_progress(
@@ -360,12 +377,22 @@ class FlowRuntimeMixin(
                     duration_seconds=time.monotonic() - started_at,
                 )
                 carb.log_warn(
-                    "DTRS FLOW DATASET VALIDATION CACHE | "
-                    "Temporal receipt stored | signature="
-                    + receipt.signature.compact_digest
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="DATASET VALIDATION CACHE",
+                        state="TEMPORAL RECEIPT STORED",
+                        details={"signature": receipt.signature.compact_digest},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
             carb.log_info(
-                "DTRS FLOW TEMPORAL VALIDATION | " + ("passed" if passed else "failed")
+                format_dtrs_diagnostic_block(
+                    owner="FLOW",
+                    process="TEMPORAL VALIDATION",
+                    state="PASS" if passed else "FAIL",
+                    details={},
+                    append_local_timestamp=with_dtrs_local_timestamp,
+                )
             )
             if status_callback:
                 status_callback(
@@ -480,13 +507,19 @@ class FlowRuntimeMixin(
         self._flow_last_vti_receipt_consumer_check = VtiReceiptConsumerCheck(
             selector=binding.dataset_identity,
         )
-        attach_selector_log = (
-            "DTRS FLOW ATTACH SELECTOR | "
-            f"workload={binding.workload_mode} | "
-            f"Selector: {binding.dataset_identity} | "
-            f"State: {binding.dataset.state}"
+        carb.log_warn(
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="ATTACH",
+                state="SELECTOR",
+                details={
+                    "workload": binding.workload_mode,
+                    "selector": binding.dataset_identity,
+                    "airflow_state": binding.dataset.state,
+                },
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
         )
-        carb.log_warn(with_dtrs_local_timestamp(attach_selector_log))
         velocity_paths = airflow_dataset.velocity_vti_sequence_paths
         velocity_path = velocity_paths[0]
         missing_velocity_paths = [path for path in velocity_paths if not path.is_file()]
@@ -495,8 +528,16 @@ class FlowRuntimeMixin(
                 str(path) for path in missing_velocity_paths
             )
             carb.log_error(
-                "DTRS Flow temporal expanded diagnostics: "
-                f"reason=asset missing or unreadable, assets={missing_velocity_paths}"
+                format_dtrs_diagnostic_block(
+                    owner="FLOW",
+                    process="TEMPORAL ASSET PREFLIGHT",
+                    state="FAIL",
+                    details={
+                        "reason": "asset missing or unreadable",
+                        "assets": missing_velocity_paths,
+                    },
+                    append_local_timestamp=with_dtrs_local_timestamp,
+                )
             )
             return SimulationCacheResult(False, message)
         if status_callback:
@@ -539,11 +580,12 @@ class FlowRuntimeMixin(
         self._flow_attach_cancel_event = Event()
         self._start_kit_cae_operator_tracking()
         self._stop_flow_performance_sampler()
-        self._log_flow_performance_event(
-            carb,
-            event="PRE_ATTACH",
-            sample=self._capture_flow_performance_sample(),
-        )
+        if self.FLOW_PERFORMANCE_SAMPLER_ENABLED:
+            self._log_flow_performance_event(
+                carb,
+                event="PRE_ATTACH",
+                sample=self._capture_flow_performance_sample(),
+            )
 
         # Kit-CAE's current VTK importer copies its result into the root layer.
         # The import destination itself must be top-level: Sdf.CopySpec does not
@@ -649,11 +691,19 @@ class FlowRuntimeMixin(
                     grid_match,
                 )
                 carb.log_warn(
-                    "DTRS AIRFLOW VALIDATION | VALIDATED | "
-                    f"selector={receipt.signature.selector} | "
-                    "receipt_source=FRESH | validation_executed=True | "
-                    f"receipt={receipt.signature.compact_digest} | "
-                    f"samples={len(velocity_paths)}"
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="AIRFLOW VALIDATION",
+                        state="VALIDATED",
+                        details={
+                            "selector": receipt.signature.selector,
+                            "receipt_source": "FRESH",
+                            "validation_executed": True,
+                            "receipt": receipt.signature.compact_digest,
+                            "samples": len(velocity_paths),
+                        },
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
                 self._log_kit_cae_attach_phase(
                     carb,
@@ -1051,7 +1101,15 @@ class FlowRuntimeMixin(
         except airflow_preflight.TemporalVtiValidationCancelled:
             # The worker has returned before any importer or Flow prim is authored.
             # Keep session validation receipts untouched because no full preflight ran.
-            carb.log_info("DTRS FLOW ATTACH | cancelled during VTI preflight")
+            carb.log_info(
+                format_dtrs_diagnostic_block(
+                    owner="FLOW",
+                    process="ATTACH",
+                    state="CANCELLED",
+                    details={"phase": "VTI preflight"},
+                    append_local_timestamp=with_dtrs_local_timestamp,
+                )
+            )
             self._clear_flow_runtime_state()
             return SimulationCacheResult(False, "Airflow preparation cancelled.")
         except Exception as error:
@@ -1059,7 +1117,15 @@ class FlowRuntimeMixin(
                 self._flow_last_vti_receipt_consumer_check,
                 failure_reason=str(error),
             )
-            carb.log_error(f"DTRS Kit-CAE Flow probe failed: {error}")
+            carb.log_error(
+                format_dtrs_diagnostic_block(
+                    owner="FLOW",
+                    process="KIT-CAE PROBE",
+                    state="FAIL",
+                    details={"reason": str(error)},
+                    append_local_timestamp=with_dtrs_local_timestamp,
+                )
+            )
             self._flow_airflow_simulate_path = None
             self._flow_base_velocity_scale = None
             self._flow_world_bounds = None
@@ -1272,7 +1338,15 @@ class FlowRuntimeMixin(
             viewport.hydra_engine,
             profiler.get_gpu_profiler_result(),
         )
-        carb.log_info(f"DTRS GPU profile saved: {profile_path}")
+        carb.log_info(
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="GPU PROFILE",
+                state="COMPLETE",
+                details={"path": profile_path},
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
+        )
 
         return SimulationCacheResult(
             True,
@@ -1412,8 +1486,13 @@ class FlowRuntimeMixin(
             )
             if not operators_quiesced:
                 carb.log_warn(
-                    "DTRS FLOW DETACH | Kit-CAE operator quiesce timed out; "
-                    "continuing teardown."
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="DETACH",
+                        state="OPERATOR QUIESCE TIMEOUT",
+                        details={"action": "continuing teardown"},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
 
             flow_environment = stage.GetPrimAtPath("/DTRS_KitCAE/FlowSimulation")
@@ -1447,7 +1526,15 @@ class FlowRuntimeMixin(
             self._clear_flow_runtime_state()
             raise
         except Exception as error:
-            carb.log_error(f"DTRS Flow detach failed: {error}")
+            carb.log_error(
+                format_dtrs_diagnostic_block(
+                    owner="FLOW",
+                    process="DETACH",
+                    state="FAIL",
+                    details={"reason": str(error)},
+                    append_local_timestamp=with_dtrs_local_timestamp,
+                )
+            )
             self._flow_lifecycle_state = "ATTACHED"
             self._log_kit_cae_flow_detach(
                 carb,
@@ -1620,8 +1707,13 @@ class FlowRuntimeMixin(
                     return True
             if now >= deadline:
                 carb.log_warn(
-                    "DTRS FLOW DETACH | active Kit-CAE operators at timeout: "
-                    + ", ".join(active_paths)
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="DETACH",
+                        state="ACTIVE OPERATORS TIMEOUT",
+                        details={"active_paths": ", ".join(active_paths)},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
                 return False
             await app.next_update_async()
@@ -1873,7 +1965,13 @@ class FlowRuntimeMixin(
             fields.append(("Reason:", reason))
         fields.append(("RESULT:", result))
         logger = carb.log_warn if result == "PASS" else carb.log_error
-        logger(cls._format_flow_log_block("DETACH", (("", tuple(fields)),)))
+        logger(
+            cls._format_flow_log_block(
+                "DETACH",
+                (("", tuple(fields)),),
+                state=result,
+            )
+        )
 
     @staticmethod
     def _deactivate_kit_cae_flow_for_detach(stage, cae_viz) -> bool:
@@ -1945,17 +2043,40 @@ class FlowRuntimeMixin(
     def _format_flow_log_block(
         title: str,
         sections: tuple[tuple[str, tuple[tuple[str, object], ...]], ...],
+        *,
+        state: str = "COMPLETE",
     ) -> str:
-        """Format bounded Flow proof evidence as one grep-friendly log block."""
+        """Adapt legacy Flow evidence call sites to the shared block formatter."""
 
-        rule = "=" * 63
-        lines = [f"=== DTRS FLOW / {title} {rule}"]
+        return FlowRuntimeMixin._format_flow_diagnostic_block(
+            process=title,
+            state=state,
+            sections=sections,
+        )
+
+    @staticmethod
+    def _format_flow_diagnostic_block(
+        *,
+        process: str,
+        state: str,
+        sections: tuple[tuple[str, tuple[tuple[str, object], ...]], ...],
+    ) -> str:
+        """Map legacy Flow evidence sections to the shared diagnostic format."""
+
+        details: dict[str, object] = {}
         for heading, fields in sections:
-            if heading:
-                lines.extend(("", f"{heading}:"))
-            lines.extend(f"  {label:<24}{value}" for label, value in fields)
-        lines.extend(("", rule))
-        return with_dtrs_local_timestamp("\n".join(lines))
+            prefix = heading.lower().replace(" ", "_").replace("-", "_")
+            for label, value in fields:
+                name = label.rstrip(":").lower().replace(" ", "_")
+                name = name.replace("-", "_").replace("/", "_")
+                details[f"{prefix}_{name}" if prefix else name] = value
+        return format_dtrs_diagnostic_block(
+            owner="FLOW",
+            process=process,
+            state=state,
+            details=details,
+            append_local_timestamp=with_dtrs_local_timestamp,
+        )
 
     def _format_flow_vti_voxel_size_mm(self, stage_meters_per_unit: float) -> str:
         """Format the attached VTI spacing in physical units for A/B evidence."""
@@ -2425,9 +2546,10 @@ class FlowRuntimeMixin(
             base_velocity_scale * smoke_tuning.velocity_scale_multiplier
         )
         carb.log_warn(
-            self._format_flow_log_block(
-                "ATTACH",
-                (
+            self._format_flow_diagnostic_block(
+                process="ATTACH",
+                state="COMPLETE",
+                sections=(
                     (
                         "",
                         (

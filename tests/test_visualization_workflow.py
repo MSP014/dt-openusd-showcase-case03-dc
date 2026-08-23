@@ -40,6 +40,24 @@ def test_unavailable_mode_is_not_scheduled(monkeypatch):
     assert workflow.statuses == ["Streamlines unavailable: Cache missing"]
 
 
+def test_mode_request_is_rejected_while_airflow_cache_operation_is_active(monkeypatch):
+    workflow = _workflow(airflow_operation_active=lambda: True)
+    scheduled = []
+    monkeypatch.setattr(asyncio, "ensure_future", scheduled.append)
+
+    accepted = workflow.request_mode_from_ui(VisualizationMode.SMOKE)
+
+    assert accepted is False
+    assert scheduled == []
+    assert workflow.validation.started == []
+    assert workflow.statuses == [
+        "Smoke unavailable: Wait for the active airflow cache operation before "
+        "changing Visualization."
+    ]
+    assert "state=REJECTED" in workflow.logs[0]
+    assert "readiness=BUSY" in workflow.logs[0]
+
+
 def test_checking_streamlines_mode_is_scheduled_for_runtime_validation(monkeypatch):
     controller = _Controller(available=True, state="CHECKING")
     workflow = _workflow(controller)
@@ -87,6 +105,35 @@ def test_streamlines_then_normal_preserves_workflow_sequence():
     assert workflow.refreshed_controls == 2
 
 
+def test_committed_mode_callback_runs_only_after_a_real_mode_change():
+    committed = []
+    workflow = _workflow(on_mode_committed=committed.append)
+
+    asyncio.run(workflow._request_mode(VisualizationMode.STREAMLINES))
+    asyncio.run(workflow._request_mode(VisualizationMode.STREAMLINES))
+
+    assert committed == [VisualizationMode.STREAMLINES]
+
+
+def test_committed_mode_callback_uses_controller_snapshot():
+    committed = []
+    controller = _Controller()
+    workflow = _workflow(controller, on_mode_committed=committed.append)
+
+    async def request_without_committed_mode(mode, status_callback):
+        controller.requested_modes.append(mode)
+        status_callback("Preparing snapshots")
+        controller.committed = mode
+        return SimpleNamespace(success=True, message=f"{mode.value} active")
+
+    controller.request_visualization_mode_in_kit = request_without_committed_mode
+
+    asyncio.run(workflow._request_mode(VisualizationMode.HEATMAP))
+
+    assert committed == [VisualizationMode.HEATMAP]
+    assert "committed_mode=Heatmap" in workflow.logs[-1]
+
+
 def test_new_workload_request_is_forwarded_for_controller_supersession(monkeypatch):
     workflow = _workflow()
     first_task = _Task()
@@ -121,7 +168,12 @@ def test_cancel_stops_only_workflow_tasks_and_controller_transition():
     assert controller.cancelled is True
 
 
-def _workflow(controller=None):
+def _workflow(
+    controller=None,
+    *,
+    airflow_operation_active=None,
+    on_mode_committed=None,
+):
     module = _load_workflow()
     statuses = []
     logs = []
@@ -144,8 +196,10 @@ def _workflow(controller=None):
             "refreshed_controls",
             state.refreshed_controls + 1,
         ),
+        airflow_operation_active=airflow_operation_active,
         log_warning=logs.append,
         append_local_timestamp=lambda message: f"{message} | Local time: fixed",
+        on_mode_committed=on_mode_committed,
     )
     workflow.statuses = statuses
     workflow.logs = logs
@@ -197,6 +251,7 @@ class _Controller:
         self.state = state
         self.requested_modes = []
         self.cancelled = False
+        self.committed = VisualizationMode.NORMAL
 
     def visualization_readiness(self):
         return SimpleNamespace(
@@ -208,11 +263,12 @@ class _Controller:
         )
 
     def visualization_snapshot(self):
-        return SimpleNamespace(pending=None)
+        return SimpleNamespace(committed=self.committed, pending=None)
 
     async def request_visualization_mode_in_kit(self, mode, status_callback):
         self.requested_modes.append(mode)
         status_callback("Preparing snapshots")
+        self.committed = mode
         return SimpleNamespace(
             success=True,
             message=f"{mode.value} active",

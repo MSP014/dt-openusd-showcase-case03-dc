@@ -17,10 +17,11 @@ development helpers, and the Digital Twin Runtime Suite runtime.
 
 ## Runtime Preview
 
-Digital Twin Runtime Suite 0.4.0 combines interactive Omniverse full-server
+Digital Twin Runtime Suite 0.5.0 combines interactive Omniverse full-server
 review, synthetic telemetry and workload-state controls, config-backed server
-fan motion, cached airflow playback, Engineering X-Ray review, and Stage 8
-workload-to-cache binding.
+fan motion, cached airflow playback, Engineering X-Ray review, Stage 8
+workload-to-cache binding, and Stage 10 Heatmaps. The Heatmap contract is at
+[`docs/knowledge_base/dtrs_heatmap_contract.md`](../../docs/knowledge_base/dtrs_heatmap_contract.md).
 
 | Nominal workload | Critical workload |
 | :---: | :---: |

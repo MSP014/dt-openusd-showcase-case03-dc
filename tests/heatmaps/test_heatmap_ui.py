@@ -10,6 +10,8 @@ def test_heatmap_ui_has_one_test_action_and_draft_settings_apply_boundary() -> N
 
     assert '"Test Heatmaps"' in source
     assert '"Restore Heatmap Test"' in source
+    assert '"Freeze Heatmap Presentation"' not in source
+    assert '"Resume Heatmap Presentation"' not in source
     assert '"Apply Heatmaps Settings"' in source
     assert '"Isolation"' in source
     assert '"X-Ray Overlay"' in source
@@ -18,6 +20,7 @@ def test_heatmap_ui_has_one_test_action_and_draft_settings_apply_boundary() -> N
     assert '"Confirm"' not in source
     assert '"Failure"' not in source
     assert "clicked_fn=self._apply_heatmap_settings" in source
+    assert "toggle_heatmap_test_presentation_writes" not in source
     assert "def _heatmap_settings_from_draft" in source
     assert "format_dtrs_status_block(" in source
     assert "carb.log_warn(" in source
@@ -51,6 +54,22 @@ def test_heatmap_sections_start_collapsed_and_apply_preserves_the_draft() -> Non
     assert "height=0," in source
     assert "self._refresh_heatmap_settings_controls()" not in apply_body
     assert "_queue_heatmap_settings_refresh" not in source
+
+
+def test_view_starts_with_visualization_as_its_only_expanded_section() -> None:
+    source = _window_path().read_text(encoding="utf-8")
+    view_tab = source.split("    def _build_view_tab", 1)[1].split(
+        "    def _build_server_appearance_controls",
+        1,
+    )[0]
+
+    assert view_tab.index('"Visualization"') < view_tab.index('"Server Appearance"')
+    visualization = view_tab.split('"Visualization"', 1)[1].split(
+        '"Server Appearance"',
+        1,
+    )[0]
+    assert "collapsed=False" in visualization
+    assert view_tab.count("collapsed=True") == 5
 
 
 def test_heatmap_controls_follow_catalog_readiness_and_gpu_hierarchy() -> None:

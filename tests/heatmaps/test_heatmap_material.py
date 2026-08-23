@@ -21,6 +21,9 @@ def test_generic_mdl_uses_direct_weight_and_configurable_palette() -> None:
     assert "DTRS_Heatmap(" in source
     assert "active_stop_count" in source
     assert "temperature_offset_celsius" in source
+    assert "telemetry_texture" in source
+    assert "telemetry_texel_index" in source
+    assert "tex::lookup_float" in source
     assert "minimum_clamp_scalar" in source
     assert "maximum_clamp_scalar" in source
     assert "temperature_preview" not in source

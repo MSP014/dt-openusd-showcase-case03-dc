@@ -352,16 +352,129 @@ def test_streamlines_xray_override_uses_last_applied_ui_material(tmp_path, monke
     assert controller.xray_target_snapshot().effective_target_ids == {"chassis"}
 
 
-def test_empty_effective_xray_targets_stop_activity_without_material_deletion(
+def test_fresnel_apply_preserves_heatmap_override_exclusions_and_manual_targets(
+    tmp_path,
+    monkeypatch,
+):
+    from pxr import Usd, UsdGeom, UsdShade
+
+    _install_xray_carb(monkeypatch)
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    gpu_01_root = "/blackwell_rig/compute/gpu_01/geo/render/RTX4500/shroud"
+    gpu_02_root = "/blackwell_rig/compute/gpu_02/geo/render/RTX4500/shroud"
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            xray_target_groups=(
+                XRayTargetGroupConfig(
+                    "chassis",
+                    "Chassis",
+                    (XRAY_CHASSIS_ROOT_PATH,),
+                ),
+                XRayTargetGroupConfig("fans", "Fans", ("/blackwell_rig/fans",)),
+                XRayTargetGroupConfig(
+                    "gpu_shrouds",
+                    "GPU shrouds",
+                    (gpu_01_root, gpu_02_root),
+                ),
+            ),
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    authored = UsdShade.Material.Define(stage, "/Looks/Authored")
+    heatmap = UsdShade.Material.Define(stage, "/Looks/Heatmap")
+    chassis = UsdGeom.Mesh.Define(stage, f"{XRAY_CHASSIS_ROOT_PATH}/Panel").GetPrim()
+    gpu_01 = UsdGeom.Mesh.Define(stage, f"{gpu_01_root}/mesh").GetPrim()
+    gpu_02 = UsdGeom.Mesh.Define(stage, f"{gpu_02_root}/mesh").GetPrim()
+    for mesh in (chassis, gpu_02):
+        UsdShade.MaterialBindingAPI.Apply(mesh).Bind(authored)
+    UsdShade.MaterialBindingAPI.Apply(gpu_01).Bind(heatmap)
+    _install_omni_usd_stage(monkeypatch, stage)
+    initial = controller.config.chassis_presentation.materials.xray
+
+    assert controller.apply_manual_xray_material_in_kit(initial, {"chassis"}).success
+    assert controller.apply_heatmap_xray_override_in_kit(
+        frozenset({"gpu_shrouds"}),
+        (gpu_01_root,),
+    ).success
+    edited = replace(initial, facing_color=(0.21, 0.34, 0.55), edge_emission=7.0)
+
+    applied = controller.apply_manual_xray_material_in_kit(edited, {"fans"})
+
+    snapshot = controller.xray_target_snapshot()
+    assert applied.success
+    assert snapshot.manual_target_ids == {"chassis"}
+    assert snapshot.override_owner == "heatmap_preview"
+    assert snapshot.effective_target_ids == {"gpu_shrouds"}
+    assert snapshot.override_excluded_paths == {gpu_01_root}
+    assert _bound_material_path(gpu_01, UsdShade) == str(heatmap.GetPath())
+    assert _bound_material_path(gpu_02, UsdShade) == controller.XRAY_MATERIAL_PATH
+    shader = UsdShade.Shader.Get(
+        stage,
+        f"{RuntimeController.XRAY_MATERIAL_PATH}/Shader",
+    )
+    assert tuple(shader.GetInput("facing_color").Get()) == pytest.approx(
+        edited.facing_color
+    )
+    assert shader.GetInput("edge_emission").Get() == pytest.approx(edited.edge_emission)
+
+
+def test_fresnel_apply_preserves_streamlines_override_and_manual_targets(
+    tmp_path,
+    monkeypatch,
+):
+    from pxr import Usd, UsdGeom, UsdShade
+
+    _install_xray_carb(monkeypatch)
+    controller = RuntimeController(_write_xray_config(tmp_path))
+    controller.config = replace(
+        controller.config,
+        chassis_presentation=replace(
+            controller.config.chassis_presentation,
+            xray_target_groups=(
+                XRayTargetGroupConfig(
+                    "chassis",
+                    "Chassis",
+                    (XRAY_CHASSIS_ROOT_PATH,),
+                ),
+                XRayTargetGroupConfig("fans", "Fans", ("/blackwell_rig/fans",)),
+            ),
+        ),
+    )
+    stage = Usd.Stage.CreateInMemory()
+    UsdGeom.Mesh.Define(stage, f"{XRAY_CHASSIS_ROOT_PATH}/Panel")
+    UsdGeom.Mesh.Define(stage, "/blackwell_rig/fans/p120_01/body")
+    _install_omni_usd_stage(monkeypatch, stage)
+    initial = controller.config.chassis_presentation.materials.xray
+
+    assert controller.apply_manual_xray_material_in_kit(initial, {"chassis"}).success
+    assert controller.apply_streamlines_xray_override_in_kit().success
+    edited = replace(initial, facing_color=(0.11, 0.22, 0.33), edge_emission=6.0)
+
+    applied = controller.apply_manual_xray_material_in_kit(edited, {"fans"})
+
+    snapshot = controller.xray_target_snapshot()
+    assert applied.success
+    assert snapshot.manual_target_ids == {"chassis"}
+    assert snapshot.override_owner == "streamlines_xray"
+    assert snapshot.override_target_ids == {"chassis", "fans"}
+    assert snapshot.effective_target_ids == {"chassis", "fans"}
+    shader = UsdShade.Shader.Get(
+        stage,
+        f"{RuntimeController.XRAY_MATERIAL_PATH}/Shader",
+    )
+    assert tuple(shader.GetInput("facing_color").Get()) == pytest.approx(
+        edited.facing_color
+    )
+    assert shader.GetInput("edge_emission").Get() == pytest.approx(edited.edge_emission)
+
+
+def test_empty_effective_xray_targets_clear_activity_without_material_deletion(
     tmp_path,
     monkeypatch,
 ):
     from pxr import Usd, UsdGeom
-
-    from digital_twin_runtime_suite.app.flow.performance import (
-        ViewportPerformanceSample,
-    )
-    from digital_twin_runtime_suite.app.xray import performance as xray_performance
 
     class _Carb:
         def __init__(self):
@@ -375,11 +488,6 @@ def test_empty_effective_xray_targets_stop_activity_without_material_deletion(
 
     carb = _Carb()
     monkeypatch.setitem(sys.modules, "carb", carb)
-    monkeypatch.setattr(
-        xray_performance,
-        "capture_viewport_performance_sample",
-        lambda: ViewportPerformanceSample(0.0, 60.0, 16.0, 4.0, 6.0),
-    )
     controller = RuntimeController(_write_xray_config(tmp_path))
     stage = Usd.Stage.CreateInMemory()
     UsdGeom.Mesh.Define(stage, f"{XRAY_CHASSIS_ROOT_PATH}/Panel")
@@ -395,12 +503,7 @@ def test_empty_effective_xray_targets_stop_activity_without_material_deletion(
     assert result.success
     assert controller.xray_target_snapshot().effective_target_ids == frozenset()
     assert controller._xray_material_active is False
-    assert controller._xray_material_performance_started_at is None
     assert stage.GetPrimAtPath(controller.XRAY_MATERIAL_PATH).IsValid()
-
-    carb.messages.clear()
-    assert controller.advance_xray_material_performance_sampler_in_kit() is False
-    assert not any("PERFORMANCE" in message for message in carb.messages)
 
 
 def test_xray_off_is_idempotent_and_restores_prior_session_binding(tmp_path):
@@ -611,15 +714,7 @@ def test_live_production_fresnel_sync_updates_without_probe(tmp_path, monkeypatc
     )
 
 
-def test_production_xray_performance_and_diagnostics_are_non_fatal(
-    tmp_path, monkeypatch
-):
-    from digital_twin_runtime_suite.app import commands
-    from digital_twin_runtime_suite.app.flow.performance import (
-        ViewportPerformanceSample,
-    )
-    from digital_twin_runtime_suite.app.xray import performance as xray_performance
-
+def test_production_xray_lifecycle_diagnostics_are_non_fatal(tmp_path, monkeypatch):
     class _Carb:
         def __init__(self):
             self.messages = []
@@ -628,25 +723,12 @@ def test_production_xray_performance_and_diagnostics_are_non_fatal(
             self.messages.append(message)
 
     controller = RuntimeController(_write_xray_config(tmp_path))
-    samples = iter(
-        (
-            ViewportPerformanceSample(0.0, 60.0, 16.0, 4.0, 6.0),
-            ViewportPerformanceSample(10.0, 50.0, 20.0, 4.5, 6.5),
-        )
-    )
-    monkeypatch.setattr(
-        xray_performance, "capture_viewport_performance_sample", lambda: next(samples)
-    )
-    monkeypatch.setattr(commands.time, "monotonic", lambda: 10.0)
-    controller._start_xray_material_performance_sampler()
     carb = _Carb()
-    controller._advance_xray_material_performance_sampler(carb)
     controller._log_xray_lifecycle_diagnostic(
         carb, action="OFF", formatter=lambda: (_ for _ in ()).throw(RuntimeError("x"))
     )
 
-    assert "DTRS X-Ray binding lifecycle - PERFORMANCE" in carb.messages[0]
-    assert "diagnostic: <inspection failed: x>" in carb.messages[1]
+    assert "diagnostic: <inspection failed: x>" in carb.messages[0]
 
 
 def _production_xray_stage(Usd, UsdGeom, UsdShade, mesh_count):
@@ -681,6 +763,13 @@ def _install_omni_usd_stage(monkeypatch, stage):
     omni_module.usd = usd_module
     monkeypatch.setitem(sys.modules, "omni", omni_module)
     monkeypatch.setitem(sys.modules, "omni.usd", usd_module)
+
+
+def _install_xray_carb(monkeypatch) -> None:
+    carb = ModuleType("carb")
+    carb.log_error = lambda _message: None
+    carb.log_warn = lambda _message: None
+    monkeypatch.setitem(sys.modules, "carb", carb)
 
 
 def _write_xray_config(tmp_path) -> Path:

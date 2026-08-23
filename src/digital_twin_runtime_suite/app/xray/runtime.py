@@ -14,10 +14,7 @@ a narrow environment limitation, not a general USD lifecycle contract.
 
 from __future__ import annotations
 
-import time
-
 from digital_twin_runtime_suite.app.config import XRayMaterialConfig
-from digital_twin_runtime_suite.app.xray import performance
 from digital_twin_runtime_suite.app.xray.material import (
     XRayApplyResult,
     XRayMaterialMixin,
@@ -35,8 +32,6 @@ class XRayRuntimeMixin(XRayMaterialMixin):
 
     XRAY_CHASSIS_TARGET_ID = "chassis"
     XRAY_MATERIAL_PATH = "/DTRS_Runtime/Looks/XRayLifecycleControl"
-    XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS = 0.5
-    XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS = 10.0
 
     def xray_target_snapshot(self):
         """Expose manual and temporary target ownership without UI state."""
@@ -48,11 +43,16 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         xray: XRayMaterialConfig,
         target_ids: frozenset[str],
     ) -> XRayApplyResult:
-        """Apply operator selection while respecting a temporary override."""
+        """Apply UI material values without displacing a temporary owner."""
 
-        self._xray_target_state.set_manual_target_ids(target_ids)
+        snapshot = self._xray_target_state.snapshot
+        if snapshot.override_owner is None:
+            self._xray_target_state.set_manual_target_ids(target_ids)
+            snapshot = self._xray_target_state.snapshot
         result = self.apply_xray_material_in_kit(
-            xray, self._xray_target_state.snapshot.effective_target_ids
+            xray,
+            snapshot.effective_target_ids,
+            excluded_paths=tuple(snapshot.override_excluded_paths),
         )
         if result.success:
             # A temporary presentation owner must use the operator's last
@@ -270,7 +270,6 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                     stage, Gf, Sdf, Usd, UsdShade
                 )
             self._xray_material_active = True
-            self._start_xray_material_performance_sampler()
             self._log_xray_lifecycle_diagnostic(
                 carb,
                 action="ON",
@@ -324,131 +323,6 @@ class XRayRuntimeMixin(XRayMaterialMixin):
             stage.SetEditTarget(previous_target)
         return True
 
-    def advance_xray_material_performance_sampler_in_kit(self) -> bool:
-        """Sample production X-Ray only while its transient material is active."""
-
-        import carb
-        import omni.usd
-
-        try:
-            if not self._xray_material_active:
-                self._stop_xray_material_performance_sampler()
-                return False
-            stage = omni.usd.get_context().get_stage()
-            material = stage.GetPrimAtPath(self.XRAY_MATERIAL_PATH) if stage else None
-            if not material or not material.IsValid():
-                self._stop_xray_material_performance_sampler()
-                return False
-            self._advance_xray_material_performance_sampler(carb)
-            return True
-        except Exception as error:  # Diagnostics must not interrupt Kit updates.
-            self._log_xray_lifecycle_diagnostic(
-                carb,
-                action="PERFORMANCE",
-                formatter=lambda error=error: (_ for _ in ()).throw(error),
-            )
-            return False
-
-    def _start_xray_material_performance_sampler(self) -> None:
-        """Start a HUD-backed interval for one production X-Ray activation."""
-
-        initial_sample = performance.capture_viewport_performance_sample()
-        started_at = initial_sample.captured_at
-        self._xray_material_performance_started_at = started_at
-        self._xray_material_performance_next_sample_at = (
-            started_at + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
-        )
-        self._xray_material_performance_next_log_at = (
-            started_at + self.XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS
-        )
-        self._xray_material_performance_interval_started_at = started_at
-        self._xray_material_performance_samples = [initial_sample]
-
-    def _stop_xray_material_performance_sampler(self) -> None:
-        self._xray_material_performance_started_at = None
-        self._xray_material_performance_next_sample_at = None
-        self._xray_material_performance_next_log_at = None
-        self._xray_material_performance_interval_started_at = None
-        self._xray_material_performance_samples = []
-
-    def _advance_xray_material_performance_sampler(self, carb) -> None:
-        started_at = self._xray_material_performance_started_at
-        next_sample_at = self._xray_material_performance_next_sample_at
-        next_log_at = self._xray_material_performance_next_log_at
-        if started_at is None or next_sample_at is None or next_log_at is None:
-            self._start_xray_material_performance_sampler()
-            return
-        now = time.monotonic()
-        if now < next_sample_at:
-            return
-        try:
-            sample = performance.capture_viewport_performance_sample()
-        except Exception as error:
-            self._xray_material_performance_next_sample_at = (
-                now + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
-            )
-            self._log_xray_lifecycle_diagnostic(
-                carb,
-                action="PERFORMANCE",
-                formatter=lambda error=error: (_ for _ in ()).throw(error),
-            )
-            return
-        self._xray_material_performance_samples.append(sample)
-        self._xray_material_performance_next_sample_at = (
-            now + self.XRAY_MATERIAL_PERFORMANCE_SAMPLE_INTERVAL_SECONDS
-        )
-        if now < next_log_at:
-            return
-        interval_started_at = self._xray_material_performance_interval_started_at
-        interval_samples = [
-            item
-            for item in self._xray_material_performance_samples
-            if interval_started_at is None or item.captured_at >= interval_started_at
-        ]
-        self._log_xray_lifecycle_diagnostic(
-            carb,
-            action="PERFORMANCE",
-            formatter=lambda: self._format_xray_material_performance_interval(
-                interval_samples
-            ),
-        )
-        self._xray_material_performance_interval_started_at = sample.captured_at
-        self._xray_material_performance_next_log_at = (
-            now + self.XRAY_MATERIAL_PERFORMANCE_LOG_INTERVAL_SECONDS
-        )
-
-    def _format_xray_material_performance_interval(
-        self, samples: list[performance.ViewportPerformanceSample]
-    ) -> str:
-        statistics = performance.viewport_performance_state(samples)
-        latest = samples[-1] if samples else None
-        started_at = self._xray_material_performance_started_at
-        elapsed = (
-            latest.captured_at - started_at
-            if latest is not None and started_at is not None
-            else None
-        )
-        elapsed_text = f"{elapsed:.1f} s" if elapsed is not None else "<unavailable>"
-        return "\n".join(
-            (
-                "DTRS X-Ray binding lifecycle - PERFORMANCE",
-                f"  elapsed={elapsed_text}",
-                f"  control_material_path={self.XRAY_MATERIAL_PATH}",
-                f"  samples={len(samples)}",
-                "  FPS: "
-                f"current={statistics['fps_current']}; "
-                f"average={statistics['average_fps']}; "
-                f"minimum={statistics['minimum_fps']}; "
-                f"maximum={statistics['maximum_fps']}",
-                "  Frame time: "
-                f"current={statistics['frame_time_ms_current']} ms; "
-                f"average={statistics['average_frame_time_ms']} ms",
-                "  Memory: "
-                f"gpu_used_gib={statistics['gpu_used_gib']}; "
-                f"process_used_gib={statistics['process_used_gib']}",
-            )
-        )
-
     def clear_xray_material_in_kit(self) -> XRayApplyResult:
         """Release runtime X-Ray state during config, stage, or app cleanup."""
 
@@ -459,7 +333,6 @@ class XRayRuntimeMixin(XRayMaterialMixin):
         stage = omni.usd.get_context().get_stage()
         if not stage:
             self._xray_material_active = False
-            self._stop_xray_material_performance_sampler()
             return XRayApplyResult(True, "X-Ray is inactive; no open stage.")
         previous_target = stage.GetEditTarget()
         stage.SetEditTarget(stage.GetSessionLayer())
@@ -551,7 +424,6 @@ class XRayRuntimeMixin(XRayMaterialMixin):
                 + self._format_xray_mismatch_paths(cleanup_failures)
             )
         self._xray_material_active = False
-        self._stop_xray_material_performance_sampler()
         self._xray_session_binding_snapshots.clear()
         self._xray_baseline_composed_bindings.clear()
         self._xray_last_lifecycle_diagnostics = diagnostics

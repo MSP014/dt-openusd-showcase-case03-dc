@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
 from digital_twin_runtime_suite.app.flow import smoke as flow_smoke
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
 
 if TYPE_CHECKING:
     from digital_twin_runtime_suite.app.flow.runtime import SimulationCacheResult
@@ -100,8 +102,15 @@ class FlowDiagnosticsMixin:
             "flow_render_layer": attr_value(render, "layer"),
             "flow_simulate_layer": attr_value(simulate, "layer"),
         }
-        details = ", ".join(f"{key}={value}" for key, value in diagnostics.items())
-        carb.log_warn(f"DTRS Kit-CAE render probe: {details}")
+        carb.log_warn(
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="KIT-CAE RENDER PROBE",
+                state="COMPLETE",
+                details=diagnostics,
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
+        )
 
     @staticmethod
     def _log_kit_cae_origin_trace(
@@ -134,8 +143,15 @@ class FlowDiagnosticsMixin:
                 dav_origin_trace["voxel_size"]
             ),
         }
-        details = ", ".join(f"{key}={value}" for key, value in diagnostics.items())
-        carb.log_warn(f"DTRS Kit-CAE origin trace: {details}")
+        carb.log_warn(
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="KIT-CAE ORIGIN TRACE",
+                state="COMPLETE",
+                details=diagnostics,
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
+        )
 
     @staticmethod
     def _log_kit_cae_flow_full_diagnostics(
@@ -471,8 +487,15 @@ class FlowDiagnosticsMixin:
             ("timeline_advancing", timeline_time_after > timeline_time_before),
             ("stage_timeCodesPerSecond", stage.GetTimeCodesPerSecond()),
         ]
-        details = ", ".join(f"{key}={value}" for key, value in diagnostics)
-        carb.log_warn(f"DTRS Kit-CAE Flow full diagnostics: {details}")
+        carb.log_warn(
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="KIT-CAE FULL DIAGNOSTICS",
+                state="COMPLETE",
+                details=dict(diagnostics),
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
+        )
 
     @staticmethod
     def _validate_kit_cae_velocity_field(

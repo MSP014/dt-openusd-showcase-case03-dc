@@ -44,6 +44,9 @@ class PresentationActionsWorkflowMixin:
         except OSError as error:
             self._set_status(f"X-Ray settings were not saved: {error}")
             return
+        acceptance = getattr(self, "_stage10_acceptance", None)
+        if acceptance is not None:
+            acceptance.observe_xray_material_apply(result)
         if not result.success:
             self._set_status(result.message)
             return

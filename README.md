@@ -20,7 +20,9 @@ manifest-driven Houdini VTI airflow playback through Kit-CAE and NVIDIA Flow.
 The shared workload state now selects the corresponding validated airflow cache
 without creating a second operational workload model. Heatmaps are available
 as a persisted-settings production visualisation with Heatmap-specific X-Ray
-composition; the separate Test/Restore controls remain a debug harness.
+composition and dynamic texture telemetry updates; the separate Test/Restore
+controls remain a debug harness. See the
+[Heatmap contract](docs/knowledge_base/dtrs_heatmap_contract.md).
 Velocity trails, lighting, and HUD navigation remain staged runtime work.
 
 The project visualises a **"Viral Inference Surge"** — a dynamic stress-test scenario where a sudden 500% spike in LLM requests triggers a sequential ramp-up of cooling and power systems across a high-density data hall.
@@ -42,12 +44,12 @@ extensions rather than fixed-shot animation.
 > Synthetic Data Generation for Sim-to-Real: No real data centre required. All metrics (GPU temps, fan RPMs, power draw) are generated procedurally by the Data Provider module to create high-quality demonstration data. This proves the full pipeline end-to-end before physical deployment.
 > **External telemetry ready by design.** DTRS currently ships with a synthetic telemetry provider. Its normalised telemetry model and planned provider boundary allow future source-specific adapters to map systems such as Grafana, Prometheus, MQTT, Kafka, NVML, Redfish, or other monitoring feeds into the same DTRS data model. Production connectors for those systems are intentionally outside the current Case 03 scope.
 
-## Digital Twin Runtime Suite 0.4.0 Runtime Preview
+## Digital Twin Runtime Suite 0.5.0 Runtime Release
 
 *Omniverse full-server runtime review with live synthetic node telemetry,
 persistent enclosure and airflow controls, and manifest-driven Houdini VTI
 velocity playback through Kit-CAE and NVIDIA Flow, including Stage 8
-workload-to-cache binding.*
+workload-to-cache binding and Stage 10 Heatmaps.*
 
 | Airflow controls | Attached airflow review |
 | :---: | :---: |
@@ -298,7 +300,7 @@ assets/_external/
 
 ### 3. Running the App
 
-Digital Twin Runtime Suite v0.4.0 launches as a dedicated Omniverse Kit
+Digital Twin Runtime Suite v0.5.0 launches as a dedicated Omniverse Kit
 application config. The quickest local launch path is:
 
 ```powershell
@@ -380,6 +382,7 @@ smoke, transport, and emitter-layout controls.
 
 ## 📜 Changelog
 
+* **Week of 23 August, 2026:** Completed Stage 10 and released Digital Twin Runtime Suite v0.5.0 with accepted single-server Heatmap/X-Ray composition, dynamic texture telemetry presentation, workload and GPU Housing precedence, and interactive RTX 3080 acceptance.
 * **Week of 17 August, 2026:** Completed Stage 7 of Digital Twin Runtime Suite v0.4.0 with a project-owned Custom MDL Fresnel X-Ray mode, reversible Session Layer ownership, live ReviewCamera response, telemetry-aware LED restoration, and accepted combined RTX Flow performance; completed Stage 8 workload-to-cache binding, where one semantic workload state drives telemetry, fan behaviour, manifest-backed Houdini temporal airflow selection, cached validation, and phase-preserving in-place Flow switching.
 * **Week of 3 August, 2026:** Hardened the responsive VTI Attach lifecycle and runtime configuration boundary, preserved Houdini PDG VTI export tooling, corrected public runtime links, and began the material-recovery and renderer-limitation investigation that established the Stage 7 X-Ray implementation path.
 * **Week of 27 July, 2026:** Completed the Stage 6 cached-airflow runtime review, including Kit-CAE/Flow capability proof, temporal VTI playback, persistent smoke tuning, extracted Flow runtime ownership, and the Digital Twin Runtime Suite naming transition.

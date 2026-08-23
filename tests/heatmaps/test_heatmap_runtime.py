@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
+from digital_twin_runtime_suite.app.commands import RuntimeController
 from digital_twin_runtime_suite.app.heatmaps import runtime
 from digital_twin_runtime_suite.app.heatmaps.runtime import (
     HeatmapRuntimeMixin,
     HeatmapRuntimeResult,
     initialise_heatmap_runtime,
 )
-from digital_twin_runtime_suite.app.heatmaps.settings import HeatmapSettings
+from digital_twin_runtime_suite.app.heatmaps.settings import (
+    HeatmapSettings,
+    HeatmapSettingsStore,
+)
+from digital_twin_runtime_suite.app.visualization_mode.model import VisualizationMode
 
 
 class _Controller(HeatmapRuntimeMixin):
-    pass
+    def commit_normal_after_heatmap_selection_cleared_in_kit(self):
+        self.normal_commit_count = getattr(self, "normal_commit_count", 0) + 1
+        return SimpleNamespace(
+            success=True, message="Visualization returned to Normal."
+        )
 
 
 class _Catalog:
@@ -319,6 +329,47 @@ def test_production_apply_recomposes_xray_housing_precedence(tmp_path) -> None:
     assert calls["xray"][-1] == (frozenset({"gpu_shrouds"}), ())
 
 
+def test_zero_production_selection_returns_mode_ownership_to_normal(tmp_path) -> None:
+    controller = RuntimeController(_runtime_config_path())
+    controller._heatmap_settings_store = HeatmapSettingsStore(
+        tmp_path / "heatmap_settings.toml"
+    )
+    controller._heatmap_catalog = _Catalog()
+    controller._heatmap_stage = lambda: object()
+    controller._heatmap_presentation = _ActivePresentation()
+    controller._heatmap_isolation = _Isolation()
+    previous = HeatmapSettings(isolation_selectors=("motherboard",))
+    controller._heatmap_applied_settings = previous
+    controller._heatmap_presentation_owner = controller._HEATMAP_PRODUCTION_OWNER
+    assert controller._xray_target_state.activate_override(
+        "heatmap_preview",
+        frozenset({"chassis"}),
+    )
+
+    def release_heatmap_xray_override():
+        assert controller._xray_target_state.release_override("heatmap_preview")
+        return SimpleNamespace(success=True, message="X-Ray restored.")
+
+    controller.release_heatmap_xray_override_in_kit = release_heatmap_xray_override
+    transition = controller._visualization_mode_state.begin(VisualizationMode.HEATMAP)
+    assert transition is not None
+    assert controller._visualization_mode_state.commit(transition.transition_id)
+
+    result = controller.apply_heatmap_settings_in_kit(HeatmapSettings())
+
+    assert result.success
+    assert controller.visualization_snapshot().committed is VisualizationMode.NORMAL
+    assert not controller.heatmap_production_active()
+    assert controller.xray_target_snapshot().override_owner is None
+    assert controller._heatmap_presentation_task is None
+
+
+def test_heatmaps_runtime_does_not_mutate_visualization_state_directly() -> None:
+    source = Path(runtime.__file__).read_text(encoding="utf-8")
+
+    assert "_visualization_mode_state" not in source
+
+
 def test_production_activation_uses_persisted_overlay_group_ids(tmp_path) -> None:
     controller, calls = _production_controller(tmp_path)
     settings = HeatmapSettings(
@@ -447,3 +498,7 @@ class _ActivePresentation:
 class _Isolation:
     def restore(self, _stage):
         return SimpleNamespace(success=True, message="restored")
+
+
+def _runtime_config_path() -> Path:
+    return Path(__file__).parents[2] / "configs" / "digital_twin_runtime_suite.toml"

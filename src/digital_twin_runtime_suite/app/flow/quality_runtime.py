@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
 from digital_twin_runtime_suite.app.flow import validation as flow_validation
 from digital_twin_runtime_suite.app.flow.quality import (
     validate_kit_cae_flow_voxel_resolution,
 )
 from digital_twin_runtime_suite.app.flow.runtime import SimulationCacheResult
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
 
 
 class FlowQualityRuntimeMixin:
@@ -361,7 +363,13 @@ class FlowQualityRuntimeMixin:
                     self._restart_kit_cae_temporal_loop(timeline)
             except Exception as recovery_error:  # noqa: BLE001
                 carb.log_error(
-                    "DTRS FLOW / VOXEL RESOLUTION recovery failed: " f"{recovery_error}"
+                    format_dtrs_diagnostic_block(
+                        owner="FLOW",
+                        process="VOXEL RESOLUTION",
+                        state="RECOVERY FAIL",
+                        details={"reason": str(recovery_error)},
+                        append_local_timestamp=with_dtrs_local_timestamp,
+                    )
                 )
             finally:
                 enabled_attribute.Set(True)

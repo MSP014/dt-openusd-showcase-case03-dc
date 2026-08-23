@@ -1,6 +1,5 @@
 """Stage 08 workload-to-cache ownership and selector-display contracts."""
 
-import re
 from pathlib import Path
 
 import pytest
@@ -27,14 +26,12 @@ def test_runtime_controller_resolves_workload_through_binding_boundary(
 
     assert binding.dataset_identity == dataset_identity
     mapping_log = binding.format_mapping_log()
-    assert mapping_log.startswith(
-        "DTRS WORKLOAD CACHE MAPPING | "
-        f"workload={workload_mode} | dataset={dataset_identity}"
-    )
-    assert re.search(
-        r"Local time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} [+-]\d{2}:\d{2}$",
-        mapping_log,
-    )
+    assert "DTRS WORKLOAD CACHE" in mapping_log
+    assert "process=MAPPING | state=RESOLVED" in mapping_log
+    assert f"workload={workload_mode}" in mapping_log
+    assert f"dataset={dataset_identity}" in mapping_log
+    assert "Local time:" in mapping_log
+    assert mapping_log.endswith("=" * 20)
 
 
 @pytest.mark.parametrize(

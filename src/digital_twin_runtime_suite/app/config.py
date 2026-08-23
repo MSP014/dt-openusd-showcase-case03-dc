@@ -180,7 +180,7 @@ class FrontPanelIndicatorsConfig:
     hdd_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
     lan_01_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
     lan_02_color: tuple[float, float, float] = (0.95, 0.98, 1.0)
-    off_color: tuple[float, float, float] = (0.62, 0.65, 0.68)
+    off_color: tuple[float, float, float] = (0.24, 0.24, 0.24)
     emission_intensity: float = 1.0
     storage_metric_id: str = "storage_activity_percent"
     lan_01_metric_id: str = "lan_1_activity_percent"
@@ -1147,7 +1147,7 @@ def _parse_front_panel_indicators_config(data: Any) -> FrontPanelIndicatorsConfi
         ),
         off_color=_parse_rgb(
             data.get("off_color"),
-            (0.62, 0.65, 0.68),
+            (0.24, 0.24, 0.24),
             "chassis_presentation.front_panel_indicators.off_color",
         ),
         emission_intensity=float(data.get("emission_intensity", 1.0)),

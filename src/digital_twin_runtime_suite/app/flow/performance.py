@@ -6,6 +6,9 @@ import asyncio
 import time
 from dataclasses import dataclass
 
+from digital_twin_runtime_suite.app.diagnostics import with_dtrs_local_timestamp
+from digital_twin_runtime_suite.app.status_log import format_dtrs_diagnostic_block
+
 from .progress import TemporalProofState
 
 
@@ -107,6 +110,11 @@ def flow_performance_statistics(
 class FlowPerformanceMixin:
     """Own Flow viewport sampling and periodic performance reporting."""
 
+    # Kept disabled in production: the application-wide PerformanceProbe is
+    # the single regular measurement. Retain this Flow-specific sampler for a
+    # future Flow diagnosis that needs temporal-source context.
+    FLOW_PERFORMANCE_SAMPLER_ENABLED = False
+
     @staticmethod
     def _format_flow_performance_value(
         value: float | None,
@@ -196,46 +204,44 @@ class FlowPerformanceMixin:
     ) -> None:
         """Record the baseline or settled Flow performance from Kit's HUD data."""
 
-        fields = [
-            ("Event:", event),
-            ("FPS:", self._format_flow_performance_value(sample.fps)),
-            (
-                "Frame time:",
-                self._format_flow_performance_value(
-                    sample.frame_time_ms,
-                    suffix=" ms",
-                ),
+        details: dict[str, object] = {
+            "fps": self._format_flow_performance_value(sample.fps),
+            "frame_time_ms": self._format_flow_performance_value(
+                sample.frame_time_ms,
+                suffix=" ms",
             ),
-        ]
+        }
         if event == "FLOW_ATTACHED":
-            fields.extend(
-                (
-                    (
-                        "GPU memory used:",
-                        self._format_flow_performance_value(
-                            sample.gpu_memory_used_gib,
-                            suffix=" GiB",
-                        ),
+            details.update(
+                {
+                    "gpu_memory_used_gib": self._format_flow_performance_value(
+                        sample.gpu_memory_used_gib,
+                        suffix=" GiB",
                     ),
-                    (
-                        "Process memory:",
-                        self._format_flow_performance_value(
-                            sample.process_memory_used_gib,
-                            suffix=" GiB",
-                        ),
+                    "process_memory_gib": self._format_flow_performance_value(
+                        sample.process_memory_used_gib,
+                        suffix=" GiB",
                     ),
-                    ("Temporal source:", sample.temporal_source or "unavailable"),
-                    ("Camera bookmark:", self._flow_performance_camera_bookmark),
-                    ("Flow attached:", True),
-                )
+                    "temporal_source": sample.temporal_source or "unavailable",
+                    "camera_bookmark": self._flow_performance_camera_bookmark,
+                    "flow_attached": True,
+                }
             )
         carb.log_warn(
-            self._format_flow_log_block("PERFORMANCE", (("", tuple(fields)),))
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="PERFORMANCE",
+                state=event,
+                details=details,
+                append_local_timestamp=with_dtrs_local_timestamp,
+            )
         )
 
     def _start_flow_performance_sampler(self) -> None:
         """Start one low-frequency Stage 6 sampler after Flow is live and settled."""
 
+        if not self.FLOW_PERFORMANCE_SAMPLER_ENABLED:
+            return
         self._stop_flow_performance_sampler()
         self._flow_performance_session_id += 1
         session_id = self._flow_performance_session_id
@@ -345,84 +351,58 @@ class FlowPerformanceMixin:
         statistics = self._flow_performance_statistics(samples)
         elapsed = latest_sample.captured_at - self._flow_performance_attached_at
         transition_state = self.airflow_transition_state()
-        sections = [
-            ("", (("Elapsed since Attach:", f"{elapsed:.1f} s"),)),
-            (
-                "FPS",
-                (
-                    (
-                        "Average:",
-                        self._format_flow_performance_value(statistics["fps_average"]),
-                    ),
-                    (
-                        "Minimum:",
-                        self._format_flow_performance_value(statistics["fps_minimum"]),
-                    ),
-                    (
-                        "Maximum:",
-                        self._format_flow_performance_value(statistics["fps_maximum"]),
-                    ),
-                ),
+        details: dict[str, object] = {
+            "elapsed_since_attach_s": f"{elapsed:.1f} s",
+            "average_fps": self._format_flow_performance_value(
+                statistics["fps_average"]
             ),
-            (
-                "Frame time",
-                (
-                    (
-                        "Average:",
-                        self._format_flow_performance_value(
-                            statistics["frame_time_average"], suffix=" ms"
-                        ),
-                    ),
-                ),
+            "minimum_fps": self._format_flow_performance_value(
+                statistics["fps_minimum"]
             ),
-            (
-                "Memory",
-                (
-                    (
-                        "GPU memory used:",
-                        self._format_flow_performance_value(
-                            latest_sample.gpu_memory_used_gib, suffix=" GiB"
-                        ),
-                    ),
-                    (
-                        "Process memory:",
-                        self._format_flow_performance_value(
-                            latest_sample.process_memory_used_gib, suffix=" GiB"
-                        ),
-                    ),
-                ),
+            "maximum_fps": self._format_flow_performance_value(
+                statistics["fps_maximum"]
             ),
-            (
-                "Flow",
-                (
-                    (
-                        "Semantic workload:",
-                        transition_state["semantic_workload"] or "unavailable",
-                    ),
-                    (
-                        "Active airflow selector:",
-                        transition_state["active_airflow_selector"] or "unavailable",
-                    ),
-                    (
-                        "Pending airflow selector:",
-                        transition_state["pending_airflow_selector"] or "None",
-                    ),
-                    (
-                        "Live temporal source:",
-                        latest_sample.temporal_source or "unavailable",
-                    ),
-                    ("Camera bookmark:", self._flow_performance_camera_bookmark),
-                    ("Flow attached:", bool(self._flow_airflow_simulate_path)),
-                ),
+            "average_frame_time_ms": self._format_flow_performance_value(
+                statistics["frame_time_average"],
+                suffix=" ms",
             ),
-        ]
+            "gpu_memory_used_gib": self._format_flow_performance_value(
+                latest_sample.gpu_memory_used_gib,
+                suffix=" GiB",
+            ),
+            "process_memory_gib": self._format_flow_performance_value(
+                latest_sample.process_memory_used_gib,
+                suffix=" GiB",
+            ),
+            "semantic_workload": (
+                transition_state["semantic_workload"] or "unavailable"
+            ),
+            "active_airflow_selector": (
+                transition_state["active_airflow_selector"] or "unavailable"
+            ),
+            "pending_airflow_selector": (
+                transition_state["pending_airflow_selector"] or "None"
+            ),
+            "live_temporal_source": latest_sample.temporal_source or "unavailable",
+            "camera_bookmark": self._flow_performance_camera_bookmark,
+            "flow_attached": bool(self._flow_airflow_simulate_path),
+        }
         last_temporal_proof = self._last_temporal_proof_log_fields()
         if last_temporal_proof:
-            sections.append(("Last temporal proof", last_temporal_proof))
+            details.update(
+                {
+                    "last_temporal_proof_"
+                    f"{label.lower().rstrip(':').replace(' ', '_')}": value
+                    for label, value in last_temporal_proof
+                }
+            )
         carb.log_warn(
-            self._format_flow_log_block(
-                "PERFORMANCE",
-                tuple(sections),
+            format_dtrs_diagnostic_block(
+                owner="FLOW",
+                process="PERFORMANCE",
+                state="INTERVAL",
+                details=details,
+                append_local_timestamp=with_dtrs_local_timestamp,
             )
         )
 

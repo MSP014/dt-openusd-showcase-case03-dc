@@ -3,6 +3,7 @@ mdl 1.7;
 import ::df::*;
 import ::math::*;
 import ::state::*;
+import ::tex::*;
 
 float dtrs_clamp01(float value) = value < 0.0 ? 0.0 :
     (value > 1.0 ? 1.0 : value);
@@ -48,7 +49,8 @@ color dtrs_palette(
     ) : color_5;
 
 export material DTRS_Heatmap(
-    float telemetry_celsius = 60.0,
+    uniform texture_2d telemetry_texture = texture_2d(),
+    uniform int telemetry_texel_index = 0,
     float temperature_offset_celsius = 0.0,
     float delta_minimum_celsius = -10.0,
     float delta_maximum_celsius = 10.0,
@@ -70,6 +72,13 @@ export material DTRS_Heatmap(
         delta_maximum_celsius,
         thermal_weight
     );
+    float telemetry_celsius = tex::texture_isvalid(telemetry_texture) ?
+        tex::lookup_float(
+            telemetry_texture,
+            float2((float(telemetry_texel_index) + 0.5) / 256.0, 0.5),
+            tex::wrap_clamp,
+            tex::wrap_clamp
+        ) : 60.0;
     float temperature = telemetry_celsius + temperature_offset_celsius + delta;
     float scale_span = scale_maximum_celsius - scale_minimum_celsius;
     float temperature_scalar = scale_span <= 0.0 ? 0.0 : dtrs_clamp01(

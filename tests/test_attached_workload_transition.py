@@ -267,11 +267,12 @@ def test_attached_target_failure_keeps_previous_airflow_and_clears_pending():
         "failure_stage": "validation",
         "action": "kept_previous_safe_dataset",
     }
-    assert "DTRS AIRFLOW TRANSITION / FAILED" in logs[0]
-    assert "Telemetry rolled back:" in logs[0]
-    assert "Pending cleared:" in logs[0]
-    assert "Flow reset:" in logs[0]
-    assert "RESULT:" in logs[0]
+    assert "DTRS AIRFLOW TRANSITION" in logs[0]
+    assert "process=WORKLOAD | state=FAILED" in logs[0]
+    assert "telemetry_rolled_back=" in logs[0]
+    assert "pending_cleared=" in logs[0]
+    assert "flow_reset=" in logs[0]
+    assert "result=FAIL" in logs[0]
 
 
 def test_detached_attach_failure_remains_detached_without_workload_rollback():
@@ -656,10 +657,11 @@ def test_transition_log_block_has_structured_authoritative_fields():
         ),
     )
 
-    assert "DTRS AIRFLOW TRANSITION / COMMIT" in message
-    assert "Active airflow:" in message
-    assert "Runtime source:" in message
-    assert "RESULT:" in message
+    assert "DTRS AIRFLOW TRANSITION" in message
+    assert "process=WORKLOAD | state=COMMIT" in message
+    assert "active_airflow=server/load_critical" in message
+    assert "runtime_source=critical_1651.vti" in message
+    assert "result=PASS" in message
     assert re.search(
         r"Local time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} [+-]\d{2}:\d{2}",
         message,
@@ -1221,8 +1223,8 @@ def test_superseded_transition_cannot_commit_after_async_barrier(
             "active_airflow_selector": "server/load_critical",
             "pending_airflow_selector": None,
         }
-        assert any("DTRS AIRFLOW TRANSITION / SUPERSEDED" in log for log in logs)
-        assert any("Old commit allowed:" in log and "False" in log for log in logs)
+        assert any("process=WORKLOAD | state=SUPERSEDED" in log for log in logs)
+        assert any("old_commit_allowed=False" in log for log in logs)
 
     asyncio.run(scenario())
 

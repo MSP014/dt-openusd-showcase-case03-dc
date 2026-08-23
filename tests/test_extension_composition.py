@@ -32,10 +32,15 @@ def test_extension_keeps_private_controller_state_out_of_its_source() -> None:
     assert "ValidationReceiptWorkflow(" in startup
     assert "VisualizationWorkflow(" in startup
     assert "StreamlinesWorkflow(" in startup
+    assert "PeriodicPerformanceWorkflow(" in startup
+    assert startup.index("PeriodicPerformanceWorkflow(") < startup.index(
+        "VisualizationWorkflow("
+    )
     assert "self._build_window()" in startup
     assert "self._cancel_scene_action_tasks()" in shutdown
     assert "clear_streamlines_static_runtime_from_open_stage()" in shutdown
-    assert "restore_heatmap_test_in_kit()" not in shutdown
+    assert "deactivate_heatmap_production_in_kit()" in shutdown
+    assert "restore_heatmap_test_in_kit()" in shutdown
 
 
 def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> None:
@@ -52,6 +57,10 @@ def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> No
     extension._validation_workflow = _Workflow(workflow_events, "validation")
     extension._visualization_workflow = _Workflow(workflow_events, "visualization")
     extension._streamlines_workflow = _Workflow(workflow_events, "streamlines")
+    extension._periodic_performance_workflow = _Workflow(
+        workflow_events,
+        "periodic_performance",
+    )
     (
         extension._load_task,
         extension._reload_task,
@@ -67,7 +76,12 @@ def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> No
 
     extension.on_shutdown()
 
-    assert workflow_events == ["validation", "visualization", "streamlines"]
+    assert workflow_events == [
+        "validation",
+        "visualization",
+        "streamlines",
+        "periodic_performance",
+    ]
     assert all(task.cancelled for task in scene_tasks)
     assert auxiliary_task.cancelled
     assert camera_task.cancelled
@@ -75,6 +89,43 @@ def test_shutdown_cancels_extracted_workflows_and_owned_tasks(monkeypatch) -> No
     assert controller.calls == [
         "cancel_transition",
         "heatmap_cleanup",
+        "streamlines_cleanup",
+        "xray_cleanup",
+        "stop_flow_callbacks",
+        "clear_flow_validation",
+    ]
+
+
+def test_shutdown_restores_active_debug_heatmap_before_remaining_cleanup(
+    monkeypatch,
+) -> None:
+    module = _load_extension(monkeypatch)
+    extension = module.DigitalTwinRuntimeSuiteExtension()
+    controller = _Controller(heatmap_owner="debug")
+
+    extension._controller = controller
+    extension._validation_workflow = None
+    extension._visualization_workflow = None
+    extension._streamlines_workflow = None
+    extension._periodic_performance_workflow = None
+    extension._load_task = None
+    extension._reload_task = None
+    extension._lighting_task = None
+    extension._airflow_task = None
+    extension._view_task = None
+    extension._auxiliary_windows_task = None
+    extension._camera_sync_task = None
+    extension._telemetry_task = None
+    extension._motion_controller = None
+    extension._window = None
+
+    extension.on_shutdown()
+
+    assert controller.debug_scheduler_stopped
+    assert controller.heatmap_session_restored
+    assert controller.calls == [
+        "cancel_transition",
+        "heatmap_test_restore",
         "streamlines_cleanup",
         "xray_cleanup",
         "stop_flow_callbacks",
@@ -112,8 +163,11 @@ class _Task:
 
 
 class _Controller:
-    def __init__(self) -> None:
+    def __init__(self, *, heatmap_owner: str = "production") -> None:
         self.calls: list[str] = []
+        self._heatmap_owner = heatmap_owner
+        self.debug_scheduler_stopped = False
+        self.heatmap_session_restored = False
 
     def clear_streamlines_static_runtime_from_open_stage(self):
         self.calls.append("streamlines_cleanup")
@@ -124,6 +178,19 @@ class _Controller:
 
     def deactivate_heatmap_production_in_kit(self):
         self.calls.append("heatmap_cleanup")
+        return SimpleNamespace(success=True)
+
+    def heatmap_production_active(self) -> bool:
+        return self._heatmap_owner == "production"
+
+    def heatmap_test_active(self) -> bool:
+        return self._heatmap_owner == "debug"
+
+    def restore_heatmap_test_in_kit(self):
+        self.calls.append("heatmap_test_restore")
+        self.debug_scheduler_stopped = True
+        self.heatmap_session_restored = True
+        self._heatmap_owner = "none"
         return SimpleNamespace(success=True)
 
     def clear_xray_material_in_kit(self) -> None:

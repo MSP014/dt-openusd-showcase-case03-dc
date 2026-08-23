@@ -35,8 +35,8 @@ def test_v02_runtime_config_resolves_default_asset():
     config = RuntimeConfig.load(config_path, apply_local_overrides=False)
 
     assert config.app_name == "Digital Twin Runtime Suite"
-    assert config.app_version == "0.4.0"
-    assert config.display_version == "0.4"
+    assert config.app_version == "0.5.0"
+    assert config.display_version == "0.5"
     assert config.default_asset.asset_id == "blackwell_rig_gb203"
     assert config.default_asset_path.name == "Blackwell_Rig_server_assembly.usd"
     assert config.default_asset_path.exists()
@@ -271,7 +271,7 @@ def test_v02_runtime_config_opens_server_chassis_in_runtime_only():
     assert indicators.hdd_color == (0.95, 0.98, 1.0)
     assert indicators.lan_01_color == (0.95, 0.98, 1.0)
     assert indicators.lan_02_color == (0.95, 0.98, 1.0)
-    assert indicators.off_color == (0.62, 0.65, 0.68)
+    assert indicators.off_color == (0.24, 0.24, 0.24)
 
 
 def test_v02_runtime_config_resolves_default_lighting():
@@ -1326,7 +1326,7 @@ def test_front_panel_indicators_keep_inactive_leds_light_but_not_emissive():
         "/DTRS_Runtime/Looks/FrontPanelIndicatorOff",
         "diffuseColor",
         UsdShade,
-    ) == (0.62, 0.65, 0.68)
+    ) == (0.24, 0.24, 0.24)
     assert _preview_surface_input_tuple(
         stage,
         "/DTRS_Runtime/Looks/FrontPanelIndicatorOff",

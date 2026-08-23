@@ -24,16 +24,24 @@ class VisualizationWorkflow:
         report_status: Callable[[str], None],
         refresh_cache_selector: Callable[[], None],
         refresh_visualization_controls: Callable[[], None],
+        airflow_operation_active: Callable[[], bool] | None = None,
         log_warning: Callable[[str], None] | None = None,
         append_local_timestamp: Callable[[str], str] | None = None,
+        on_mode_complete: Callable[[object, object], None] | None = None,
+        on_mode_committed: Callable[[object], None] | None = None,
+        on_workload_complete: Callable[[str, object], None] | None = None,
     ) -> None:
         self._controller = controller
         self._validation_receipts = validation_receipts
         self._report_status = report_status
         self._refresh_cache_selector = refresh_cache_selector
         self._refresh_visualization_controls = refresh_visualization_controls
+        self._airflow_operation_active = airflow_operation_active
         self._log_warning = log_warning
         self._append_local_timestamp = append_local_timestamp
+        self._on_mode_complete = on_mode_complete
+        self._on_mode_committed = on_mode_committed
+        self._on_workload_complete = on_workload_complete
         self._visualization_task = None
         self._scheduled_mode = None
         self._workload_transition_task = None
@@ -47,6 +55,20 @@ class VisualizationWorkflow:
     def request_mode_from_ui(self, mode) -> bool:
         """Validate current readiness, then schedule one user-requested mode."""
 
+        if self._airflow_operation_active and self._airflow_operation_active():
+            detail = (
+                "Wait for the active airflow cache operation before changing "
+                "Visualization."
+            )
+            self._report_mode_transition(
+                "REJECTED",
+                mode,
+                readiness="BUSY",
+                detail=detail,
+            )
+            self._report_status(f"{mode.value} unavailable: {detail}")
+            self._refresh_visualization_controls()
+            return False
         readiness = self._controller.visualization_readiness().for_mode(mode)
         self._report_mode_transition(
             "REQUEST",
@@ -107,6 +129,7 @@ class VisualizationWorkflow:
         self._controller.cancel_visualization_transition()
 
     async def _request_mode(self, mode) -> None:
+        committed_before = self._controller.visualization_snapshot().committed
         try:
             result = await self._controller.request_visualization_mode_in_kit(
                 mode,
@@ -119,7 +142,18 @@ class VisualizationWorkflow:
         self._report_status(result.message)
         self._refresh_visualization_controls()
         self._validation_receipts.complete_consumer_action(mode, result)
-        committed = getattr(result, "committed_mode", None)
+        if self._on_mode_complete is not None:
+            self._on_mode_complete(mode, result)
+        # The controller snapshot is authoritative after the transaction: Kit
+        # adapters may return a legacy result without ``committed_mode``.
+        committed = self._controller.visualization_snapshot().committed
+        if (
+            self._on_mode_committed is not None
+            and result.success
+            and committed is not None
+            and committed is not committed_before
+        ):
+            self._on_mode_committed(committed)
         self._report_mode_transition(
             "COMPLETE" if result.success else "FAIL",
             mode,
@@ -135,6 +169,8 @@ class VisualizationWorkflow:
         self._report_status(result.message)
         self._refresh_cache_selector()
         self._refresh_visualization_controls()
+        if self._on_workload_complete is not None:
+            self._on_workload_complete(workload_mode, result)
 
     def _report_progress(self, message: str) -> None:
         self._report_status(message)

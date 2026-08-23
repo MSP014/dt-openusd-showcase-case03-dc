@@ -345,6 +345,9 @@ class HeatmapsUiMixin:
             "COMPLETE" if result.success else "FAIL",
             details,
         )
+        acceptance = getattr(self, "_stage10_acceptance", None)
+        if acceptance is not None:
+            acceptance.observe_heatmap_settings_apply(candidate, result)
 
     def _log_heatmap_action(
         self,

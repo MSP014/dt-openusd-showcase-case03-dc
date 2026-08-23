@@ -42,7 +42,7 @@ than pretending an estimate is a measured sensor value.
 
 All Heatmap-capable hardware shares one presentation contract: a telemetry
 snapshot retargets the current displayed temperature, which interpolates to the
-latest value over 2.0 seconds and writes dynamic material values at 2 Hz
+latest value over 2.0 seconds and updates dynamic Heatmap texture data at 2 Hz
 (0.5-second period). The telemetry provider cadence and Kit render cadence are
 independent. Ordinary Kit frames author no Heatmap USD or material opinions.
 
