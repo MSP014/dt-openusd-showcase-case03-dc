@@ -2299,3 +2299,314 @@ the sole owner of chassis visibility.
 `Open` and `Closed` chassis-presentation visibility controls remain a separate
 future Stage 17 concern. Auto fade is not a future requirement and must not be
 reintroduced as part of X-Ray or camera-navigation work.
+
+
+### Stage 10 - Server Heatmap Slice
+
+Checkpoint preflight: before implementation, verify that Stage 9 ends at a
+clean Git checkpoint commit. If it does not, create that checkpoint first.
+
+Jira: `DC-50`
+
+Release track: `0.5.0` (released on Stage 10 completion).
+
+
+Prove a reusable telemetry-driven Heatmap against the full server at
+single-server detail level before adding rack or data-hall scale.
+
+Preparatory package structure has already been created to reserve the Heatmap
+subsystem boundary before implementation begins.
+
+Prepared runtime package:
+
+`src/digital_twin_runtime_suite/app/heatmaps/`
+
+- `__init__.py`
+- `bindings.py`
+- `diagnostics.py`
+- `discovery.py`
+- `material.py`
+- `runtime.py`
+- `scalar.py`
+
+Prepared test package:
+
+`tests/heatmaps/`
+
+- `test_heatmap_bindings.py`
+- `test_heatmap_discovery.py`
+- `test_heatmap_runtime.py`
+- `test_heatmap_scalar.py`
+
+These files currently contain package/module placeholders and responsibility
+descriptions only. They do not constitute Stage 10 implementation and may be
+refined as the runtime architecture is proven. `__init__.py` is intentionally
+left without a predefined public API.
+
+
+#### Thermal contract
+
+Use the thermal metadata already authored in Houdini and transported through
+USD:
+
+- `thermal_zone` - semantic thermal region;
+- `thermal_component` - component role inside that region;
+- `primvars:thermal_weight` - dimensionless authored spatial distribution from
+  relatively colder to hotter areas;
+- `primvars:temperature_preview` - optional Houdini authoring/debug data only.
+
+`thermal_weight` is not temperature and must never be interpreted as degrees
+Celsius. Runtime thermal values come from the existing DTRS telemetry
+provider. Heatmap combines documented telemetry with the authored
+`thermal_weight` distribution to produce the visual result.
+
+Only documented telemetry may drive Heatmap regions. Missing measurements must
+remain unavailable rather than being invented. Preserve the existing telemetry
+quality semantics (`measured`, `estimated`, `derived`, `synthetic`, `stale`,
+`unavailable`).
+
+Stage 10 uses one documented absolute temperature scale in degrees Celsius for
+the complete server. The same temperature must always map to the same colour,
+regardless of workload, component family, or thermal zone. Do not apply
+per-workload, per-component, or per-region normalization to this Celsius
+scalar.
+
+Heatmap temperatures are a derived spatial interpolation, not a claim that
+each rendered vertex has a physical temperature sensor. Runtime normalises the
+observed authored weights across each discovered asset/zone/component group to
+`[0, 1]`; it then calculates:
+
+```text
+delta_min_celsius = -Delta
+delta_max_celsius = +Delta
+
+display_temperature_celsius = component_telemetry_celsius
+    + TemperatureOffset
+    + lerp(
+        delta_min_celsius,
+        delta_max_celsius,
+        normalized_thermal_weight
+      )
+```
+
+`component_telemetry_celsius` is the source temperature for the exact telemetry
+identity, such as GPU 1. Delta and Temperature Offset are persisted by
+asset/zone/component and are independent of workload. A normalized weight of
+`0` resolves to the lower delta endpoint; `1` resolves to the upper endpoint.
+The derived display temperature then uses the one server-wide Celsius scale
+above. `scalar.py` owns this Celsius calculation; `palette.py` owns clamping,
+active stops, and colour interpolation.
+
+The input telemetry quality remains visible. The resulting field must be
+described in the UI, legend, and diagnostics as a derived spatial
+interpolation from component telemetry and Houdini-authored thermal metadata,
+never as direct per-part measurement.
+
+Phase 10.3 provides one settings-driven Heatmap harness, initially OFF. Its
+Test/Restore controls own only Heatmap Session opinions. Reload returns the
+normal scene and repopulates persisted Heatmap settings; production lifecycle
+composition and X-Ray precedence remain deliberately deferred to Phase 10.4.
+
+Rack and data-hall Heatmap behavior is outside Stage 10.
+
+
+### Implementation sequence
+
+#### Phase 10.0 - Asset preflight ✅
+
+- inspect the production server USD used by DTRS;
+- verify `thermal_zone`, `thermal_component`, `thermal_weight`, and optional
+  `temperature_preview`;
+- verify `thermal_weight` range and usable USD interpolation;
+- identify dual-purpose X-Ray/Heatmap geometry.
+
+Gate: production USD proves the expected thermal metadata contract.
+
+result=PASS
+thermal_targets=1148
+valid_targets=1148
+malformed_targets=0
+review_targets=0
+thermal_weight_range=[0, 1]
+xray_overlaps=42
+
+
+#### Phase 10.1 - Discovery and telemetry binding ✅
+
+- create a reusable semantic registry of Heatmap-capable primitives;
+- discover targets from thermal metadata rather than hard-coded mesh paths
+  where semantic discovery is sufficient;
+- preserve deterministic identity for repeated hardware such as GPU 1/2/3;
+- map documented telemetry metrics to compatible thermal zones/components;
+- mark regions without truthful telemetry as unavailable;
+- keep presentation policy separate from Heatmap capability.
+
+Gate: DTRS can deterministically resolve:
+
+`primitive -> thermal semantics -> telemetry binding/unavailable ->
+presentation policy`
+
+without rendering yet.
+
+
+#### Phase 10.2 - Scalar mapping foundation ✅
+
+- implement the one fixed documented server-wide Celsius scale, clamping,
+  colour mapping, quality handling, and missing-data behavior;
+- preserve the same-temperature-to-same-colour Celsius-scalar contract without
+  per-workload, per-component, or per-region scalar normalization;
+- implement the telemetry-anchored derived spatial interpolation defined in
+  the thermal contract; do not claim measured temperature at every surface
+  point;
+- keep `temperature_preview` outside the runtime calculation;
+- cover the mapping logic with focused tests;
+- implement the reusable Heatmap renderer and prove the complete path on a
+  representative non-uniform target:
+
+`TelemetrySnapshot -> semantic binding -> scalar mapping ->
+thermal_weight -> visible Heatmap`
+
+- apply runtime presentation without modifying authored asset layers;
+- prove clean enable/disable and appearance restoration.
+
+Gate: one production target works end-to-end in Kit before expanding coverage.
+
+
+#### Phase 10.3 - Generic settings-driven Heatmaps ✅
+
+- persist Isolation, Calibration, and Color Scale in
+  `configs/heatmap_settings.toml` without changing telemetry provider config;
+- build a stage-driven catalog for the generic Isolation union and dynamic
+  calibration controls; all enabled selectors are the full-server case;
+- support independent GPU Internals and Housing selectors plus arbitrary
+  combinations, exact Session restoration, and generic presentation plans;
+- apply candidate settings transactionally while Heatmaps are active, with an
+  explicit previous-presentation rollback result on failure;
+- retain the 2 Hz presentation cadence, 2.0-second smoothing, and one global
+  absolute Celsius scale;
+- configure a 2-to-6-stop palette with post-scalar clamp in `palette.py`;
+- keep Test/Restore as a development harness, initially OFF after startup or
+  reload. No Heatmap lifecycle or X-Ray composition is added in this phase.
+
+Gate: the generic settings path works from one selected target through all
+selectors against the production server, without a Vertical Slice or FullServer
+runtime mode.
+
+
+#### Phase 10.4 - Composition and lifecycle ✅
+
+- require every Heatmap activation to apply the Engineering X-Ray presentation;
+- do not implement a standalone non-X-Ray Heatmap mode;
+- enforce single-server X-Ray precedence on dual-purpose geometry, especially
+  the GPU enclosure/shroud;
+- ensure suppression affects presentation only and does not remove thermal
+  capability or metadata;
+- add only the necessary runtime controls, legend, quality/missing-data state,
+  and diagnostics;
+- verify clean behavior across metric changes, workload changes,
+  enable/disable, stage reload, and shutdown;
+- remove only Heatmap-owned runtime state and restore the correct authored or
+  higher-priority presentation.
+
+Gate: Heatmap always owns its X-Ray presentation, and Heatmap/Streamlines
+transitions leave exactly one healthy primary presentation without stale or
+corrupted state.
+
+
+#### Phase 10.5 - Acceptance and release ✅
+
+- run focused Heatmap tests and the full DTRS test suite;
+- perform Kit-side acceptance against the production server stage;
+- document the thermal metadata contract, telemetry binding, scalar mapping,
+  X-Ray precedence, and rack/data-hall boundary;
+- record acceptance evidence;
+- close `DC-50`;
+- create the Stage 10 checkpoint;
+- release DTRS `0.5.0`.
+
+
+#### Post-acceptance Heatmap performance fix - periodic viewport stalls
+
+**Symptom.** With Heatmap enabled, fan animation regularly appeared to stop:
+`spins -> freezes -> spins`. Fan controllers continued to update each Kit
+frame, so the defect was a brief viewport/update-loop stall rather than an RPM
+calculation error. Average FPS could remain acceptable; fan motion made each
+periodic main-loop stall conspicuous.
+
+**Diagnosis.** Heatmap presentation ran at its preserved 2 Hz cadence through
+the smoother, presentation update, material telemetry update, and then a
+USD/UsdShade mutation consumed by Hydra/RTX. The decisive A/B left Heatmap
+materials, bindings, Isolation, X-Ray composition, scheduler, and ownership
+active, but suppressed only periodic dynamic presentation writes:
+
+- dynamic presentation ON: regular fan stalls;
+- `Freeze Heatmap Presentation`: stalls disappeared completely.
+
+This isolated the defect to dynamic Heatmap presentation, not fan motion,
+Streamlines, X-Ray, or static Heatmap composition.
+
+**Rejected approaches.** The shader-input path was batched by precomputing
+changes, skipping unchanged values, using one Session edit target and one
+`Sdf.ChangeBlock`, reusing inputs, and avoiding periodic `CreateInput()`. It
+did not remove the stalls. A `primvar` / `scene::data_lookup_float` experiment
+was substantially worse: geometry/Hydra dirtying reduced the viewport to about
+1-2 FPS. That experiment was fully reverted.
+
+**Root cause and fix.** USD/UsdShade had been used as transport for frequently
+changing telemetry. Even a small material mutation could invalidate
+Hydra/RTX work and occupy a later Kit frame for hundreds of milliseconds. Fan
+motion was not the defect; it exposed the defect.
+
+The final production path creates and binds the Heatmap MDL/material graph and
+one compact named dynamic GPU texture at activation. Each periodic update now
+applies existing smoothing, calibration, and palette semantics, then uploads
+only texture pixel data; MDL reads the current texel value. No periodic
+`UsdShade` input set, USD primvar set, material recreation, or rebinding is
+performed. USD remains the transport for structural/static presentation state.
+
+**Result.** Regular fan-animation freezes disappeared while live thermal colours
+continued to respond to telemetry. Production Heatmap + X-Ray remained
+interactive on the reference RTX 3080 (approximately 30 FPS in the observed
+view), without changing the 2 Hz cadence, 2 s smoothing, or fan-motion logic.
+
+
+### Stage 10 Acceptance
+
+Stage 10 is complete when:
+
+1. Production USD thermal metadata is discovered and validated correctly.
+
+2. `thermal_weight` remains an authored `[0, 1]` spatial distribution and
+   `temperature_preview` remains authoring/debug data only.
+
+3. Documented DTRS telemetry drives the correct thermal regions through the
+   defined derived spatial interpolation and one deterministic server-wide
+   Celsius mapping. Delta and Temperature Offset are persisted calibration,
+   while normalized authored weight supplies the spatial distribution.
+
+4. Telemetry quality, stale state, and missing data are represented truthfully;
+   unavailable component temperatures are not invented.
+
+5. Repeated hardware resolves to the correct telemetry identity.
+
+6. Workload changes alter runtime thermal presentation without changing the
+   authored thermal distribution.
+
+7. Isolation, calibration, and palette settings persist independently of the
+   telemetry provider; Test uses applied settings rather than an unsaved draft.
+
+8. Test/Restore leave authored layers and exact prior Session opinions intact.
+   Reload returns Heatmaps to OFF and reloads persisted settings. Production
+   lifecycle composition and Heatmap/X-Ray precedence are validated as part
+   of the completed Phase 10.4 contract.
+
+9. Enable/disable and metric changes leave no stale Heatmap harness state and
+   do not modify production asset layers.
+
+10. The implementation is reusable and subsystem-owned, with rack/data-hall
+    Heatmap behavior explicitly left outside Stage 10.
+
+
+Done when the full server can present a stable, readable telemetry-driven
+Heatmap over Houdini-authored thermal distributions without inventing
+measurements or implying validated thermal simulation.

@@ -7,15 +7,29 @@ Each catalogued target has a semantic component, a telemetry binding, and an
 authored `thermal_weight`. Capability remains catalog metadata even when a
 target is temporarily excluded from the Heatmap presentation.
 
+Authored USD fields are `thermal_zone`, `thermal_component`, and
+`primvars:thermal_weight`. `primvars:temperature_preview` is authoring/debug
+data only; it is never a runtime telemetry source.
+
 `thermal_weight` is an authored spatial distribution. It is not a measured
 per-vertex temperature.
 
 ## Telemetry binding and scalar mapping
 
 The semantic target resolves only to a documented canonical telemetry metric.
-DTRS applies the existing telemetry Celsius value, authored calibration delta,
-temperature offset, and `thermal_weight` to produce the presentation scalar.
-The 2 Hz retarget cadence and 2.0-second smoothing contract are unchanged.
+Runtime normalises `thermal_weight` to `w` in `[0, 1]` and calculates:
+
+```text
+T_display = T_telemetry + TemperatureOffset + lerp(-Delta, +Delta, w)
+```
+
+`Delta` and `TemperatureOffset` are persisted calibration settings, not
+authored measurements. The 2 Hz retarget cadence and 2.0-second smoothing
+contract are unchanged.
+
+Missing or unavailable telemetry never produces an invented temperature.
+Stale telemetry retains its source-quality semantics and is not presented as a
+current value from a previous sample.
 
 ## Global Celsius palette
 
