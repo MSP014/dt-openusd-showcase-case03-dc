@@ -412,6 +412,7 @@ smoke, transport, and emitter-layout controls.
 
 ## 📜 Changelog
 
+* **Week of 25 August, 2026:** Established dual licensing for the public DTRS release: MIT for original source code and a separate evaluation licence for authored assets, documentation, and simulation data. Added third-party notices, SPDX file headers, asset provenance, and a versioned Asset Pack with a manifest and SHA-256 checksums; published the licensed airflow datasets for local evaluation.
 * **Week of 23 August, 2026:** Completed Stage 10 and released Digital Twin Runtime Suite v0.5.0 with accepted single-server Heatmap/X-Ray composition, dynamic texture telemetry presentation, workload and GPU Housing precedence, and interactive RTX 3080 acceptance.
 * **Week of 17 August, 2026:** Completed Stage 7 of Digital Twin Runtime Suite v0.4.0 with a project-owned Custom MDL Fresnel X-Ray mode, reversible Session Layer ownership, live ReviewCamera response, telemetry-aware LED restoration, and accepted combined RTX Flow performance; completed Stage 8 workload-to-cache binding, where one semantic workload state drives telemetry, fan behaviour, manifest-backed Houdini temporal airflow selection, cached validation, and phase-preserving in-place Flow switching.
 * **Week of 3 August, 2026:** Hardened the responsive VTI Attach lifecycle and runtime configuration boundary, preserved Houdini PDG VTI export tooling, corrected public runtime links, and began the material-recovery and renderer-limitation investigation that established the Stage 7 X-Ray implementation path.
