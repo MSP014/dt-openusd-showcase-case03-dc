@@ -22,7 +22,7 @@ affiliated with, sponsored by, endorsed by, or produced by these manufacturers.
 The following entry records a third-party file currently used by the Digital
 Twin Runtime Suite. It remains under its original licence. Neither the MIT
 License nor the Maksim Pospelkov Asset & Technical Content Evaluation License
-1.0 grants rights in it.
+1.1 grants rights in it.
 
 ### HDRI
 

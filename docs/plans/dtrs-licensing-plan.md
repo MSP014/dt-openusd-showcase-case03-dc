@@ -1,16 +1,17 @@
 # DTRS Licensing Plan
 
-**Status**: Draft
-**Last Updated**: 2026-07-11
+**Status**: Implemented / Maintenance
+**Last Updated**: 2026-08-25
 
 ## Purpose
 
-This plan defines the work required to make DTRS publicly inspectable and
-testable without granting unrestricted reuse of its authored 3D assets.
+This plan records the licensing work that makes DTRS publicly inspectable and
+testable without granting unrestricted reuse of its authored 3D assets. It is
+the maintenance baseline for future releases.
 
-It deliberately does not contain final legal language. The custom asset licence
-must be reviewed by a qualified intellectual-property lawyer before it is used
-for a new public Asset Pack release.
+It deliberately does not provide legal advice. Qualified intellectual-property
+review is recommended before relying on the custom asset licence for broader
+commercial licensing or enforcement.
 
 ## Current State
 
@@ -18,14 +19,38 @@ for a new public Asset Pack release.
   externally hosted Asset Pack.
 - Heavy USD assets, textures, caches, and Houdini source files are excluded from
   Git tracking.
-- The Asset Pack is currently distributed through Google Drive and hydrated
-  locally under `assets/_external/`.
+- Asset Pack 0.5.1 is distributed through Google Drive and hydrated locally
+  under `assets/_external/`.
 - `LICENSE.md` maps the separate code, authored-asset, and third-party
   boundaries. `LICENSES/MIT.txt`,
-  `LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt`, and
-  `THIRD_PARTY_NOTICES.md` record the current repository terms and boundaries.
-- The next Asset Pack release still requires a complete rights inventory,
-  package-level notices, and qualified review of the asset-evaluation terms.
+  `LICENSES/LicenseRef-MSP-Asset-Evaluation-1.1.txt`, and
+  `THIRD_PARTY_NOTICES.md` record the current repository terms and boundaries;
+  version 1.0 remains historical for prior Asset Pack releases.
+- Asset Pack 0.5.1 contains `LICENSE-ASSETS.txt`, `README-ASSET-PACK.md`,
+  `ASSET_MANIFEST.json`, `THIRD_PARTY_NOTICES.txt`, and `SHA256SUMS.txt`.
+- The DTRS Airflow Runtime Dataset is a separate CC BY 4.0 distribution; it is
+  not covered by the MSP Asset & Technical Content Evaluation License.
+- Third-party publisher PDFs are excluded from the public repository and Asset
+  Pack. Author-owned notes cite the official publisher pages instead.
+
+## Implementation Status
+
+| Phase | Status | Current outcome |
+| --- | --- | --- |
+| 1. Stabilise distribution | Implemented | Asset Pack 0.5.1 is versioned and separately distributed. |
+| 2. Rights inventory | Implemented baseline | Scope matrix, manifest records, and third-party notices classify public content. |
+| 3. Third-party rights | Implemented for current distribution | Publisher PDFs are excluded; new external material requires a fresh rights review. |
+| 4. Code and documentation licences | Implemented | MIT code zone and separate asset/documentation terms are mapped in `LICENSE.md`. |
+| 5. Asset evaluation licence | Implemented | Version 1.1 defines the current evaluation grant and authorised internal evaluators. |
+| 6. Public evaluation package | Implemented | Runtime-facing assets are distributed without Houdini authoring sources. |
+| 7. Package provenance | Implemented | Asset Pack 0.5.1 includes a manifest, USD provenance metadata, and SHA-256 checksums. |
+| 8. Distribution integration | Implemented | README presents licence terms beside the download link. |
+| 9. Release and maintenance | Ongoing | Apply the maintenance rules to every future package version. |
+| 10. Infringement response | Maintenance guidance | Preserve evidence and obtain legal advice before making claims. |
+
+The phase descriptions below retain their rationale and act as maintenance
+checklists. The status table above is the authoritative record for the current
+public release.
 
 ## Target Model
 
@@ -222,7 +247,8 @@ Recommended repository artefacts:
 ```text
 LICENSE.md
 LICENSES/MIT.txt
-LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt
+LICENSES/LicenseRef-MSP-Asset-Evaluation-1.1.txt
+LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt  # historical releases only
 THIRD_PARTY_NOTICES.md
 ```
 
@@ -232,8 +258,9 @@ scope.
 
 ## Phase 5 - Design The Asset Evaluation Licence
 
-Prepare a lawyer-reviewed custom licence that addresses the following points.
-Do not copy an unreviewed draft directly into the release.
+The current release uses the custom licence version 1.1. Use the following
+points to maintain a counsel-reviewed successor if broader commercial licensing
+or enforcement becomes necessary.
 
 ### Covered Assets
 
@@ -316,7 +343,7 @@ Consider a two-tier distribution only if it improves the hiring workflow:
 
 ## Phase 7 - Add Package-Level Provenance
 
-Create `ASSET_MANIFEST.json` with, at minimum:
+Asset Pack 0.5.1 includes `ASSET_MANIFEST.json` with, at minimum:
 
 - package name and semantic version;
 - archive identifier and release date;
@@ -353,8 +380,8 @@ does not by itself prove authorship of every work inside it.
 
 ## Phase 8 - Integrate The Licence Into Distribution
 
-The repository licence map is in place. Before the next public Asset Pack
-release:
+The repository licence map and the Asset Pack 0.5.1 integration are in place.
+For the next public Asset Pack release:
 
 1. Confirm the repository licensing files remain current.
 2. Add a concise licensing table near the Asset Pack download instructions in
@@ -455,7 +482,8 @@ Licensing preparation is complete when:
 - every authored asset has an explicit `rightsClass` and matching notices;
 - third-party redistribution rights have been verified or the files removed;
 - the code, documentation, and asset scopes are unambiguous;
-- the custom asset licence has been reviewed by qualified counsel;
+- qualified counsel review has been sought before relying on the custom asset
+  licence for broader commercial licensing or enforcement;
 - the public archive contains its matching licence, manifest, and notices;
 - the README presents the split licensing model clearly near the download link;
 - the package remains installable and testable from a clean environment;

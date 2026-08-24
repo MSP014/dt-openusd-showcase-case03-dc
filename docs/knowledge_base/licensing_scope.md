@@ -11,8 +11,9 @@ would not describe those rights accurately. This document fixes the intended
 scope for the repository licence map, asset-evaluation terms, and third-party
 notices.
 
-The final legal text for the MSP Asset & Technical Content Evaluation License
-must be reviewed by qualified intellectual-property counsel before distribution.
+This scope document is not legal advice. Qualified intellectual-property review
+is recommended before relying on the MSP Asset & Technical Content Evaluation
+License for broader commercial licensing or enforcement.
 
 The repository's current evaluation licence is version 1.1. Version 1.0 remains
 the historical licence text for prior Asset Pack releases.
@@ -25,7 +26,7 @@ the historical licence text for prior Asset Pack releases.
 | Authored assets and documentation | MSP Asset & Technical Content Evaluation License | Author-owned runtime assets, visual media, simulation outputs, README content, and authored technical documentation. |
 | Third-party material | Its own applicable terms | HDRIs, libraries, NVIDIA components, manufacturer material, fonts, and every other item whose rights belong to another party. |
 
-The planned MIT licence applies only to the Code zone. It must never be
+The MIT licence applies only to the Code zone. It must never be
 described as a licence for the whole repository, the external Asset Pack, or
 the DTRS project as a whole.
 
@@ -108,15 +109,16 @@ Apply these rules in order when classifying a file for a future release:
 Unclassified or mixed-origin files must remain out of a public package until a
 rights inventory records their provenance and distribution status.
 
-## Implementation Boundary
+## Implemented Boundary and Maintenance
 
-The repository licence map and reference texts now record this decision. Before
-they accompany a new public Asset Pack release, the next licensing work must:
+The repository licence map, reference texts, and Asset Pack 0.5.1 implement
+this decision. The package carries its matching licence, manifest, notices, and
+checksums. For each future public Asset Pack release, the maintainer must:
 
 1. inventory distributable files and record third-party provenance;
 2. confirm that the MIT licence remains limited to the code zone;
-3. obtain qualified review of the MSP Asset & Technical Content Evaluation License before it
-   accompanies author-owned assets and documentation in a public release;
+3. seek qualified review of the MSP Asset & Technical Content Evaluation
+   License before relying on it for broader commercial licensing or enforcement;
 4. maintain `THIRD_PARTY_NOTICES.md` with provenance and release treatment,
    then confirm the relevant permissions before including third-party files;
 5. state the split model beside every public Asset Pack download.
