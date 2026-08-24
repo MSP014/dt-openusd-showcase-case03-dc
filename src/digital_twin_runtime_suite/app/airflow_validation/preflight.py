@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Worker-safe VTI preflight without live Flow or USD state."""
 
 from __future__ import annotations

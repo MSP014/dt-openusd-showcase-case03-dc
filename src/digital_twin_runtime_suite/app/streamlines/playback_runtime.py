@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Kit-facing cached Streamlines switching and bounded cadence characterization."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused regression coverage for static Streamlines source cleanliness."""
 
 from __future__ import annotations

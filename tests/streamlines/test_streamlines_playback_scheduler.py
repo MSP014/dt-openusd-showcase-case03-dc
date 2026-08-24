@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused deadline and no-backlog contracts for Streamlines cached playback."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Stage 08 workload-to-cache ownership and selector-display contracts."""
 
 from pathlib import Path

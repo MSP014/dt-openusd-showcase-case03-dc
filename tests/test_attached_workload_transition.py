@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused Stage 08 attached workload-transition contracts."""
 
 from __future__ import annotations

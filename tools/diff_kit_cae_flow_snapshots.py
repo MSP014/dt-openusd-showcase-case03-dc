@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Create a machine-readable parity diff from the two Kit-CAE Flow snapshots."""
 
 from __future__ import annotations

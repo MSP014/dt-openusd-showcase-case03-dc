@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Static USD preflight checks for runtime asset review."""
 
 from __future__ import annotations

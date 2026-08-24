@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Exact Session-layer restoration coverage for generic Heatmap isolation."""
 
 from __future__ import annotations

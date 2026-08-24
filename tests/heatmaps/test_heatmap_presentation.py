@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Presentation-plan spatial-weight normalization coverage."""
 
 from __future__ import annotations

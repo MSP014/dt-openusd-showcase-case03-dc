@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Settings-owned calibration resolution coverage."""
 
 from __future__ import annotations

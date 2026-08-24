@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Runtime coordination between semantic workload and authored airflow data."""
 
 from __future__ import annotations

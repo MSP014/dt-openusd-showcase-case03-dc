@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Digital Twin Runtime Suite runtime package."""
 
 __all__ = ["__version__"]

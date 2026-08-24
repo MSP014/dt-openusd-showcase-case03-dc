@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain bounded cadence-characterization contracts for cached playback."""
 
 from __future__ import annotations

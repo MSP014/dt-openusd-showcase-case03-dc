@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """X-Ray material construction and parameter authoring for DTRS.
 
 Owns reusable instances of the project-owned Custom MDL.

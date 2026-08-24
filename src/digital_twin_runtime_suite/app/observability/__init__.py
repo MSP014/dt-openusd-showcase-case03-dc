@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Reusable live-progress and durable-event reporting for DTRS operations."""
 
 from .progress import DurableEvent, EventKind, EventSeverity, ProgressState

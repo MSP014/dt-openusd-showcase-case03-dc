@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Production X-Ray material-override lifecycle for DTRS.
 
 Owns transient Session Layer bindings for config-driven production target

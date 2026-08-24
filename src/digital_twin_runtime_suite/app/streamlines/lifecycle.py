@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Own canonical Streamlines teardown and residue inspection."""
 
 from __future__ import annotations

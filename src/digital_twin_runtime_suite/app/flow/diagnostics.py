@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Deep Kit-CAE and Flow diagnostics kept out of lifecycle orchestration."""
 
 from __future__ import annotations

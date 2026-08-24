@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Attached workload-to-airflow transition orchestration."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused persisted temporal-geometry liveness contracts."""
 
 from pathlib import Path

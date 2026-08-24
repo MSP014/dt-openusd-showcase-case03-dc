@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure draft feedback and HEX-to-RGB boundary coverage for Color Scale UI."""
 
 from __future__ import annotations

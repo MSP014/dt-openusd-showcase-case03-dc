@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Stage 08 dataset-family compatibility contracts."""
 
 from __future__ import annotations

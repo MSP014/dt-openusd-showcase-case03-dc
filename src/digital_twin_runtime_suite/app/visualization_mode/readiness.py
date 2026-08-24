@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Read-only primary-visualization readiness projections for DTRS."""
 
 from __future__ import annotations

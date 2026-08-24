@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain Streamlines operator request, geometry validation, and cleanup contracts."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused telemetry configuration workflow validation contracts."""
 
 from __future__ import annotations

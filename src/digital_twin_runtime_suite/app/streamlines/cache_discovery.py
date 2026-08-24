@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Read-only classification of workload-owned Streamlines cache artifacts."""
 
 from __future__ import annotations

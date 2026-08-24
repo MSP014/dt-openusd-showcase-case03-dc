@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain cached-state contracts for exact Streamlines presentation."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Live voxel-resolution switching for an attached Flow session."""
 
 from __future__ import annotations

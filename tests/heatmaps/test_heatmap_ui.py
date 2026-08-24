@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused shell coverage for draft-only Heatmap settings controls."""
 
 from __future__ import annotations

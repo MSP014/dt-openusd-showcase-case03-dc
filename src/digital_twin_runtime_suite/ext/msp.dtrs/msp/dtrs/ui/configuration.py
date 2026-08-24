@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Configuration-pane OmniUI builders and transient control models."""
 
 from __future__ import annotations

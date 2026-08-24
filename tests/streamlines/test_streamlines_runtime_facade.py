@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused public-facade contracts for Streamlines UI ownership."""
 
 from __future__ import annotations

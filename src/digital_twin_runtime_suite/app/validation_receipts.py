@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Versioned local persistence for previously proven validation receipts."""
 
 from __future__ import annotations

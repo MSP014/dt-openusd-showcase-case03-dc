@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Immutable production geometry contract for standard Streamlines caches."""
 
 from __future__ import annotations

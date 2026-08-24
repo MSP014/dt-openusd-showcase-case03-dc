@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused active-to-target validation gates for attached Flow transitions."""
 
 from __future__ import annotations

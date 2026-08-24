@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Runtime orchestration for transactional DTRS primary visualization modes."""
 
 from __future__ import annotations

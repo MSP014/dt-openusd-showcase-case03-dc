@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Thin public Streamlines runtime facade composed from focused owners."""
 
 from __future__ import annotations

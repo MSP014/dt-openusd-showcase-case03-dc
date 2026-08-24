@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Bind one fixed-scale velocity material to the active static snapshots."""
 
 from __future__ import annotations

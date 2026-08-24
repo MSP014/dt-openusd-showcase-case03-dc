@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Registry-backed Streamlines dataset and temporal-source contracts."""
 
 from __future__ import annotations

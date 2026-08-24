@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Temporal VTI sample mapping and loop-proof helpers for DTRS Flow."""
 
 from __future__ import annotations

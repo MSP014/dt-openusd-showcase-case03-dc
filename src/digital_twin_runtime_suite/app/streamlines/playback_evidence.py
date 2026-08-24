@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Read-only evidence for the one active production Streamlines presentation."""
 
 from __future__ import annotations

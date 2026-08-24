@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Runtime front-panel LED indicator helpers."""
 
 from __future__ import annotations

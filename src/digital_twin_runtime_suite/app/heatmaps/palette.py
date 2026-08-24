@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure post-normalisation Heatmap palette policy."""
 
 from __future__ import annotations

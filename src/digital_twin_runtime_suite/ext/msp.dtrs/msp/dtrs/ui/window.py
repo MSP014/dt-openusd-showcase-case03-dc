@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Window and tab construction for the DTRS Kit shell."""
 
 from __future__ import annotations

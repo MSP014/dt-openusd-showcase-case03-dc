@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Kit-neutral owner of shared airflow binding, phase, and transition truth."""
 
 from __future__ import annotations

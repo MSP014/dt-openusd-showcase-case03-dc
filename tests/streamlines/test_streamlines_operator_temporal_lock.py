@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused temporal-context contracts for disposable cache operators."""
 
 from digital_twin_runtime_suite.app.streamlines.operator_runtime import (

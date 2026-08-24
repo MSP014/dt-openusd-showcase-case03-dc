@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure contracts for mutable operation state and durable observability events."""
 
 from __future__ import annotations

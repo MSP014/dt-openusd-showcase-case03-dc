@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Streamlines and validation-receipt OmniUI controls."""
 
 from __future__ import annotations

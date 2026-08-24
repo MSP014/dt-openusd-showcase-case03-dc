@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Public workload-to-airflow runtime integration boundary for DTRS."""
 
 from digital_twin_runtime_suite.app.workload_binding.background_validation import (

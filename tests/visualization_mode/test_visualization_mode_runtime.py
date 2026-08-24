@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused visualization-mode transaction and independent-target contracts."""
 
 from __future__ import annotations

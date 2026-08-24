@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused cache-contract tests without Kit-CAE execution."""
 
 from __future__ import annotations

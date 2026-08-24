@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Synthetic latest-snapshot telemetry provider."""
 
 from __future__ import annotations

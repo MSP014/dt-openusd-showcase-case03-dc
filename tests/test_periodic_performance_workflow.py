@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Application-lifetime periodic PerformanceProbe coverage."""
 
 from __future__ import annotations

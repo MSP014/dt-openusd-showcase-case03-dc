@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Flow attach/detach lifecycle implementation for the DTRS command facade."""
 
 from __future__ import annotations

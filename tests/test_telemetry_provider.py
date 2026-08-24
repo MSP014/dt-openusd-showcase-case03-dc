@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

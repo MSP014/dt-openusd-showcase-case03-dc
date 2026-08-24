@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Read-only runtime snapshots for Kit-CAE Flow parity investigations."""
 
 from __future__ import annotations

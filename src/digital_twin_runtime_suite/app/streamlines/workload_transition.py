@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Transactional workload switching for an active Streamlines presentation."""
 
 from __future__ import annotations

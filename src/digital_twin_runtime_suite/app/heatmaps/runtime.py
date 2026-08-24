@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Thin Kit-facing coordinator for generic settings-driven Heatmap presentation."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Run finite, feature-agnostic viewport performance measurements."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused composition-root regressions for the extracted DTRS extension."""
 
 from __future__ import annotations

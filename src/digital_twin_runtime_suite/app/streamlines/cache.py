@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Derived-cache contracts for persisted, manifest-exact Streamlines states."""
 
 from __future__ import annotations

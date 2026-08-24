@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Telemetry-driven QLED and front-panel presentation for the DTRS facade."""
 
 from __future__ import annotations

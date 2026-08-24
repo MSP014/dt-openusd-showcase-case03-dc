@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Build a downsampled OpenVDB runtime proxy through Houdini's VDB Resample SOP.
 
 Run with Houdini's ``hython``. Source cache files are read-only inputs; this

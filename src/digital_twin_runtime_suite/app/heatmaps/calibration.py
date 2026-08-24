@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Resolve persisted Heatmap calibration rules for discovered semantic targets."""
 
 from __future__ import annotations

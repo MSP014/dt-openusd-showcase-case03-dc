@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Dataset-level validation evidence for manifest-backed airflow caches."""
 
 from digital_twin_runtime_suite.app.airflow_validation.cache import (

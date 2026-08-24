@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Regression coverage for the production-neutral in-place retarget primitive."""
 
 from __future__ import annotations

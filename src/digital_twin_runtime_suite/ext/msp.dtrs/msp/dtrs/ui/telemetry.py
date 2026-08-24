@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Telemetry-panel construction and UI-side state synchronisation."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Telemetry binding coverage separated from calibration and presentation policy."""
 
 from __future__ import annotations

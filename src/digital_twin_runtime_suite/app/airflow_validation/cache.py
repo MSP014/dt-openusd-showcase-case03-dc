@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Session and persisted receipts for manifest-backed VTI validation."""
 
 from __future__ import annotations

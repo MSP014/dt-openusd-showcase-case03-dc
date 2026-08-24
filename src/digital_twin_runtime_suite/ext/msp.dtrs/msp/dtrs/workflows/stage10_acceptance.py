@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Bounded Stage 10 guidance over existing DTRS runtime transactions."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """GPU-side dynamic texture transport for Heatmap telemetry scalars."""
 
 from __future__ import annotations

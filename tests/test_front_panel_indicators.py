@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 from types import SimpleNamespace
 
 from digital_twin_runtime_suite.app.front_panel_indicators import (

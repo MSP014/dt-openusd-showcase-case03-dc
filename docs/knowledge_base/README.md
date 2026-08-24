@@ -1,7 +1,7 @@
 # Knowledge Base: "Forced-Flow" Inference Refinery
 
 > [!NOTE]
-> This directory serves as the **Single Source of Truth (SSOT)** for all engineering and conceptual documentation regarding the Case 03 Digital Twin.
+> This directory serves as the **Single Source of Truth (SSOT)** for all engineering and conceptual documentation regarding DTRS.
 
 ## 🧠 Core Documentation
 
@@ -23,6 +23,12 @@ The overarching mechanics, definitions, and logics of the Digital Twin.
   Strategic justification identifying this project precisely as a **Level 1** Digital Twin. *(Includes authoritative PDF reference).*
 * **[Runtime Packaging Guardrail](./runtime_packaging_guardrail.md)**
   Defines the future viewer/runtime packaging boundary: Houdini remains the production factory, exported USD/cache packages become runtime inputs, and containerisation stays deferred until a minimal local viewer contract exists.
+* **[Licensing Scope](./licensing_scope.md)**
+  Defines the MIT code zone, the MSP Asset & Technical Content Evaluation License zone for authored assets and documentation, and the separate treatment required for third-party material and private Houdini sources.
+  The manufacturer manuals, datasheets, and IEEE paper stored in this knowledge
+  base are third-party reference files, not authored documentation; see
+  [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md) for their provenance
+  and public-release boundary.
 
 ---
 
@@ -41,6 +47,12 @@ Detailed operational and dimensional reference hubs for the specific physical co
 
 > [!IMPORTANT]
 > **To preserve a clean repository**, source working files (like `.hip`, `.ae`, or external heavy assets) and raw reference scraping folders (like `/refs`) are strictly **git-ignored** per the project limits. The folders below contain the curated MarkDown data and specs intended for version control.
+
+> [!WARNING]
+> Manufacturer manuals and datasheets that happen to be stored beside those
+> authored notes remain third-party files. They are not covered by either
+> repository licence and must not be included in a public release until their
+> original redistribution terms have been verified.
 
 * **[📂 rtx_pro_4500_blackwell/](./rtx_pro_4500_blackwell/)**
   The hero asset. Architecture specs for the GB203 die, blower turbine speeds, and internal motherboard configurations.

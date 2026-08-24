@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Seven-segment QLED display helpers for runtime telemetry."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Standard Kit-CAE Streamlines execution and confirmed UsdRT receipt mechanics."""
 
 from __future__ import annotations

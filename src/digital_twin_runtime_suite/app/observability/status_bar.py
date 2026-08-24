@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Kit status-bar adapter for the shared replaceable-progress contract."""
 
 from __future__ import annotations

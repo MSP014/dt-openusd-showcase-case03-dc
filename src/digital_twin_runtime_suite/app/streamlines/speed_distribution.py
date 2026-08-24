@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Memory-bounded statistics over persisted raw Streamlines speed samples."""
 
 from __future__ import annotations

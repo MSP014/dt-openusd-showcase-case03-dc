@@ -1,0 +1,92 @@
+Maksim Pospelkov Asset & Technical Content Evaluation License 1.0
+
+Copyright (c) 2026 Maksim Pospelkov
+
+1. Definitions
+
+"Author Content" means the original 3D assets, geometry, USD files, textures,
+materials, renders, documentation, images, simulation caches, VTI datasets,
+derived visualisation data, and other artistic or technical content authored by
+Maksim Pospelkov and expressly identified as subject to this licence. Author
+Content excludes source code licensed under the MIT License, Houdini authoring
+source files, and Third-Party Materials.
+
+"Third-Party Materials" means material whose rights belong to another party,
+including software, HDRIs, libraries, trademarks, product designs, fonts,
+manufacturer documentation, and reference material.
+
+"Evaluation" means non-commercial review, study, and local running and testing
+of the Digital Twin Runtime Suite with Author Content, including internal
+technical or hiring evaluation by a prospective employer.
+
+2. Limited Evaluation Grant
+
+Subject to this licence, Maksim Pospelkov grants you a non-exclusive,
+non-transferable, non-sublicensable licence to download, reproduce, run the
+Digital Twin Runtime Suite locally with, load, display, inspect, study, test,
+and make temporary local technical modifications or format conversions to Author
+Content only where necessary for Evaluation.
+
+You may create and display screenshots or video captures of Evaluation, provided
+that they include clear attribution to Maksim Pospelkov and identify the Digital
+Twin Runtime Suite. This permission does not permit distribution of the
+underlying Author Content.
+
+3. Restrictions
+
+You may not, except with prior written permission from Maksim Pospelkov:
+
+- use Author Content in a commercial project, client work, employer production,
+  paid services, advertising, or product integration;
+- redistribute, mirror, publish, share, sublicense, sell, or otherwise make
+  Author Content available to another party;
+- redistribute modified, converted, or derivative Author Content;
+- extract, reuse, or distribute individual assets, textures, materials, caches,
+  or other components outside Evaluation;
+- incorporate Author Content into an asset pack, template, library, dataset,
+  application, game, film, simulation product, digital twin, or other project;
+- use Author Content to construct, train, fine-tune, evaluate, or otherwise
+  support a machine-learning or generative-AI model or dataset;
+- remove or alter copyright, licence, attribution, provenance, or asset-
+  identification notices; or
+- claim authorship, ownership, endorsement, or affiliation in relation to
+  Author Content or the Digital Twin Runtime Suite.
+
+4. Third-Party Rights and Product Representations
+
+This licence grants rights only in the author-owned contribution to Author
+Content. It grants no rights in Third-Party Materials, including trademarks,
+logos, manufacturer names, product designs, manufacturer documentation, or
+other intellectual property of NVIDIA, ASUS, Noctua, or any other owner.
+
+Product representations in Author Content are independently modelled visual
+proxies based on public references, not manufacturer CAD data. Nothing in this
+licence creates affiliation with, endorsement by, or sponsorship from a
+manufacturer or other third party.
+
+5. Ownership
+
+Author Content is licensed, not sold. Maksim Pospelkov and applicable
+third-party owners retain all rights, title, and interest not expressly granted
+by this licence.
+
+6. Termination
+
+This licence terminates automatically if you materially breach its terms. On
+termination, you must stop using Author Content and delete all copies under
+your control, except to the extent that retention is required by applicable law.
+
+7. Disclaimer and Limitation of Liability
+
+Author Content is provided "as is" and without warranty of any kind, whether
+express, implied, statutory, or otherwise, including warranties of
+merchantability, fitness for a particular purpose, non-infringement, accuracy,
+or uninterrupted availability. To the maximum extent permitted by applicable
+law, Maksim Pospelkov is not liable for any claim, loss, damage, or other
+liability arising from Author Content or its use.
+
+8. Legal Review
+
+This project-defined licence records the current intended evaluation terms. It
+must receive qualified intellectual-property review before it accompanies a new
+public Asset Pack release or other asset distribution.

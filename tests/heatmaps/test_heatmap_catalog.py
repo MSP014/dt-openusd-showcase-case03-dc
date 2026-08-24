@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Stage-discovery catalogue coverage without specialized Heatmap modes."""
 
 from __future__ import annotations

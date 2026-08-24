@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Flow viewport-performance data contracts and pure aggregation helpers."""
 
 from __future__ import annotations

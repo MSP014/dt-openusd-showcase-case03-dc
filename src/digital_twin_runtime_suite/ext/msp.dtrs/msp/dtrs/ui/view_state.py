@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Read-only View-state rendering and transient UI values."""
 
 from __future__ import annotations

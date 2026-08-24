@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """UI-bound orchestration for primary visualization and workload requests."""
 
 from __future__ import annotations

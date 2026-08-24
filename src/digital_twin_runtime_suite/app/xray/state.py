@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain X-Ray target-selection state shared by manual and temporary owners."""
 
 from __future__ import annotations

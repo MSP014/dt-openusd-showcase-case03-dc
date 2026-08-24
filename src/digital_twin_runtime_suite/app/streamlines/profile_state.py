@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Own the preferred Streamlines profile independently from OmniUI."""
 
 from __future__ import annotations

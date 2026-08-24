@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Runtime motion helpers for telemetry-driven scene behaviour."""
 
 from __future__ import annotations

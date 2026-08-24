@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Server-appearance and material-control OmniUI builders."""
 
 from __future__ import annotations

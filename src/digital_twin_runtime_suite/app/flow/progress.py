@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Immutable progress snapshots for DTRS temporal VTI validation."""
 
 from __future__ import annotations

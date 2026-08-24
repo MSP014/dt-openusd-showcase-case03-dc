@@ -1,11 +1,11 @@
-# Case 03 - Licensing Plan
+# DTRS Licensing Plan
 
 **Status**: Draft
 **Last Updated**: 2026-07-11
 
 ## Purpose
 
-This plan defines the work required to make Case 03 publicly inspectable and
+This plan defines the work required to make DTRS publicly inspectable and
 testable without granting unrestricted reuse of its authored 3D assets.
 
 It deliberately does not contain final legal language. The custom asset licence
@@ -20,20 +20,22 @@ for a new public Asset Pack release.
   Git tracking.
 - The Asset Pack is currently distributed through Google Drive and hydrated
   locally under `assets/_external/`.
-- No repository-level code licence, asset licence, licensing scope document, or
-  third-party notices file currently exists.
-- The public download instructions therefore need an explicit licensing model
-  before the next Asset Pack release.
+- `LICENSE.md` maps the separate code, authored-asset, and third-party
+  boundaries. `LICENSES/MIT.txt`,
+  `LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt`, and
+  `THIRD_PARTY_NOTICES.md` record the current repository terms and boundaries.
+- The next Asset Pack release still requires a complete rights inventory,
+  package-level notices, and qualified review of the asset-evaluation terms.
 
 ## Target Model
 
-Case 03 should use a split licensing and distribution model:
+DTRS should use a split licensing and distribution model:
 
 | Content | Target treatment |
 | --- | --- |
-| Application code and reusable project tools | Standard open-source software licence |
-| Project documentation and renders | Explicitly scoped rights; decision still required |
-| Maksim Pospelkov-authored runtime assets | Custom evaluation-only asset licence |
+| Application code, reusable project tools, tests, and project configuration files | MIT, limited to `src/`, `tools/`, `tests/`, and project configuration files |
+| Maksim Pospelkov-authored project documentation and renders | MSP Asset & Technical Content Evaluation License |
+| Maksim Pospelkov-authored runtime assets | MSP Asset & Technical Content Evaluation License |
 | Third-party textures, HDRIs, fonts, logos, and reference material | Their original terms or exclusion from distribution |
 | Houdini source files, procedural generators, high-resolution masters, and source simulations | Private; not included in the public package |
 
@@ -44,7 +46,7 @@ evaluation-only.
 ## Principles
 
 1. Keep technical reproducibility and asset reuse rights separate.
-2. Grant only the rights required to install, run, inspect, and evaluate Case 03.
+2. Grant only the rights required to install, run, inspect, and evaluate DTRS.
 3. Do not grant commercial production, client-work, redistribution, asset-pack,
    dataset, or machine-learning reuse rights through the public Asset Pack.
 4. Do not claim rights over third-party material or manufacturer intellectual
@@ -77,7 +79,7 @@ Before publishing another Asset Pack version:
 Create an inventory covering both the repository and the external Asset Pack.
 Classify every distributable file into one of these groups:
 
-- original code authored for Case 03;
+- original code authored for DTRS;
 - original 3D geometry, textures, materials, simulations, and renders;
 - third-party content redistributed under an explicit licence;
 - third-party content that may be used locally but may not be redistributed;
@@ -178,7 +180,7 @@ noticeIds
 
 ## Phase 3 - Resolve Third-Party Product Rights
 
-The Case 03 assets visually represent real products and brands. Before offering
+The DTRS assets visually represent real products and brands. Before offering
 any broader licence, obtain legal guidance on:
 
 - copyright in the original authored meshes and textures;
@@ -204,27 +206,29 @@ materially different permission model for a particular asset category.
 
 ## Phase 4 - Choose The Code And Documentation Licences
 
-1. Choose a standard licence for the code, most likely MIT or Apache-2.0.
+1. Use the standard MIT licence for the code zone.
 2. Keep the standard licence text unmodified.
-3. Define its exact path scope in a separate `LICENSING.md` file.
+3. Define its exact path scope in root `LICENSE.md`.
 4. Explicitly exclude the external Asset Pack, artistic assets, simulation
    caches, source files, and third-party content from the software licence.
-5. Decide separately whether documentation and renders are all-rights-reserved,
-   attribution-only, or covered by another limited licence.
+5. Apply the MSP Asset & Technical Content Evaluation License to Maksim Pospelkov-authored
+   documentation and renders, while retaining the original terms for any
+   third-party documentation or media.
 6. Confirm that repository contributions, if accepted in the future, do not
    create conflicting ownership assumptions.
 
 Recommended repository artefacts:
 
 ```text
-LICENSE
-ASSET-LICENCE.md
-LICENSING.md
-THIRD-PARTY-NOTICES.md
+LICENSE.md
+LICENSES/MIT.txt
+LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt
+THIRD_PARTY_NOTICES.md
 ```
 
-`LICENSE` should remain the conventional filename for the standard code licence.
-The other files should explain the split without modifying the standard licence.
+`LICENSE.md` is the licensing map rather than a standalone MIT text. The
+standard MIT text stays under `LICENSES/`, and the map defines its code-only
+scope.
 
 ## Phase 5 - Design The Asset Evaluation Licence
 
@@ -245,7 +249,7 @@ Do not copy an unreviewed draft directly into the release.
 ### Permitted Evaluation
 
 - downloading and installing the Asset Pack;
-- local execution and evaluation of Case 03;
+- local execution and evaluation of DTRS;
 - inspection of its OpenUSD, Houdini, and NVIDIA Omniverse workflows;
 - temporary local modifications or format conversions required for testing;
 - internal technical and hiring evaluation by a prospective employer;
@@ -254,7 +258,7 @@ Do not copy an unreviewed draft directly into the release.
 
 ### Prohibited Uses
 
-- reuse outside the evaluation of Case 03;
+- reuse outside the evaluation of DTRS;
 - commercial production, client work, paid services, advertising, or product
   integration;
 - redistribution, mirroring, sublicensing, resale, or inclusion in an asset
@@ -285,7 +289,7 @@ Do not copy an unreviewed draft directly into the release.
 ## Phase 6 - Define The Public Evaluation Package
 
 The public package should contain only what is necessary to run and inspect the
-published Case 03 experience:
+published DTRS experience:
 
 - runtime USD assets and their required composition layers;
 - baked runtime textures at an appropriate evaluation resolution;
@@ -349,10 +353,10 @@ does not by itself prove authorship of every work inside it.
 
 ## Phase 8 - Integrate The Licence Into Distribution
 
-Update the public repository only after the legal and rights inventory work is
-complete:
+The repository licence map is in place. Before the next public Asset Pack
+release:
 
-1. Add the repository licensing files.
+1. Confirm the repository licensing files remain current.
 2. Add a concise licensing table near the Asset Pack download instructions in
    `README.md`.
 3. State explicitly that the software licence does not apply to the Asset Pack.
@@ -432,8 +436,7 @@ repository:
 
 ## Decisions Required Before Drafting
 
-- MIT or Apache-2.0 for application code.
-- Rights granted for documentation and renders.
+- Final lawyer-reviewed wording for documentation and render coverage.
 - Public package fidelity and texture resolution.
 - Whether a second evaluator-only package is useful.
 - Whether manufacturer logos remain in downloadable assets.

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused contracts for DTRS-owned Streamlines teardown."""
 
 from __future__ import annotations

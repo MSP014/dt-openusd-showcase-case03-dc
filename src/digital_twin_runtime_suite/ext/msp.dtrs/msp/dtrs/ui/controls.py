@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """View-control models, labels, and short controller-facing UI adapters."""
 
 from __future__ import annotations

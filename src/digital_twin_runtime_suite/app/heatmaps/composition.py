@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure Heatmap and X-Ray target precedence planning."""
 
 from __future__ import annotations

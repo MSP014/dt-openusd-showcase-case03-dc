@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused contracts for consumer-neutral airflow temporal truth."""
 
 from __future__ import annotations

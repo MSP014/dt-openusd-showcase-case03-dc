@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Session-layer visibility isolation owned exclusively by the Heatmap harness."""
 
 from __future__ import annotations

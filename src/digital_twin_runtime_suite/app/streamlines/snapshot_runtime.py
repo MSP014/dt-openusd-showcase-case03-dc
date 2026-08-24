@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Materialise immutable Streamlines cache states as static runtime snapshots."""
 
 from __future__ import annotations

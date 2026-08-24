@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Stage 08 single-flight validation priority, retry, and shutdown contracts."""
 
 import asyncio

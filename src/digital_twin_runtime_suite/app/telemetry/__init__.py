@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Synthetic telemetry boundary for Digital Twin Runtime Suite."""
 
 from .config import TelemetryConfig

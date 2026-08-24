@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Structured diagnostics for DTRS velocity-source and operator state."""
 
 from __future__ import annotations

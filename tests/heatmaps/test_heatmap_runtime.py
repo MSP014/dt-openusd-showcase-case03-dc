@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Coordinator contracts that do not require launching a Kit application."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused two-session validation-receipt workflow contracts."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Application-level task ownership for scene and Flow user actions."""
 
 from __future__ import annotations

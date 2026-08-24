@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Build a short NanoVDB airflow proxy with the Python API shipped in Kit.
 
 Run this script through ``kit.exe --enable omni.volume --exec``. The source

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused raw-speed persistence contracts for cached Streamlines geometry."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Generic MDL contract coverage independent of a running Kit application."""
 
 from __future__ import annotations

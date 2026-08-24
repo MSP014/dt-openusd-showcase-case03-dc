@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Shared, portable timestamp formatting for DTRS-owned diagnostics."""
 
 from __future__ import annotations

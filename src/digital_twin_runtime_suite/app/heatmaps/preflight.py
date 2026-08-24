@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Validate the authored full-server Heatmap metadata contract."""
 
 from __future__ import annotations

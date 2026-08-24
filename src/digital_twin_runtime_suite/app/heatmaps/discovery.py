@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Discover immutable thermal metadata from authored USD geometry."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Build stage-driven Heatmap selectors and calibration descriptors."""
 
 from __future__ import annotations

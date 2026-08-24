@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Run the unchanged NVIDIA NPZ Flow sample and capture its effective Flow state."""
 
 from __future__ import annotations

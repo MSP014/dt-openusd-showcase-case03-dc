@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 from pathlib import Path
 
 from digital_twin_runtime_suite.app.review import runtime as review_runtime

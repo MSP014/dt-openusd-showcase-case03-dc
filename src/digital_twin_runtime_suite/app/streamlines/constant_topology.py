@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Convert real Streamlines curves into an RTX-safe fixed cache topology."""
 
 from __future__ import annotations

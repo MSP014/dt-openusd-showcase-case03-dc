@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Dependency-free monotonic scheduler for direct cached Streamlines playback."""
 
 from __future__ import annotations

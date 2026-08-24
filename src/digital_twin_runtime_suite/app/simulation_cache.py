@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Preflight checks for the Stage 6 OpenVDB airflow cache."""
 
 from __future__ import annotations

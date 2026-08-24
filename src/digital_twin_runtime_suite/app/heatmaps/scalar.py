@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure Heatmap scalar calculation and semantic-group spatial normalization."""
 
 from __future__ import annotations

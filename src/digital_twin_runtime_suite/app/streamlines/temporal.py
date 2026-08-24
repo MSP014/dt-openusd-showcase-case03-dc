@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain manifest-backed temporal source contracts for Streamlines.
 
 The Kit-facing runtime owns VTI import, USD time-sample authoring, and CAE

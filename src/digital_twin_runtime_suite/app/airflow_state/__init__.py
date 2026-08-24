@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Consumer-neutral airflow state contracts and runtime coordination."""
 
 from digital_twin_runtime_suite.app.airflow_state.model import (

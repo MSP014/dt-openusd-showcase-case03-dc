@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Resolve authored Heatmap semantics to stable hardware and telemetry identity."""
 
 from __future__ import annotations

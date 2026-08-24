@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain data contracts for DTRS primary visualization presentation."""
 
 from __future__ import annotations

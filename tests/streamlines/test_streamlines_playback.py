@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused plain contracts for persisted Streamlines cache playback."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Public DTRS primary-visualization state and runtime boundary."""
 
 from digital_twin_runtime_suite.app.visualization_mode.model import (

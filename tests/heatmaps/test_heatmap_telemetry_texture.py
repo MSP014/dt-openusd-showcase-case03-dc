@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused dynamic-texture telemetry transport contracts."""
 
 from __future__ import annotations

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Dependency-free logical airflow phase and exact real-sample resolution."""
 
 from __future__ import annotations

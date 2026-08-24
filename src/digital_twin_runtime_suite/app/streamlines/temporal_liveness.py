@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Inspect persisted Streamlines geometry for real temporal movement."""
 
 from __future__ import annotations

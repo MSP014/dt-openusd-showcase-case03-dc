@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Single-flight plain-data validation for workload-addressable airflow data.
 
 The coordinator owns expensive VTI preflight arbitration for a DTRS session:

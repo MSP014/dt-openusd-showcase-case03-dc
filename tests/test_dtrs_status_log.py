@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused formatting contracts for visually isolated DTRS status records."""
 
 from digital_twin_runtime_suite.app.status_log import (

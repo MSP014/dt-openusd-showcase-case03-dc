@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused portable timestamp contracts for DTRS diagnostics."""
 
 from __future__ import annotations

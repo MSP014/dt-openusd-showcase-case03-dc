@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused contracts for the production Streamlines seed layout."""
 
 from __future__ import annotations

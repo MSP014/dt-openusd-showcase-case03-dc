@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Draft-only OmniUI controls for the generic settings-driven Heatmap harness."""
 
 from __future__ import annotations

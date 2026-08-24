@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Plain ordered-workflow contracts shared by temporary DTRS acceptance UI."""
 
 from digital_twin_runtime_suite.app.manual_acceptance import (

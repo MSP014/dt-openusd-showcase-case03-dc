@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Time-based Heatmap presentation smoothing coverage."""
 
 from __future__ import annotations

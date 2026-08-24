@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Kit-neutral transactional state for primary DTRS visualization modes."""
 
 from __future__ import annotations

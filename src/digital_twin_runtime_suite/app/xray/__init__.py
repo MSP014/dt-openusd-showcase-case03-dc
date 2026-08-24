@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Public DTRS X-Ray application integration boundary.
 
 Only the production runtime mixin is exported here. Material authoring and

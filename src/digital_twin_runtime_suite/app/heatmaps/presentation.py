@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Build and own one generic Heatmap presentation for any selector union."""
 
 from __future__ import annotations

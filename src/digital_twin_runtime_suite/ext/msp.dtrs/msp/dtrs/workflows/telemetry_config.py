@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Persist and reload telemetry-provider edits submitted by OmniUI."""
 
 from __future__ import annotations

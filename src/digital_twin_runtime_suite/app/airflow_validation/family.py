@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Compatibility and phase-mapping rules for authored airflow dataset families."""
 
 from __future__ import annotations

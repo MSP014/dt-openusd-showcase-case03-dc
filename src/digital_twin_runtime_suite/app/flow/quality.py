@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Runtime-only quality choices for Kit-CAE Flow A/B testing."""
 
 from __future__ import annotations

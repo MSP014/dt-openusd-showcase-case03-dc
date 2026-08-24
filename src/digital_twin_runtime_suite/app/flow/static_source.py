@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """One-sample airflow source preparation reused before any Flow consumer exists."""
 
 from __future__ import annotations

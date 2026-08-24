@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused retirement checks for the completed Phase 3.6 acceptance surface."""
 
 from __future__ import annotations

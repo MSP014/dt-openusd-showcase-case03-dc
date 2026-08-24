@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Persisted Heatmap settings and their validation boundary."""
 
 from __future__ import annotations

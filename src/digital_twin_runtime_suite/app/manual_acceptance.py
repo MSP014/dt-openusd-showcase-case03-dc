@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Reusable plain formatting for guided DTRS manual acceptance workflows."""
 
 from __future__ import annotations

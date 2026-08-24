@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Deterministic front-intake point-rake derivation for Streamlines previews."""
 
 from __future__ import annotations

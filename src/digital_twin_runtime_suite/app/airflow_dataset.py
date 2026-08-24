@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Manifest-driven discovery and validation for external airflow datasets."""
 
 from __future__ import annotations

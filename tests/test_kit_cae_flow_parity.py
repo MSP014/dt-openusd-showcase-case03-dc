@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 from digital_twin_runtime_suite.app.kit_cae_flow_parity import diff_flow_snapshots
 
 

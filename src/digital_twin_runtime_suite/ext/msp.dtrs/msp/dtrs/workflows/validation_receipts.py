@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Bounded validation-receipt work and its guided acceptance sequence."""
 
 from __future__ import annotations

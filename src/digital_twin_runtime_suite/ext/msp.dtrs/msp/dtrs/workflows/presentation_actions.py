@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Synchronous presentation actions triggered by View controls."""
 
 from __future__ import annotations

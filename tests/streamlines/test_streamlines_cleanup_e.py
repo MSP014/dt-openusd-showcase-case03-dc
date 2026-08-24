@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Regression guard for the final cleaned Streamlines runtime boundary."""
 
 from __future__ import annotations

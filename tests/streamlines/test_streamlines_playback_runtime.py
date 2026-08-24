@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused Kit-facing contracts for persisted Streamlines state switching."""
 
 from __future__ import annotations

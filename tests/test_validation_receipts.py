@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused persisted validation-receipt storage and VTI reuse contracts."""
 
 from __future__ import annotations

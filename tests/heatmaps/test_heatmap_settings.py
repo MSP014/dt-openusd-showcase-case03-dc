@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused persistence coverage for settings-driven Heatmaps."""
 
 from __future__ import annotations

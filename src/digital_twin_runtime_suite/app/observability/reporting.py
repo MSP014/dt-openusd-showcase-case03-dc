@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Route generic durable events and replaceable progress to independent sinks."""
 
 from __future__ import annotations

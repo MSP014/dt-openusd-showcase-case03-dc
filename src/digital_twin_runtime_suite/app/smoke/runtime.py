@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Smoke and tracer presentation built on an attached Flow session."""
 
 from __future__ import annotations

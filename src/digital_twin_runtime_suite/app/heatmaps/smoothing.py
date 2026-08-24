@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure time-based smoothing for dynamic Heatmap group temperatures."""
 
 from __future__ import annotations

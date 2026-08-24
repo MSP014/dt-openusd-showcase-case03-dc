@@ -242,6 +242,24 @@ operational state keeps the server active.
 
 ---
 
+## 📜 Licensing
+
+This project uses separate licenses for software and authored content.
+
+- **Source code** is licensed under the MIT License.
+- **3D assets, USD geometry, textures, renders, documentation and simulation
+  datasets** are provided only under the
+  [Maksim Pospelkov Asset & Technical Content Evaluation License 1.0](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt).
+- Houdini authoring files (`.hip`, `.hiplc`) are not distributed.
+- Third-party materials remain subject to their respective licenses.
+
+The downloadable Asset Pack is provided for **evaluation, study and local
+testing of this project only**. Commercial reuse, redistribution, resale,
+extraction into other projects, and ML/AI training use are not permitted.
+
+See [LICENSE.md](LICENSE.md) for the complete licensing map and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party rights.
+
 ## 🛠️ Usage & Setup
 
 ### 1. Environment Setup
@@ -262,6 +280,18 @@ pip install -r requirements.txt
 ### 2. External Data Hydration
 
 Large binary dependencies are distributed separately from the Git repository.
+
+> [!IMPORTANT]
+> Original assets in the Production Asset Pack and the Airflow Runtime Dataset
+> are **not open-source** and are not covered by the MIT license applicable to
+> source code.
+>
+> They are provided solely for evaluation and local testing under the
+> [Maksim Pospelkov Asset & Technical Content Evaluation License 1.0](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt).
+>
+> Commercial reuse, redistribution, resale, extraction into another project,
+> and ML/AI training use are prohibited. Third-party materials remain subject
+> to their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Two external packages are used:
 
@@ -293,7 +323,7 @@ assets/_external/
 └── usd/
 ```
 
-- [Production Asset Pack on Google Drive](https://drive.google.com/drive/folders/1qV2-NQr9HLf-maKPOiB4z9TwodqvK_sh?usp=sharing)
+- [Production Asset Pack on Google Drive](https://drive.google.com/file/d/1m76Wd1gMruQJWxJI3WCfS1f3XZcI8NKP/view?usp=sharing)
 - [Airflow Runtime Dataset on Hugging Face](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow)
 
 

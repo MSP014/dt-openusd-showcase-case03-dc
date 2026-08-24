@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure-Python helpers for DTRS view-control state."""
 
 from __future__ import annotations

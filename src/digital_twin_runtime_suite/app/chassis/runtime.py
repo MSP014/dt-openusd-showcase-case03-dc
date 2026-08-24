@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Session-layer chassis presentation commands for the DTRS runtime facade."""
 
 from __future__ import annotations

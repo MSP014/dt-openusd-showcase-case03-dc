@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Explicit 2.6-second Streamlines recompute fallback for cache recovery."""
 
 from __future__ import annotations

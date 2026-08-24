@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Kit-facing VTI import and exact temporal-source selection for Streamlines."""
 
 from __future__ import annotations

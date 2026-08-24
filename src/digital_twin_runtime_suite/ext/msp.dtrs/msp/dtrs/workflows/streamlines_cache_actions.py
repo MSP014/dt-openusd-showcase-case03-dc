@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Task ownership for Streamlines cache maintenance actions."""
 
 from __future__ import annotations

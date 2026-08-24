@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Smoke emitters, Cloud presentation, and smoke-tuning authoring."""
 
 from __future__ import annotations

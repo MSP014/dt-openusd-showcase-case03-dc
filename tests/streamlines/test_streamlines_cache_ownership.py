@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused Phase 3.4 workload-aware cache ownership and discovery contracts."""
 
 from __future__ import annotations

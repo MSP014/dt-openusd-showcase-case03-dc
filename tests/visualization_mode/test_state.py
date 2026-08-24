@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Focused primary-visualization transaction ownership contracts."""
 
 from __future__ import annotations

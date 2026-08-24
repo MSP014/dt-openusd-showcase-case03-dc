@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Pure fixed-scale velocity-presentation contracts for Streamlines."""
 
 from __future__ import annotations

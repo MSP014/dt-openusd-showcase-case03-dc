@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Path,

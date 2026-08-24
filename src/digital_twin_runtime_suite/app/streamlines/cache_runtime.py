@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Maksim Pospelkov
+# SPDX-License-Identifier: MIT
 """Kit-facing persistent centerline-cache build, validation, and preparation."""
 
 from __future__ import annotations
