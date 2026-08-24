@@ -14,6 +14,9 @@ notices.
 The final legal text for the MSP Asset & Technical Content Evaluation License
 must be reviewed by qualified intellectual-property counsel before distribution.
 
+The repository's current evaluation licence is version 1.1. Version 1.0 remains
+the historical licence text for prior Asset Pack releases.
+
 ## The Three Licensing Zones
 
 | Zone | Intended licence or treatment | Scope |
@@ -37,7 +40,8 @@ the DTRS project as a whole.
 | Author-owned `.usd`, `.usda`, and `.usdc` assets | Authored assets and documentation | MSP Asset & Technical Content Evaluation License. |
 | Author-owned textures and materials | Authored assets and documentation | MSP Asset & Technical Content Evaluation License. |
 | Author-owned renders and preview images | Authored assets and documentation | MSP Asset & Technical Content Evaluation License. |
-| VTI, other authored simulation caches, and derived visualisation data | Authored assets and documentation | MSP Asset & Technical Content Evaluation License. |
+| VTI and manifest files in the [DTRS Airflow Runtime Dataset](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow) | Separate published dataset | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). This is not Author Content under the MSP Asset & Technical Content Evaluation License. |
+| Other author-owned VTI files, simulation caches, and derived visualisation data | Authored assets and documentation | MSP Asset & Technical Content Evaluation License. |
 | `README.md` and author-owned DTRS documentation | Authored assets and documentation | MSP Asset & Technical Content Evaluation License. |
 | Houdini `.hip` files and other authoring masters | Private source | Not distributed. They are not part of any public licence grant. |
 | Third-party HDRIs, libraries, NVIDIA components, manufacturer PDFs, fonts, logos, and reference material | Third-party material | Subject to their original terms; no rights are granted by the DTRS author. |
@@ -49,11 +53,12 @@ documentation zone.
 
 ### Knowledge-Base Reference Files
 
-The current knowledge base contains authored Markdown documents and fourteen
-third-party PDF references from NVIDIA, ASUS, Noctua, Weiss Doppelbodensysteme
-GmbH, and IEEE. Those PDFs remain in the third-party zone even when a nearby
-Markdown document cites or interprets them. Their file-level provenance,
-official sources, and release treatment are recorded in
+The knowledge base contains authored Markdown documents and cites fourteen
+third-party technical references from NVIDIA, ASUS, Noctua, Weiss
+Doppelbodensysteme GmbH, and IEEE. The publisher PDF files are not distributed
+by this repository. They remain in the third-party zone even when a nearby
+Markdown document cites or interprets them. Their provenance, official sources,
+and release treatment are recorded in
 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
 
 The authored project renders and simulation-preview images displayed from
@@ -63,11 +68,11 @@ depicted product names, marks, or product designs. An ordinary outbound link to
 an external page or specification is a citation, not a relicensing or copying
 of the linked work.
 
-For a public repository snapshot or Asset Pack, an unverified third-party PDF
-must be excluded unless its publisher's redistribution terms or a specific
-permission support its inclusion. Retain an author-written citation and an
-official source link instead. A notice records the boundary; it cannot create
-permission that the original rights holder has not granted.
+For a public repository snapshot or Asset Pack, a third-party PDF must remain
+excluded unless its publisher's redistribution terms or a specific permission
+support its inclusion. Retain an author-written citation and an official source
+link instead. A notice records the boundary; it cannot create permission that
+the original rights holder has not granted.
 
 ## Product Representations and Manufacturer Rights
 
@@ -92,9 +97,12 @@ Apply these rules in order when classifying a file for a future release:
    its path or whether it is required by the runtime.
 2. Private authoring sources, including Houdini `.hip` files, are excluded from
    public distribution.
-3. Author-owned software under `src/`, `tools/`, or `tests/`, plus project
+3. The published DTRS Airflow Runtime Dataset is licensed under CC BY 4.0. Its
+   VTI files and manifests are not subject to the MSP Asset & Technical Content
+   Evaluation License.
+4. Author-owned software under `src/`, `tools/`, or `tests/`, plus project
    configuration files, belongs to the MIT code zone.
-4. Other author-owned DTRS assets, media, README content, and documentation
+5. Other author-owned DTRS assets, media, README content, and documentation
    belong to the MSP Asset & Technical Content Evaluation License zone.
 
 Unclassified or mixed-origin files must remain out of a public package until a

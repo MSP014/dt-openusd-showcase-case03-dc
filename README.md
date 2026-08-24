@@ -248,8 +248,11 @@ This project uses separate licenses for software and authored content.
 
 - **Source code** is licensed under the MIT License.
 - **3D assets, USD geometry, textures, renders, documentation and simulation
-  datasets** are provided only under the
-  [Maksim Pospelkov Asset & Technical Content Evaluation License 1.0](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt).
+  caches** are provided only under the
+  [Maksim Pospelkov Asset & Technical Content Evaluation License 1.1](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.1.txt).
+- The [DTRS Airflow Runtime Dataset](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow),
+  including its VTI files and manifests, is separately licensed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Houdini authoring files (`.hip`, `.hiplc`) are not distributed.
 - Third-party materials remain subject to their respective licenses.
 
@@ -282,16 +285,19 @@ pip install -r requirements.txt
 Large binary dependencies are distributed separately from the Git repository.
 
 > [!IMPORTANT]
-> Original assets in the Production Asset Pack and the Airflow Runtime Dataset
-> are **not open-source** and are not covered by the MIT license applicable to
-> source code.
+> Original assets in the Production Asset Pack are **not open-source** and are
+> not covered by the MIT license applicable to source code.
 >
-> They are provided solely for evaluation and local testing under the
-> [Maksim Pospelkov Asset & Technical Content Evaluation License 1.0](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt).
+> The Asset Pack is provided solely for evaluation and local testing under the
+> [Maksim Pospelkov Asset & Technical Content Evaluation License 1.1](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.1.txt).
 >
 > Commercial reuse, redistribution, resale, extraction into another project,
 > and ML/AI training use are prohibited. Third-party materials remain subject
 > to their respective licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The [Airflow Runtime Dataset on Hugging Face](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow)
+is a separate CC BY 4.0 distribution. Its VTI files and manifests may be used
+under those terms; they are not subject to the Asset Pack restrictions.
 
 Two external packages are used:
 
@@ -302,6 +308,7 @@ Two external packages are used:
 
 2. **Airflow Runtime Dataset — Hugging Face**
    - manifest-driven temporal VTI velocity fields
+   - licensed under CC BY 4.0
    - current registry: `server/load_idle`, `server/load_normal`,
      `server/load_surge`, `server/load_critical`
    - per-dataset cadence, sample structure, and duration declared in
@@ -323,7 +330,7 @@ assets/_external/
 └── usd/
 ```
 
-- [Production Asset Pack on Google Drive](https://drive.google.com/file/d/1m76Wd1gMruQJWxJI3WCfS1f3XZcI8NKP/view?usp=sharing)
+- [Production Asset Pack 0.5.1 on Google Drive](https://drive.google.com/file/d/1z28hjhvLJZMCLIJP4LhfzoHQsAa8ObbZ/view?usp=sharing)
 - [Airflow Runtime Dataset on Hugging Face](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow)
 
 

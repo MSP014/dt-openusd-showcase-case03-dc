@@ -18,16 +18,27 @@ data, and other artistic or technical content authored by Maksim Pospelkov are
 **not** licensed under MIT.
 
 They are provided under the **Maksim Pospelkov Asset & Technical Content
-Evaluation License 1.0**.
+Evaluation License 1.1**.
 
 See
-[LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.0.txt).
+[LICENSES/LicenseRef-MSP-Asset-Evaluation-1.1.txt](LICENSES/LicenseRef-MSP-Asset-Evaluation-1.1.txt).
 
 This licence permits downloading, evaluation, study, local testing, necessary
 technical modifications, attributed screenshots or video captures of testing,
 and internal technical or hiring evaluation. It does not permit commercial
 reuse, redistribution, resale, asset extraction, incorporation into other
 products or projects, or use for training machine-learning models.
+
+## Hugging Face Airflow Dataset
+
+The complete contents of the
+[DTRS Airflow Runtime Dataset](https://huggingface.co/datasets/MaxSpeLL/dt-openusd-showcase-case03-airflow),
+including its VTI files, `manifest.toml` files, and Dataset Card, are licensed
+under the [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
+
+This dataset is not subject to the Maksim Pospelkov Asset & Technical Content
+Evaluation License 1.1. This exception does not apply to the Production Asset
+Pack or to other author-owned simulation caches.
 
 ## Houdini Source Files
 

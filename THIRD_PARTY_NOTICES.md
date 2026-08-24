@@ -35,25 +35,23 @@ License nor the Maksim Pospelkov Asset & Technical Content Evaluation License
 | Runtime use | Default HDRI configured for Digital Twin Runtime Suite lighting. |
 
 The HDRI is an external hydrated dependency. It is not Author Content under the
-Maksim Pospelkov Asset & Technical Content Evaluation License 1.0, and its CC0
+Maksim Pospelkov Asset & Technical Content Evaluation License 1.1, and its CC0
 terms are not limited or replaced by that licence.
 
 ## Knowledge-Base Reference Documents
 
-The PDFs below are third-party technical references kept in
-`docs/knowledge_base/`. They are not Author Content. Their presence in this
-repository does not grant a licence to copy, redistribute, modify, or include
-them in a public release. The MIT License and the Maksim Pospelkov Asset &
-Technical Content Evaluation License 1.0 do not apply to them.
+The public repository does not contain or distribute the publisher PDFs
+identified below. They are third-party technical references, not Author Content.
+The MIT License and the Maksim Pospelkov Asset & Technical Content Evaluation
+License 1.1 do not apply to them.
 
-Before publishing or redistributing a repository snapshot, release, or Asset
-Pack containing any of these files, confirm the original publisher's terms and
-any required permission. If that cannot be confirmed, exclude the PDF from the
-release and retain only an authored citation that links to the publisher's
-official page. This notice records provenance; it does not replace a
+Author-owned documentation may cite the publishers' official pages below. Do
+not add a third-party PDF to a public repository snapshot, release, or Asset
+Pack unless the original publisher's terms or a specific permission support its
+redistribution. This notice records provenance; it does not replace a
 publisher's copyright notice or licence.
 
-| Repository file(s) | Rights holder / official source | Release treatment |
+| Former local reference file(s) (not distributed) | Rights holder / official source | Release treatment |
 | --- | --- | --- |
 | `docs/knowledge_base/rtx_pro_4500_blackwell/workstation-datasheet-blackwell-rtx-pro-4500-gtc25-spring-nvidia-3662540.pdf` | NVIDIA Corporation. [RTX PRO 4500 Blackwell Workstation Edition datasheet](https://www.nvidia.com/content/dam/en-zz/Solutions/data-center/rtx-pro-4500-blackwell/workstation-datasheet-blackwell-rtx-pro-4500-gtc25-spring-nvidia-3662540.pdf). | Original NVIDIA terms apply; redistribution permission must be confirmed before public release. |
 | `docs/knowledge_base/infiniband-quantum-2-qm9700-series-datasheet-us-nvidia-1751454-r8-web-1.pdf` | NVIDIA Corporation. Official [NVIDIA InfiniBand adapters product page](https://www.nvidia.com/en-us/networking/infiniband-adapters/); exact downloaded document version must be re-verified before release. | Original NVIDIA terms apply; do not publish the repository copy until its source version and redistribution permission are confirmed. |
