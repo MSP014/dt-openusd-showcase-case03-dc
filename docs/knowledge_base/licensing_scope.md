@@ -57,9 +57,9 @@ documentation zone.
 The knowledge base contains authored Markdown documents and cites fourteen
 third-party technical references from NVIDIA, ASUS, Noctua, Weiss
 Doppelbodensysteme GmbH, and IEEE. The publisher PDF files are not distributed
-by this repository. They remain in the third-party zone even when a nearby
-Markdown document cites or interprets them. Their provenance, official sources,
-and release treatment are recorded in
+by the repository's current public branches or tags. They remain in the
+third-party zone even when a nearby Markdown document cites or interprets them.
+Their provenance, official sources, and release treatment are recorded in
 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md).
 
 The authored project renders and simulation-preview images displayed from

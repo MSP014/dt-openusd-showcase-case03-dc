@@ -30,8 +30,9 @@ commercial licensing or enforcement.
   `ASSET_MANIFEST.json`, `THIRD_PARTY_NOTICES.txt`, and `SHA256SUMS.txt`.
 - The DTRS Airflow Runtime Dataset is a separate CC BY 4.0 distribution; it is
   not covered by the MSP Asset & Technical Content Evaluation License.
-- Third-party publisher PDFs are excluded from the public repository and Asset
-  Pack. Author-owned notes cite the official publisher pages instead.
+- Third-party publisher PDFs are excluded from the current public branches and
+  tags, and from the Asset Pack. Author-owned notes cite the official publisher
+  pages instead.
 
 ## Implementation Status
 

@@ -40,8 +40,9 @@ terms are not limited or replaced by that licence.
 
 ## Knowledge-Base Reference Documents
 
-The public repository does not contain or distribute the publisher PDFs
-identified below. They are third-party technical references, not Author Content.
+The current public branches and tags do not contain or distribute the publisher
+PDFs identified below. They are third-party technical references, not Author
+Content.
 The MIT License and the Maksim Pospelkov Asset & Technical Content Evaluation
 License 1.1 do not apply to them.
 
